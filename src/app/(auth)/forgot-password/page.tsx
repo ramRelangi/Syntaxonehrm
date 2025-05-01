@@ -1,0 +1,132 @@
+"use client";
+
+import { useState } from 'react';
+import Link from 'next/link';
+import { z } from 'zod';
+import { useForm, SubmitHandler } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { useToast } from "@/hooks/use-toast";
+import { Loader2 } from 'lucide-react';
+
+const forgotPasswordSchema = z.object({
+  companyDomain: z.string().min(1, "Company domain is required"),
+  email: z.string().email("Invalid email address"),
+});
+
+type ForgotPasswordFormInputs = z.infer<typeof forgotPasswordSchema>;
+
+export default function ForgotPasswordPage() {
+  const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+
+  const form = useForm<ForgotPasswordFormInputs>({
+    resolver: zodResolver(forgotPasswordSchema),
+    defaultValues: {
+      companyDomain: "",
+      email: "",
+    },
+  });
+
+  const onSubmit: SubmitHandler<ForgotPasswordFormInputs> = async (data) => {
+    setIsLoading(true);
+    console.log("Forgot password data:", data);
+    // --- Mock Forgot Password Logic ---
+    // In a real app, call your backend API to send a password reset link
+    // e.g., await fetch('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify(data) });
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    setIsLoading(false);
+    setIsSubmitted(true); // Show the confirmation message
+
+    toast({
+      title: "Password Reset Email Sent",
+      description: `If an account exists for ${data.email} at ${data.companyDomain}.streamlinehr.app, you will receive an email with reset instructions.`,
+      className: "bg-green-100 text-green-800 border-green-300 dark:bg-green-900 dark:text-green-100 dark:border-green-700", // Direct Tailwind for accent color example
+      duration: 8000, // Show toast for longer
+    });
+     // Optionally reset the form, although hiding it might be better UX
+    // form.reset();
+    // --- End Mock Logic ---
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <Card className="w-full max-w-md shadow-lg">
+        <CardHeader className="space-y-1 text-center">
+          <CardTitle className="text-2xl font-bold">Forgot Your Password?</CardTitle>
+          {!isSubmitted ? (
+             <CardDescription>Enter your company domain and email to receive reset instructions.</CardDescription>
+          ) : (
+             <CardDescription className="text-green-700 dark:text-green-300">Check your email for the password reset link.</CardDescription>
+          )}
+        </CardHeader>
+        <CardContent>
+          {!isSubmitted ? (
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="companyDomain"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Company Domain</FormLabel>
+                      <FormControl>
+                         <div className="flex items-center">
+                           <Input placeholder="your-company" {...field} className="rounded-r-none" />
+                           <span className="inline-flex items-center rounded-r-md border border-l-0 border-input bg-secondary px-3 text-sm text-muted-foreground">
+                              .streamlinehr.app
+                           </span>
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input placeholder="m@example.com" {...field} type="email" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading ? (
+                     <>
+                       <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Sending...
+                     </>
+                   ) : (
+                     "Send Reset Link"
+                   )}
+                </Button>
+              </form>
+            </Form>
+             ) : (
+             <div className="text-center text-sm">
+               Didn't receive the email? Check your spam folder or{' '}
+               <button onClick={() => setIsSubmitted(false)} className="font-medium text-primary hover:underline">
+                 try again
+               </button>.
+             </div>
+          )}
+          <div className="mt-4 text-center text-sm">
+            Remembered your password?{' '}
+            <Link href="/login" className="font-medium text-primary hover:underline">
+              Login
+            </Link>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
