@@ -8,7 +8,7 @@ const IGNORED_SUBDOMAINS = ['www', 'api'];
 const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
 
 // Paths that are public on the root domain
-const PUBLIC_ROOT_PATHS = ['/login', '/register', '/forgot-password', '/jobs']; // '/' removed, handled separately
+const PUBLIC_ROOT_PATHS = ['/login', '/register', '/forgot-password', '/jobs']; // '/' handled separately
 
 export async function middleware(request: NextRequest) {
   const url = request.nextUrl.clone();
@@ -19,7 +19,7 @@ export async function middleware(request: NextRequest) {
   console.log(`[Middleware] Request URL: ${request.url}, Hostname: ${normalizedHostname}, Path: ${url.pathname}`);
 
   // --- Static Assets and Next.js Internals ---
-  // Allow all requests for Next.js internal files, static assets, and API routes not needing tenant context
+  // Allow all requests for Next.js internal files, static assets, and API routes
    if (
      url.pathname.startsWith('/_next') ||
      url.pathname.startsWith('/api/') || // Allow all API routes (they should handle their own auth/tenant logic)
@@ -29,20 +29,30 @@ export async function middleware(request: NextRequest) {
      return NextResponse.next();
    }
 
-  // --- Root Domain Handling ---
-  if (normalizedHostname === ROOT_DOMAIN || IGNORED_SUBDOMAINS.some(sub => normalizedHostname.startsWith(`${sub}.${ROOT_DOMAIN}`))) {
-     console.log(`[Middleware] Handling root domain request for: ${url.pathname}`);
+   // Determine if the request is for the root domain (or equivalent like localhost/IP in dev)
+   const isRootDomainRequest =
+       normalizedHostname === ROOT_DOMAIN ||
+       normalizedHostname === 'localhost' ||
+       normalizedHostname === '127.0.0.1' ||
+       // Add a check for typical local network IPs if needed, though this can be broad
+       normalizedHostname.match(/^192\.168\.\d+\.\d+$/) ||
+       normalizedHostname.match(/^10\.\d+\.\d+\.\d+$/) ||
+       normalizedHostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/);
 
-     // Special case: If root '/' is requested, redirect to '/register' (as per new requirement)
+
+  // --- Root Domain Handling (including localhost/IPs for dev) ---
+  if (isRootDomainRequest || IGNORED_SUBDOMAINS.some(sub => normalizedHostname.startsWith(`${sub}.${ROOT_DOMAIN}`))) {
+     console.log(`[Middleware] Handling root domain equivalent request for: ${url.pathname}`);
+
+     // Special case: If root '/' is requested, allow access (redirect handled by page.tsx)
      if (url.pathname === '/') {
-         console.log('[Middleware] Redirecting root / to /register');
-         url.pathname = '/register';
-         return NextResponse.redirect(url);
+         console.log('[Middleware] Allowing root / access (redirect to /login handled by page).');
+         return NextResponse.next();
      }
 
-     // Allow access to defined public paths on the root domain
+     // Allow access to defined public paths on the root domain/IP
      const isPublicRootPath = PUBLIC_ROOT_PATHS.some(path => {
-        // Exact match for /login, /register, etc., or startsWith for /jobs/..., /forgot-password/...
+        // Exact match or startsWith for nested public routes
         return url.pathname === path || url.pathname.startsWith(path + '/');
      });
 
@@ -51,9 +61,9 @@ export async function middleware(request: NextRequest) {
         return NextResponse.next(); // Allow access to /login, /register, /jobs/* etc.
      }
 
-     // For any other path on the root domain, redirect to register (new default)
-     console.log(`[Middleware] Path "${url.pathname}" on root domain is not public. Redirecting to /register.`);
-     url.pathname = '/register';
+     // For any other path on the root domain/IP, redirect to login (as per current setup)
+     console.log(`[Middleware] Path "${url.pathname}" on root equivalent domain is not public. Redirecting to /login.`);
+     url.pathname = '/login';
      return NextResponse.redirect(url);
   }
 
@@ -82,15 +92,15 @@ export async function middleware(request: NextRequest) {
   }
 
   // --- Fallback for Unknown Hostnames ---
-  // If hostname doesn't match root or a valid subdomain structure, redirect to root registration.
-  console.log(`[Middleware] Unknown hostname or structure: ${hostname}. Redirecting to root /register.`);
-  const registerUrl = request.nextUrl.clone();
-  const port = registerUrl.port ? `:${registerUrl.port}` : '';
-  registerUrl.protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http:'; // Ensure correct protocol
-  registerUrl.host = `${ROOT_DOMAIN}${port}`; // Ensure redirect goes to ROOT_DOMAIN
-  registerUrl.pathname = '/register';
-  registerUrl.search = ''; // Clear query params
-  return NextResponse.redirect(registerUrl);
+  // If hostname doesn't match root, known dev IPs, or a valid subdomain structure, redirect to root login.
+  console.log(`[Middleware] Unknown hostname or structure: ${hostname}. Redirecting to root /login.`);
+  const loginUrl = request.nextUrl.clone();
+  const port = loginUrl.port ? `:${loginUrl.port}` : '';
+  loginUrl.protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http:'; // Ensure correct protocol
+  loginUrl.host = `${ROOT_DOMAIN}${port}`; // Ensure redirect goes to ROOT_DOMAIN
+  loginUrl.pathname = '/login';
+  loginUrl.search = ''; // Clear query params
+  return NextResponse.redirect(loginUrl);
 }
 
 export const config = {
