@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
-import { employeeSchema, type EmployeeFormData } from '@/actions/employee-actions';
+import { employeeSchema, type EmployeeFormData } from '@/types/employee'; // Updated import path
 import type { Employee } from '@/types/employee';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, CalendarIcon, Save, UserPlus } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns'; // Import isValid
 import { cn } from '@/lib/utils';
 
 interface EmployeeFormProps {
@@ -36,6 +36,21 @@ export function EmployeeForm({
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
+  const [datePickerOpen, setDatePickerOpen] = React.useState(false);
+
+  // Function to safely parse and format the date
+  const getFormattedHireDate = (hireDate?: string): string => {
+    if (!hireDate) return "";
+    try {
+      const parsedDate = parseISO(hireDate);
+      if (isValid(parsedDate)) {
+        return format(parsedDate, 'yyyy-MM-dd');
+      }
+    } catch (e) {
+      console.error("Error parsing hire date:", e);
+    }
+    return ""; // Return empty string if parsing fails or date is invalid
+  };
 
   const form = useForm<EmployeeFormData>({
     resolver: zodResolver(employeeSchema),
@@ -45,18 +60,18 @@ export function EmployeeForm({
       phone: employee?.phone ?? "",
       position: employee?.position ?? "",
       department: employee?.department ?? "",
-      // Ensure date is handled correctly, parsing if needed
-      hireDate: employee?.hireDate ? format(parseISO(employee.hireDate), 'yyyy-MM-dd') : "",
+      hireDate: getFormattedHireDate(employee?.hireDate), // Use helper function
       status: employee?.status ?? "Active",
     },
   });
 
    // Watch the hireDate field to handle date picker updates
    const hireDateValue = form.watch('hireDate');
-   const [datePickerOpen, setDatePickerOpen] = React.useState(false);
+
 
   const onSubmit = async (data: EmployeeFormData) => {
     setIsLoading(true);
+    console.log("Submitting form data:", data); // Debug: Log form data
     const result = await onSubmitAction(data);
     setIsLoading(false);
 
@@ -68,13 +83,20 @@ export function EmployeeForm({
       });
       // Redirect to the employee list or the updated employee's detail page
       router.push('/employees');
-      // Refresh might be needed if caching is aggressive, but revalidatePath should handle it
-      // router.refresh();
+      router.refresh(); // Force refresh to ensure data table updates
     } else {
+      console.error("Form submission error:", result.errors); // Debug: Log errors
       // Handle validation errors from server action if any
       if (result.errors) {
          result.errors.forEach((err: any) => {
-            form.setError(err.path.join('.'), { message: err.message });
+             // Ensure err.path exists and is an array before joining
+             const fieldName = Array.isArray(err.path) ? err.path.join('.') : 'unknownField';
+             // Check if the field exists in the form before setting the error
+             if (fieldName in form.getValues()) {
+                 form.setError(fieldName as keyof EmployeeFormData, { message: err.message });
+             } else {
+                 console.warn(`Attempted to set error on non-existent field: ${fieldName}`);
+             }
          });
          toast({
            title: "Validation Error",
@@ -172,7 +194,7 @@ export function EmployeeForm({
                        <SelectItem value="Sales">Sales</SelectItem>
                        <SelectItem value="Finance">Finance</SelectItem>
                        <SelectItem value="Operations">Operations</SelectItem>
-                       <SelectItem value="Construction">Construction</SelectItem> {/* Added from mock */}
+                       <SelectItem value="Construction">Construction</SelectItem>
                        <SelectItem value="Other">Other</SelectItem>
                      </SelectContent>
                    </Select>
@@ -188,7 +210,7 @@ export function EmployeeForm({
                control={form.control}
                name="hireDate"
                render={({ field }) => (
-                 <FormItem className="flex flex-col">
+                 <FormItem className="flex flex-col pt-2"> {/* Added pt-2 for alignment */}
                    <FormLabel>Hire Date</FormLabel>
                    <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                      <PopoverTrigger asChild>
@@ -201,7 +223,7 @@ export function EmployeeForm({
                            )}
                          >
                            {field.value ? (
-                             format(parseISO(field.value), "PPP") // Display formatted date
+                             isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : "Invalid date" // Display formatted date or error
                            ) : (
                              <span>Pick a date</span>
                            )}
@@ -212,11 +234,14 @@ export function EmployeeForm({
                      <PopoverContent className="w-auto p-0" align="start">
                        <Calendar
                          mode="single"
-                         selected={field.value ? parseISO(field.value) : undefined}
+                         selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
                          onSelect={(date) => {
-                            if (date) {
+                            if (date && isValid(date)) {
                               field.onChange(format(date, 'yyyy-MM-dd')); // Store as YYYY-MM-DD
                               setDatePickerOpen(false); // Close picker on select
+                            } else {
+                               field.onChange(""); // Clear field if date is invalid or cleared
+                               setDatePickerOpen(false);
                             }
                          }}
                          disabled={(date) =>
@@ -234,7 +259,7 @@ export function EmployeeForm({
               control={form.control}
               name="status"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="pt-2"> {/* Added pt-2 for alignment */}
                   <FormLabel>Status</FormLabel>
                   <Select onValueChange={field.onChange} defaultValue={field.value}>
                     <FormControl>
