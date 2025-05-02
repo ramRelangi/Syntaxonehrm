@@ -155,80 +155,80 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                      ) : (
                      requests.map((req) => (
                          <TableRow key={req.id}>
-                         {isAdminView && <TableCell>{req.employeeName}</TableCell>}
-                         <TableCell>{getLeaveTypeName(req.leaveTypeId)}</TableCell> {/* Use helper */}
-                         <TableCell>
-                             {format(parseISO(req.startDate), "MMM d, yyyy")} - {format(parseISO(req.endDate), "MMM d, yyyy")}
-                         </TableCell>
-                         <TableCell>
-                             <Tooltip>
-                                <TooltipTrigger asChild>
-                                     <span className="truncate max-w-[150px] inline-block">{req.reason}</span>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                     <p className="max-w-xs">{req.reason}</p>
-                                     {req.comments && <p className="mt-2 border-t pt-2 text-muted-foreground"><strong>Approver Comment:</strong> {req.comments}</p>}
-                                </TooltipContent>
-                            </Tooltip>
-                         </TableCell>
-                         <TableCell>{format(parseISO(req.requestDate), "MMM d, yyyy")}</TableCell>
-                         <TableCell className="text-center">
-                             <Badge variant={getStatusVariant(req.status)} className="flex items-center justify-center gap-1 w-24">
-                                 {getStatusIcon(req.status)}
-                                 {req.status}
-                             </Badge>
-                         </TableCell>
-                         <TableCell className="text-right">
-                             {isAdminView && req.status === 'Pending' && (
-                                 <div className="flex gap-1 justify-end">
-                                     <Button
-                                         variant="ghost"
-                                         size="sm"
-                                         onClick={() => handleStatusUpdate(req.id, 'Approved')}
-                                         disabled={actionLoading[req.id]}
-                                         className="text-green-600 hover:text-green-700 hover:bg-green-100"
-                                     >
-                                         <CheckCircle className="h-4 w-4 mr-1"/> Approve
-                                     </Button>
-                                     <Button
-                                         variant="ghost"
-                                         size="sm"
-                                         onClick={() => handleStatusUpdate(req.id, 'Rejected')}
-                                         disabled={actionLoading[req.id]}
-                                         className="text-red-600 hover:text-red-700 hover:bg-red-100"
-                                     >
-                                         <XCircle className="h-4 w-4 mr-1"/> Reject
-                                     </Button>
-                                 </div>
-                             )}
-                             {!isAdminView && req.employeeId === currentUserId && req.status === 'Pending' && (
-                                 <AlertDialog>
-                                     <AlertDialogTrigger asChild>
-                                        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={actionLoading[req.id]}>
-                                             <Trash2 className="h-4 w-4 mr-1"/> Cancel
+                            {isAdminView && <TableCell>{req.employeeName}</TableCell>}
+                            <TableCell>{getLeaveTypeName(req.leaveTypeId)}</TableCell> {/* Use helper */}
+                            <TableCell>
+                                {format(parseISO(req.startDate), "MMM d, yyyy")} - {format(parseISO(req.endDate), "MMM d, yyyy")}
+                            </TableCell>
+                            <TableCell>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <span className="truncate max-w-[150px] inline-block">{req.reason}</span>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        <p className="max-w-xs">{req.reason}</p>
+                                        {req.comments && <p className="mt-2 border-t pt-2 text-muted-foreground"><strong>Approver Comment:</strong> {req.comments}</p>}
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TableCell>
+                            <TableCell>{format(parseISO(req.requestDate), "MMM d, yyyy")}</TableCell>
+                            <TableCell className="text-center">
+                                <Badge variant={getStatusVariant(req.status)} className="flex items-center justify-center gap-1 w-24">
+                                    {getStatusIcon(req.status)}
+                                    {req.status}
+                                </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                                {isAdminView && req.status === 'Pending' && (
+                                    <div className="flex gap-1 justify-end">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleStatusUpdate(req.id, 'Approved')}
+                                            disabled={actionLoading[req.id]}
+                                            className="text-green-600 hover:text-green-700 hover:bg-green-100"
+                                        >
+                                            <CheckCircle className="h-4 w-4 mr-1"/> Approve
                                         </Button>
-                                     </AlertDialogTrigger>
-                                     <AlertDialogContent>
-                                         <AlertDialogHeader>
-                                             <AlertDialogTitle>Cancel Leave Request?</AlertDialogTitle>
-                                             <AlertDialogDescription>
-                                                Are you sure you want to cancel your leave request for {getLeaveTypeName(req.leaveTypeId)} from {format(parseISO(req.startDate), "MMM d")} to {format(parseISO(req.endDate), "MMM d")}?
-                                             </AlertDialogDescription>
-                                         </AlertDialogHeader>
-                                         <AlertDialogFooter>
-                                             <AlertDialogCancel disabled={actionLoading[req.id]}>Back</AlertDialogCancel>
-                                             <AlertDialogAction onClick={() => handleCancel(req.id, req.employeeName)} disabled={actionLoading[req.id]} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                                                 Yes, Cancel Request
-                                             </AlertDialogAction>
-                                         </AlertDialogFooter>
-                                     </AlertDialogContent>
-                                 </AlertDialog>
-                             )}
-                              {/* Add a View Details Button/Link if needed */}
-                             {/* <Button variant="ghost" size="icon" asChild>
-                                 <Link href={`/leave/${req.id}`}><Eye className="h-4 w-4"/></Link>
-                             </Button> */}
-                         </TableCell>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleStatusUpdate(req.id, 'Rejected')}
+                                            disabled={actionLoading[req.id]}
+                                            className="text-red-600 hover:text-red-700 hover:bg-red-100"
+                                        >
+                                            <XCircle className="h-4 w-4 mr-1"/> Reject
+                                        </Button>
+                                    </div>
+                                )}
+                                {!isAdminView && req.employeeId === currentUserId && req.status === 'Pending' && (
+                                    <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={actionLoading[req.id]}>
+                                                <Trash2 className="h-4 w-4 mr-1"/> Cancel
+                                            </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                            <AlertDialogHeader>
+                                                <AlertDialogTitle>Cancel Leave Request?</AlertDialogTitle>
+                                                <AlertDialogDescription>
+                                                    Are you sure you want to cancel your leave request for {getLeaveTypeName(req.leaveTypeId)} from {format(parseISO(req.startDate), "MMM d")} to {format(parseISO(req.endDate), "MMM d")}?
+                                                </AlertDialogDescription>
+                                            </AlertDialogHeader>
+                                            <AlertDialogFooter>
+                                                <AlertDialogCancel disabled={actionLoading[req.id]}>Back</AlertDialogCancel>
+                                                <AlertDialogAction onClick={() => handleCancel(req.id, req.employeeName)} disabled={actionLoading[req.id]} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                                    Yes, Cancel Request
+                                                </AlertDialogAction>
+                                            </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                    </AlertDialog>
+                                )}
+                                {/* Add a View Details Button/Link if needed */}
+                                {/* <Button variant="ghost" size="icon" asChild>
+                                    <Link href={`/leave/${req.id}`}><Eye className="h-4 w-4"/></Link>
+                                </Button> */}
+                            </TableCell>
                          </TableRow>
                      ))
                      )}
@@ -239,5 +239,3 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
      </TooltipProvider>
   );
 }
-        
-    
