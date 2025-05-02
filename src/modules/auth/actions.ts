@@ -6,7 +6,7 @@ import bcrypt from 'bcrypt';
 import nodemailer from 'nodemailer';
 import { registrationSchema, type RegistrationFormData, type Tenant, type User } from '@/modules/auth/types';
 import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db';
-import pool, { testDbConnection } from '@/lib/db'; // Import default pool and test function
+import pool, { testDbConnection } from '@/lib/db'; // Import pool and test function
 import { getEmailSettings, updateEmailSettings } from '@/modules/communication/lib/db'; // Import function to get settings
 import type { EmailSettings } from '@/modules/communication/types'; // Import EmailSettings type
 import { redirect } from 'next/navigation'; // Import redirect
@@ -64,14 +64,17 @@ async function sendWelcomeEmail(tenantId: string, adminName: string, adminEmail:
         console.log('[sendWelcomeEmail] Retrieved settings:', settings ? JSON.stringify({ ...settings, smtpPassword: '***' }) : 'null');
 
         // Validate essential settings
-        const isSettingsValid = settings && settings.smtpHost && settings.smtpPort && settings.smtpUser && settings.smtpPassword && settings.fromEmail && settings.fromName;
+        // Ensure password check works even if it's an empty string initially (allow empty for initial setup)
+        const isSettingsValid = settings && settings.smtpHost && settings.smtpPort && settings.smtpUser && settings.smtpPassword !== undefined && settings.fromEmail && settings.fromName;
+
 
         if (!isSettingsValid) {
-            console.error('[sendWelcomeEmail] Email settings are incomplete or not configured in DB for this tenant. Cannot send welcome email.');
-            // Optionally, send a fallback email from a central address here
-            return false; // Indicate failure to send
-        }
-        console.log('[sendWelcomeEmail] Email settings validated.');
+             console.error(`[sendWelcomeEmail] Email settings are incomplete or not configured in DB for tenant ${tenantId}. Cannot send welcome email. Check if DB save/fetch is working.`);
+             // Optionally, try to send a fallback email from a central address if the primary settings are bad/missing
+             // For now, just return false
+             return false; // Indicate failure to send
+         }
+        console.log('[sendWelcomeEmail] Email settings retrieved and validated.');
 
 
         console.log('[sendWelcomeEmail] Creating Nodemailer transporter...');
@@ -179,6 +182,8 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     }
 
 
+    let newTenant: Tenant | null = null; // Define newTenant outside the try block
+
     try {
         // 3. Check if domain already exists
         console.log(`[registerTenantAction] Checking if domain '${lowerCaseDomain}' exists...`);
@@ -191,7 +196,10 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
 
         // 4. Create the Tenant
         console.log(`[registerTenantAction] Creating tenant '${companyName}' with domain '${lowerCaseDomain}'...`);
-        const newTenant = await addTenant({ name: companyName, domain: lowerCaseDomain });
+        newTenant = await addTenant({ name: companyName, domain: lowerCaseDomain });
+        if (!newTenant?.id) {
+             throw new Error("Failed to create tenant or retrieve tenant ID.");
+        }
         console.log(`[registerTenantAction] Tenant created successfully with ID: ${newTenant.id}`);
 
 
@@ -221,17 +229,18 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         // 8. Initialize default Email Settings for the new tenant
          console.log(`[registerTenantAction] Initializing default email settings for tenant ${newTenant.id}...`);
          const defaultSettings: EmailSettings = {
-             tenantId: newTenant.id,
+             tenantId: newTenant.id, // Include tenantId here
              smtpHost: 'smtp.example.com', // Placeholder - user MUST configure this later
              smtpPort: 587,
              smtpUser: 'user@example.com',
-             smtpPassword: '', // Should be encrypted if set, leave empty for user to set
+             smtpPassword: '', // Leave empty for user to set (or use placeholder if encryption is handled)
              smtpSecure: false, // Default to false (use TLS for port 587)
              fromEmail: `noreply@${lowerCaseDomain}.${process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost'}`, // More specific default
              fromName: `${companyName} (SyntaxHive Hrm)`,
          };
-         // Ensure updateEmailSettings accepts tenantId in its data
-         await updateEmailSettings(newTenant.id, defaultSettings); // Pass tenantId and settings
+         // Pass the complete settings object to updateEmailSettings
+         // Need to ensure updateEmailSettings accepts tenantId
+          await updateEmailSettings(defaultSettings.tenantId, defaultSettings);
          console.log(`[registerTenantAction] Default email settings initialized for tenant ${newTenant.id}.`);
 
 
@@ -272,6 +281,9 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
             errorMessage = `Database "${process.env.DB_NAME}" does not exist. Please create it manually before running the application or db:init.`;
          } else if (error.message?.includes('schema not initialized')) {
              // Catch specific schema error from underlying DB functions
+              errorMessage = error.message;
+         } else if (error.message?.includes('Tenant ID is required')) {
+              // Catch error from updateEmailSettings
               errorMessage = error.message;
          }
 
