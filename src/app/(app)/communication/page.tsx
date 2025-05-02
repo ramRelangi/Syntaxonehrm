@@ -20,12 +20,10 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import type { EmailTemplate, EmailSettings } from "@/modules/communication/types"; // Import EmailSettings type
+import type { EmailTemplate, EmailSettings, ConnectionStatus } from "@/modules/communication/types"; // Import types
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-// Define connection status type
-type ConnectionStatus = 'idle' | 'checking' | 'success' | 'failed' | 'unconfigured';
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
@@ -76,57 +74,7 @@ export default function CommunicationPage() {
   const [activeTab, setActiveTab] = React.useState("templates"); // Default to templates tab
   const [connectionStatus, setConnectionStatus] = React.useState<ConnectionStatus>('idle'); // State for connection status
 
-  // --- Fetch Templates ---
-  const fetchTemplates = React.useCallback(async () => {
-    setIsLoadingTemplates(true);
-    setTemplateError(null);
-    try {
-      const data = await fetchData<EmailTemplate[]>('/api/communication/templates');
-      setTemplates(data);
-    } catch (err: any) {
-      setTemplateError("Failed to load email templates.");
-      toast({
-        title: "Error Loading Templates",
-        description: err.message || "Could not fetch templates.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoadingTemplates(false);
-    }
-  }, [toast]);
-
-  // --- Fetch Settings ---
- const fetchSettings = React.useCallback(async () => {
-    setIsLoadingSettings(true);
-    setSettingsError(null);
-    setConnectionStatus('idle'); // Reset status on fetch
-    try {
-        const data = await fetchData<EmailSettings | null>('/api/communication/settings');
-        // Check if data is null or empty object and has required fields
-        if (data && Object.keys(data).length > 0 && data.smtpHost && data.fromEmail) {
-            setSettings(data);
-            // Trigger background check only if settings seem complete
-            await checkConnectionInBackground(data);
-        } else {
-            setSettings(null); // Explicitly set to null if no valid settings
-            setConnectionStatus('unconfigured'); // Set status if no settings found or incomplete
-        }
-    } catch (err: any) {
-         // Don't set 'unconfigured' status on fetch error, only if 404 or empty
-        setSettingsError("Failed to load email settings.");
-        setConnectionStatus('failed'); // Indicate failure to fetch settings
-        toast({
-            title: "Error Loading Settings",
-            description: err.message || "Could not fetch settings.",
-            variant: "destructive",
-        });
-    } finally {
-        setIsLoadingSettings(false);
-    }
-}, [toast]); // Dependency array fixed
-
-
-   // --- Background Connection Check ---
+  // --- Background Connection Check ---
   const checkConnectionInBackground = React.useCallback(async (currentSettings: EmailSettings) => {
     // No need to check for null/empty here as fetchSettings handles it
     setConnectionStatus('checking');
@@ -150,15 +98,64 @@ export default function CommunicationPage() {
     }
   }, []); // No dependencies, relies on passed settings
 
+  // --- Fetch Settings ---
+ const fetchSettings = React.useCallback(async () => {
+    setIsLoadingSettings(true);
+    setSettingsError(null);
+    // Don't reset status immediately, let the check handle it
+    // setConnectionStatus('idle');
+    try {
+        const data = await fetchData<EmailSettings | null>('/api/communication/settings');
+        // Check if data is null or empty object and has required fields
+        if (data && Object.keys(data).length > 0 && data.smtpHost && data.fromEmail) {
+            setSettings(data);
+            // Trigger background check only if settings seem complete
+            // Run check but don't await it here, let it update state in background
+             checkConnectionInBackground(data); // No await
+        } else {
+            setSettings(null); // Explicitly set to null if no valid settings
+            setConnectionStatus('unconfigured'); // Set status if no settings found or incomplete
+        }
+    } catch (err: any) {
+         // Don't set 'unconfigured' status on fetch error, only if 404 or empty
+        setSettingsError("Failed to load email settings.");
+        setConnectionStatus('failed'); // Indicate failure to fetch settings
+        toast({
+            title: "Error Loading Settings",
+            description: err.message || "Could not fetch settings.",
+            variant: "destructive",
+        });
+    } finally {
+        setIsLoadingSettings(false);
+    }
+}, [toast, checkConnectionInBackground]); // Added checkConnectionInBackground dependency
+
+
+  // --- Fetch Templates ---
+  const fetchTemplates = React.useCallback(async () => {
+    setIsLoadingTemplates(true);
+    setTemplateError(null);
+    try {
+      const data = await fetchData<EmailTemplate[]>('/api/communication/templates');
+      setTemplates(data);
+    } catch (err: any) {
+      setTemplateError("Failed to load email templates.");
+      toast({
+        title: "Error Loading Templates",
+        description: err.message || "Could not fetch templates.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingTemplates(false);
+    }
+  }, [toast]);
+
+
    // --- Initial Data Fetch and Background Check ---
   React.useEffect(() => {
     fetchTemplates();
     fetchSettings(); // This now includes the initial checkConnectionInBackground call if settings are valid
   }, [fetchTemplates, fetchSettings]); // Keep dependencies as they trigger the fetches
-
-  // --- Removed useEffect for settings change ---
-  // The check is now triggered directly within fetchSettings or handleSettingsSuccess
-
 
   // --- Handlers ---
   const handleTemplateFormSuccess = () => {
@@ -186,7 +183,7 @@ export default function CommunicationPage() {
 
     const handleSettingsSuccess = async () => {
         // Refetch settings AND trigger connection check *after* saving new settings
-        await fetchSettings();
+        await fetchSettings(); // Await fetchSettings here to ensure check runs after save
     }
 
     const handleManualTestConnectionResult = (success: boolean) => {
@@ -199,7 +196,8 @@ export default function CommunicationPage() {
   const isEmailConfigured = connectionStatus === 'success';
   const isEmailMisconfigured = connectionStatus === 'failed';
   const isEmailUnconfigured = connectionStatus === 'unconfigured';
-  const isLoadingStatus = connectionStatus === 'checking' || connectionStatus === 'idle'; // Consider idle as loading
+  // Treat idle and checking as loading states for disabling UI elements like the Send tab
+  const isLoadingStatus = connectionStatus === 'checking' || connectionStatus === 'idle';
 
 
     // Helper to render connection status indicator
@@ -215,7 +213,12 @@ export default function CommunicationPage() {
                  return <span className="text-xs text-yellow-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Unconfigured</span>;
             case 'idle':
             default:
-                return <span className="text-xs text-muted-foreground">Status: Checking...</span>; // Show checking initially
+                 // Show idle only if settings are present but check hasn't run/finished
+                 if (settings && !isLoadingSettings) {
+                     return <span className="text-xs text-muted-foreground">Status: Idle</span>;
+                 }
+                 // Otherwise show checking or unconfigured based on other states
+                 return isLoadingSettings ? <span className="text-xs text-muted-foreground">Loading...</span> : <span className="text-xs text-yellow-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Unconfigured</span>;
         }
     };
 
@@ -268,14 +271,14 @@ export default function CommunicationPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="templates">Email Templates</TabsTrigger>
-              {/* Send tab is disabled if connection is not successful */}
-              <TabsTrigger value="send" disabled={!isEmailConfigured}>
+              {/* Send tab is disabled if connection is not successful or still loading/checking */}
+              <TabsTrigger value="send" disabled={!isEmailConfigured || isLoadingStatus}>
                   <Send className="mr-1 h-4 w-4"/> Send Email
-                  {!isEmailConfigured && <AlertTriangle className="ml-2 h-3 w-3 text-yellow-600 dark:text-yellow-500" title="Email not configured" />}
+                  {(!isEmailConfigured || isLoadingStatus) && <AlertTriangle className="ml-2 h-3 w-3 text-yellow-600 dark:text-yellow-500" title="Email not configured or status checking" />}
               </TabsTrigger>
               <TabsTrigger value="settings">
                  <Settings className="mr-1 h-4 w-4"/> Settings
-                 {connectionStatus === 'checking' && <Loader2 className="ml-2 h-3 w-3 animate-spin"/>}
+                 {(connectionStatus === 'checking' || (connectionStatus === 'idle' && !isLoadingSettings && settings)) && <Loader2 className="ml-2 h-3 w-3 animate-spin"/>}
                  {connectionStatus === 'success' && <CheckCircle className="ml-2 h-3 w-3 text-green-600"/>}
                  {connectionStatus === 'failed' && <XCircle className="ml-2 h-3 w-3 text-red-600"/>}
                  {connectionStatus === 'unconfigured' && <AlertTriangle className="ml-2 h-3 w-3 text-yellow-600"/>}
@@ -325,8 +328,8 @@ export default function CommunicationPage() {
                    <CardContent>
                         {isLoadingTemplates ? (
                             <Skeleton className="h-64 w-full" />
-                        ) : isEmailConfigured ? (
-                             <SendEmailForm templates={templates} />
+                        ) : isEmailConfigured && !isLoadingStatus ? ( // Only enable form if truly configured and not loading status
+                             <SendEmailForm templates={templates} connectionStatus={connectionStatus}/>
                          ) : (
                              <div className="flex items-center justify-center h-40 bg-muted rounded-md">
                                <p className="text-muted-foreground text-center px-4">
@@ -373,6 +376,5 @@ export default function CommunicationPage() {
     </div>
   );
 }
-
 
 

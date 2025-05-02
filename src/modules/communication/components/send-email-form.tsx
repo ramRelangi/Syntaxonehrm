@@ -4,7 +4,7 @@
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { sendEmailSchema, type SendEmailFormData, type EmailTemplate } from '@/modules/communication/types';
+import { sendEmailSchema, type SendEmailFormData, type EmailTemplate, type ConnectionStatus } from '@/modules/communication/types'; // Import ConnectionStatus
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from '@/components/ui/textarea';
@@ -17,9 +17,10 @@ const NONE_VALUE = "__none__"; // Define a constant for the non-empty placeholde
 
 interface SendEmailFormProps {
   templates: EmailTemplate[];
+  connectionStatus: ConnectionStatus; // Receive connection status
 }
 
-export function SendEmailForm({ templates }: SendEmailFormProps) {
+export function SendEmailForm({ templates, connectionStatus }: SendEmailFormProps) {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = React.useState<string | null>(null);
@@ -86,6 +87,9 @@ export function SendEmailForm({ templates }: SendEmailFormProps) {
         setIsLoading(false);
     }
   };
+
+  // Disable send button if connection is not successful
+  const isSendDisabled = isLoading || !form.formState.isValid || connectionStatus !== 'success';
 
   return (
     <Form {...form}>
@@ -179,7 +183,7 @@ export function SendEmailForm({ templates }: SendEmailFormProps) {
            >
              <X className="mr-2 h-4 w-4" /> Clear
           </Button>
-          <Button type="submit" disabled={isLoading || !form.formState.isValid}>
+          <Button type="submit" disabled={isSendDisabled}> {/* Use isSendDisabled */}
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (

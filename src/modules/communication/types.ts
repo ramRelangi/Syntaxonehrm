@@ -38,6 +38,10 @@ export const sendEmailSchema = z.object({
 
 export type SendEmailFormData = z.infer<typeof sendEmailSchema>;
 
+// --- Connection Status ---
+export type ConnectionStatus = 'idle' | 'checking' | 'success' | 'failed' | 'unconfigured';
+
+
 // No separate FormData needed if all fields are editable
 // export type EmailSettingsFormData = EmailSettings;
 
