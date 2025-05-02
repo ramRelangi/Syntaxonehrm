@@ -17,22 +17,9 @@ CREATE TABLE IF NOT EXISTS tenants (
 );
 SELECT 'tenants table ensured.';
 
--- Index for tenants.domain
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM   pg_class c
-        JOIN   pg_namespace n ON n.oid = c.relnamespace
-        WHERE  c.relname = 'idx_tenants_domain'
-        AND    n.nspname = 'public' -- assuming public schema
-    ) THEN
-        CREATE INDEX idx_tenants_domain ON tenants(domain);
-        RAISE NOTICE 'Index idx_tenants_domain created.';
-    ELSE
-        RAISE NOTICE 'Index idx_tenants_domain already exists.';
-    END IF;
-END$$;
+-- Index for tenants.domain (using IF NOT EXISTS)
+CREATE INDEX IF NOT EXISTS idx_tenants_domain ON tenants(domain);
+SELECT 'Index idx_tenants_domain checked/created.';
 
 -- User Roles Enum
 DO $$ BEGIN
@@ -58,10 +45,9 @@ CREATE TABLE IF NOT EXISTS users (
 );
 SELECT 'users table ensured.';
 
--- Indexes for users table
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_users_tenant_id_email' AND n.nspname = 'public') THEN CREATE UNIQUE INDEX idx_users_tenant_id_email ON users(tenant_id, email); RAISE NOTICE 'Index idx_users_tenant_id_email created.'; ELSE RAISE NOTICE 'Index idx_users_tenant_id_email already exists.'; END IF;
-END$$;
+-- Index for users table (using IF NOT EXISTS)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_tenant_id_email ON users(tenant_id, email);
+SELECT 'Index idx_users_tenant_id_email checked/created.';
 
 -- Employee Status Enum
 DO $$ BEGIN
@@ -89,10 +75,9 @@ CREATE TABLE IF NOT EXISTS employees (
 );
 SELECT 'employees table ensured.';
 
--- Index for employees table
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_employees_tenant_id' AND n.nspname = 'public') THEN CREATE INDEX idx_employees_tenant_id ON employees(tenant_id); RAISE NOTICE 'Index idx_employees_tenant_id created.'; ELSE RAISE NOTICE 'Index idx_employees_tenant_id already exists.'; END IF;
-END$$;
+-- Index for employees table (using IF NOT EXISTS)
+CREATE INDEX IF NOT EXISTS idx_employees_tenant_id ON employees(tenant_id);
+SELECT 'Index idx_employees_tenant_id checked/created.';
 
 -- Leave Types Table
 CREATE TABLE IF NOT EXISTS leave_types (
@@ -109,10 +94,9 @@ CREATE TABLE IF NOT EXISTS leave_types (
 );
 SELECT 'leave_types table ensured.';
 
--- Index for leave_types table
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_leave_types_tenant_id' AND n.nspname = 'public') THEN CREATE INDEX idx_leave_types_tenant_id ON leave_types(tenant_id); RAISE NOTICE 'Index idx_leave_types_tenant_id created.'; ELSE RAISE NOTICE 'Index idx_leave_types_tenant_id already exists.'; END IF;
-END$$;
+-- Index for leave_types table (using IF NOT EXISTS)
+CREATE INDEX IF NOT EXISTS idx_leave_types_tenant_id ON leave_types(tenant_id);
+SELECT 'Index idx_leave_types_tenant_id checked/created.';
 
 
 -- Leave Request Status Enum
@@ -144,11 +128,10 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 );
 SELECT 'leave_requests table ensured.';
 
--- Index for leave_requests table
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_leave_requests_tenant_id' AND n.nspname = 'public') THEN CREATE INDEX idx_leave_requests_tenant_id ON leave_requests(tenant_id); RAISE NOTICE 'Index idx_leave_requests_tenant_id created.'; ELSE RAISE NOTICE 'Index idx_leave_requests_tenant_id already exists.'; END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_leave_requests_employee_id' AND n.nspname = 'public') THEN CREATE INDEX idx_leave_requests_employee_id ON leave_requests(employee_id); RAISE NOTICE 'Index idx_leave_requests_employee_id created.'; ELSE RAISE NOTICE 'Index idx_leave_requests_employee_id already exists.'; END IF;
-END$$;
+-- Index for leave_requests table (using IF NOT EXISTS)
+CREATE INDEX IF NOT EXISTS idx_leave_requests_tenant_id ON leave_requests(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(employee_id);
+SELECT 'Indexes for leave_requests checked/created.';
 
 
 -- Leave Balances Table
@@ -163,10 +146,9 @@ CREATE TABLE IF NOT EXISTS leave_balances (
 );
 SELECT 'leave_balances table ensured.';
 
--- Index for leave_balances table
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_leave_balances_tenant_id_employee_id' AND n.nspname = 'public') THEN CREATE INDEX idx_leave_balances_tenant_id_employee_id ON leave_balances(tenant_id, employee_id); RAISE NOTICE 'Index idx_leave_balances_tenant_id_employee_id created.'; ELSE RAISE NOTICE 'Index idx_leave_balances_tenant_id_employee_id already exists.'; END IF;
-END$$;
+-- Index for leave_balances table (using IF NOT EXISTS)
+CREATE INDEX IF NOT EXISTS idx_leave_balances_tenant_id_employee_id ON leave_balances(tenant_id, employee_id);
+SELECT 'Index idx_leave_balances_tenant_id_employee_id checked/created.';
 
 
 -- Job Posting Status Enum
@@ -195,10 +177,9 @@ CREATE TABLE IF NOT EXISTS job_postings (
 );
 SELECT 'job_postings table ensured.';
 
--- Index for job_postings table
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_job_postings_tenant_id_status' AND n.nspname = 'public') THEN CREATE INDEX idx_job_postings_tenant_id_status ON job_postings(tenant_id, status); RAISE NOTICE 'Index idx_job_postings_tenant_id_status created.'; ELSE RAISE NOTICE 'Index idx_job_postings_tenant_id_status already exists.'; END IF;
-END$$;
+-- Index for job_postings table (using IF NOT EXISTS)
+CREATE INDEX IF NOT EXISTS idx_job_postings_tenant_id_status ON job_postings(tenant_id, status);
+SELECT 'Index idx_job_postings_tenant_id_status checked/created.';
 
 
 -- Candidate Status Enum
@@ -229,10 +210,9 @@ CREATE TABLE IF NOT EXISTS candidates (
 );
 SELECT 'candidates table ensured.';
 
--- Index for candidates table
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_candidates_tenant_id_job_posting_id' AND n.nspname = 'public') THEN CREATE INDEX idx_candidates_tenant_id_job_posting_id ON candidates(tenant_id, job_posting_id); RAISE NOTICE 'Index idx_candidates_tenant_id_job_posting_id created.'; ELSE RAISE NOTICE 'Index idx_candidates_tenant_id_job_posting_id already exists.'; END IF;
-END$$;
+-- Index for candidates table (using IF NOT EXISTS)
+CREATE INDEX IF NOT EXISTS idx_candidates_tenant_id_job_posting_id ON candidates(tenant_id, job_posting_id);
+SELECT 'Index idx_candidates_tenant_id_job_posting_id checked/created.';
 
 
 -- Email Templates Table
@@ -249,10 +229,9 @@ CREATE TABLE IF NOT EXISTS email_templates (
 );
 SELECT 'email_templates table ensured.';
 
--- Index for email_templates table
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_email_templates_tenant_id' AND n.nspname = 'public') THEN CREATE INDEX idx_email_templates_tenant_id ON email_templates(tenant_id); RAISE NOTICE 'Index idx_email_templates_tenant_id created.'; ELSE RAISE NOTICE 'Index idx_email_templates_tenant_id already exists.'; END IF;
-END$$;
+-- Index for email_templates table (using IF NOT EXISTS)
+CREATE INDEX IF NOT EXISTS idx_email_templates_tenant_id ON email_templates(tenant_id);
+SELECT 'Index idx_email_templates_tenant_id checked/created.';
 
 
 -- Email Configuration Table (Single Row Per Tenant)
@@ -326,12 +305,14 @@ export async function initializeDatabase() {
     console.log('Attempting to connect to database for schema initialization...');
     client = await pool.connect();
     console.log('Connected to database. Executing schema creation script...');
+    // Execute the entire script as a single query
     await client.query(schemaSQL);
     console.log('Database schema initialization script executed successfully.');
   } catch (err: any) {
     console.error('-----------------------------------------');
     console.error('Error during database schema initialization:', err.message);
     console.error('Stack:', err.stack);
+    console.error('Error Details:', err); // Log the full error object
     console.error('-----------------------------------------');
     // Re-throw the error so it can be caught by the caller (e.g., registerTenantAction)
     throw err;
