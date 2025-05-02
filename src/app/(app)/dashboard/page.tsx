@@ -30,23 +30,26 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
 
         if (!response.ok) {
             const errorText = await response.text();
-            console.error(`Server-side fetch error for ${fullUrl}: ${errorText}`);
-            // Try to parse JSON, but fallback if it's not JSON
+            // Log the raw error text first for debugging
+            console.error(`Server-side fetch error for ${fullUrl}: Status ${response.status}, Body: ${errorText}`);
+            // Try to parse JSON to get a more specific error message from the API
             let errorMessage = `HTTP error! status: ${response.status}`;
             try {
                 const errorData = JSON.parse(errorText);
-                errorMessage = errorData.message || errorMessage;
+                // Use the specific error message from the API response if available
+                errorMessage = errorData.error || errorData.message || errorMessage;
             } catch (parseError) {
                 // If parsing fails, use the raw text or the status code error
                 errorMessage = errorText || errorMessage;
             }
-             throw new Error(errorMessage);
+             throw new Error(errorMessage); // Throw the potentially parsed error message
         }
         return await response.json() as T;
     } catch (error) {
         console.error(`Error fetching ${fullUrl}:`, error);
         // Re-throw to be caught by Suspense boundary or error component
         if (error instanceof Error) {
+           // Include the URL in the thrown error message for better context
            throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
         } else {
             throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
@@ -78,23 +81,38 @@ async function MetricCard({ title, icon: Icon, valuePromise, link, linkText, cha
 
 // --- Async Data Fetching Functions via API ---
 async function getTotalEmployees() {
-    const employees = await fetchData<Employee[]>('/api/employees');
-    return employees.length;
+    // Wrap in try-catch to handle potential fetch errors gracefully for this specific metric
+    try {
+        const employees = await fetchData<Employee[]>('/api/employees');
+        return employees.length;
+    } catch (error) {
+        console.error("Dashboard: Failed to get total employees count:", error);
+        return "Error"; // Return an error string or indicator
+    }
 }
 
 async function getUpcomingLeavesCount() {
-    const today = new Date();
-    // Fetch approved requests via API
-    const upcomingRequests = await fetchData<LeaveRequest[]>('/api/leave/requests?status=Approved');
-    // Filter for requests starting today or later
-    const count = upcomingRequests.filter(req => new Date(req.startDate) >= today).length;
-    return count;
+    // Wrap in try-catch
+    try {
+        const today = new Date();
+        const upcomingRequests = await fetchData<LeaveRequest[]>('/api/leave/requests?status=Approved');
+        const count = upcomingRequests.filter(req => new Date(req.startDate) >= today).length;
+        return count;
+    } catch (error) {
+         console.error("Dashboard: Failed to get upcoming leaves count:", error);
+         return "Error";
+    }
 }
 
 async function getOpenPositionsCount() {
-     // Fetch job postings with status 'Open'
-     const openPositions = await fetchData<any[]>('/api/recruitment/postings?status=Open');
-     return openPositions.length;
+    // Wrap in try-catch
+     try {
+         const openPositions = await fetchData<any[]>('/api/recruitment/postings?status=Open');
+         return openPositions.length;
+     } catch (error) {
+          console.error("Dashboard: Failed to get open positions count:", error);
+          return "Error";
+     }
  }
 
 async function getPendingTasksCount() { await new Promise(res => setTimeout(res, 50)); return 3; } // Mock - Replace later
@@ -105,10 +123,8 @@ export default function DashboardPage() {
   // Define quick links
   const quickLinks = [
     { href: '/employees/add', label: 'Add New Employee', icon: Users },
-    // Updated the recruitment link to point to the main recruitment page
-    // The button to create a new posting is on the recruitment page itself
     { href: '/recruitment', label: 'Manage Job Postings', icon: Briefcase },
-    { href: '/leave#request', label: 'Request Leave', icon: Calendar }, // Updated href to target tab
+    { href: '/leave#request', label: 'Request Leave', icon: Calendar },
     { href: '/smart-resume-parser', label: 'Parse Resume', icon: UploadCloud },
   ];
 

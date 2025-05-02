@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEmployees, addEmployee } from '@/modules/employees/actions';
-import { employeeSchema } from '@/modules/employees/types';
+import { employeeSchema, EmployeeFormData } from '@/modules/employees/types'; // Ensure EmployeeFormData is imported if used in POST
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,9 +8,46 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(employees);
   } catch (error: any) { // Catch as any to access error properties
     console.error('Error fetching employees (API):', error);
-    // Try to return a more specific message if available
-    const message = error.message || 'Failed to fetch employees due to an internal server error.';
-    return NextResponse.json({ error: message }, { status: 500 });
+
+    let message = 'Failed to fetch employees due to an internal server error.';
+    let status = 500;
+
+    // Check for specific database connection errors by code
+    if (error.code) {
+        switch (error.code) {
+            case 'ECONNREFUSED':
+                message = `Database connection refused at ${error.address}:${error.port}. Please ensure the database server is running and accessible.`;
+                status = 503; // Service Unavailable
+                break;
+            case 'ENOTFOUND':
+                 message = `Database host not found (${process.env.DB_HOST}). Please check the DB_HOST environment variable and DNS resolution.`;
+                 status = 503;
+                 break;
+            case 'ETIMEDOUT':
+                message = 'Database connection timed out. Please check network connectivity and database server status.';
+                status = 504; // Gateway Timeout
+                break;
+            case 'ERR_MODULE_NOT_FOUND': // Handle potential issues if db module itself fails
+                 message = 'Database module failed to load. Check server logs.';
+                 status = 500;
+                 break;
+            // Add more specific PG error codes if needed (e.g., authentication errors)
+            // case '28P01': // invalid_password
+            //     message = 'Database authentication failed. Check DB_USER and DB_PASSWORD.';
+            //     status = 503;
+            //     break;
+            default:
+                 // Use the original error message if available
+                 message = error.message || message;
+                 break; // Keep status 500 for unspecified errors
+        }
+    } else {
+         // Fallback for non-coded errors
+         message = error.message || message;
+    }
+
+
+    return NextResponse.json({ error: message }, { status: status });
   }
 }
 
@@ -26,7 +63,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Call the server action to add the employee
-    const result = await addEmployee(validation.data);
+    const result = await addEmployee(validation.data as EmployeeFormData); // Cast if necessary
 
     if (result.success && result.employee) {
       return NextResponse.json(result.employee, { status: 201 });
@@ -37,6 +74,17 @@ export async function POST(request: NextRequest) {
        if (result.errors?.some(e => e.message?.includes('Email address already exists'))) {
             return NextResponse.json({ error: 'Email address already exists.' }, { status: 409 }); // 409 Conflict
        }
+       // Handle potential DB connection errors during POST as well
+       const dbError = result.errors?.find(e => ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(e.code || ''));
+       if (dbError) {
+           let message = dbError.message;
+           let status = 503;
+           if (dbError.code === 'ECONNREFUSED') message = `Database connection refused. Cannot add employee.`;
+           else if (dbError.code === 'ENOTFOUND') message = `Database host not found. Cannot add employee.`;
+           else if (dbError.code === 'ETIMEDOUT') message = `Database connection timed out. Cannot add employee.`;
+           return NextResponse.json({ error: message }, { status });
+       }
+
       return NextResponse.json({ error: result.errors?.[0]?.message || 'Failed to add employee' }, { status: result.errors ? 400 : 500 });
     }
   } catch (error: any) {
@@ -44,6 +92,22 @@ export async function POST(request: NextRequest) {
     if (error instanceof SyntaxError) {
        return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+     // Catching potential DB connection errors directly in POST
+     let message = 'Internal server error';
+     let status = 500;
+      if (error.code === 'ECONNREFUSED') {
+          message = `Database connection refused at ${error.address}:${error.port}. Cannot add employee.`;
+          status = 503;
+      } else if (error.code === 'ENOTFOUND') {
+          message = `Database host not found (${process.env.DB_HOST}). Cannot add employee.`;
+          status = 503;
+      } else if (error.code === 'ETIMEDOUT') {
+          message = 'Database connection timed out. Cannot add employee.';
+          status = 504;
+      } else {
+          message = error.message || message;
+      }
+
+    return NextResponse.json({ error: message }, { status: status });
   }
 }
