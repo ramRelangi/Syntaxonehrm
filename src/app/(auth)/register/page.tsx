@@ -70,13 +70,14 @@ export default function RegisterPage() {
         }
     } catch (error) {
         console.error("Unexpected error during registration submission:", error); // Debug log
+        const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred. Please try again later.";
         toast({
             title: "Registration Error",
-            description: "An unexpected error occurred. Please try again later.",
+            description: errorMessage,
             variant: "destructive",
         });
         setIsLoading(false);
-         form.setError("root.serverError", { type: 'unexpected', message: 'An unexpected error occurred.' });
+         form.setError("root.serverError", { type: 'unexpected', message: errorMessage });
     }
   };
 
@@ -91,7 +92,7 @@ export default function RegisterPage() {
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
              {form.formState.errors.root?.serverError && (
-                <FormMessage className="text-destructive text-center">
+                <FormMessage className="text-destructive text-center bg-destructive/10 p-3 rounded-md">
                     {form.formState.errors.root.serverError.message}
                 </FormMessage>
             )}

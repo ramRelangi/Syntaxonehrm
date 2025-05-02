@@ -96,10 +96,11 @@ function mapRowToUser(row: any): User {
         role: row.role, // Assumes DB role matches UserRole type
         isActive: row.is_active,
         createdAt: new Date(row.created_at).toISOString(),
+        updatedAt: new Date(row.updated_at).toISOString(),
     };
 }
 
-export async function addUser(userData: Omit<User, 'id' | 'createdAt'>): Promise<User> {
+export async function addUser(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> {
     const client = await pool.connect();
     console.log(`[DB addUser] Attempting to add user: ${userData.email} for tenant ${userData.tenantId}`);
     const query = `

@@ -170,8 +170,11 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.error("[registerTenantAction] Error during tenant registration:", error);
          let errorMessage = error.message || 'Failed to register tenant due to a server error.';
          // Add specific error mapping for DB issues if needed
-         if (error.message?.includes('relation "tenants" does not exist') || error.message?.includes('relation "users" does not exist')) {
-             errorMessage = 'Database schema is not initialized. Please run `npm run db:init`.';
+         if (error.code === '42P01') { // Handle undefined_table error (PostgreSQL code for missing relation)
+             errorMessage = `Database schema is not initialized (table "${error.message?.match(/relation "([^"]+)"/)?.[1] || 'unknown'}" does not exist). Please run 'npm run db:init' and restart the server.`;
+         } else if (error.message?.includes('relation "tenants" does not exist') || error.message?.includes('relation "users" does not exist')) {
+             // This is a fallback check in case the code is not '42P01'
+             errorMessage = 'Database schema is not initialized. Please run `npm run db:init` and restart the server.';
          } else if (error.code === 'ECONNREFUSED') {
               errorMessage = `Database connection refused. Ensure the database server is running and accessible at ${process.env.DB_HOST}:${process.env.DB_PORT || 5432}.`;
          } else if (error.code === '28P01') {
