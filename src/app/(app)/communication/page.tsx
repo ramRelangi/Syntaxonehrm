@@ -4,7 +4,7 @@
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Mail, PlusCircle, MessageSquareText } from "lucide-react"; // Use MessageSquareText for placeholder
+import { Mail, PlusCircle, MessageSquareText, Settings } from "lucide-react"; // Added Settings icon
 import { EmailTemplateList } from "@/modules/communication/components/email-template-list";
 import { EmailTemplateForm } from "@/modules/communication/components/email-template-form";
 import {
