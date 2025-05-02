@@ -1,14 +1,14 @@
 
-import dotenv from 'dotenv';
 import { Pool } from 'pg';
 
 
-// Load environment variables from .env file
-dotenv.config();
+// Load environment variables from .env file - REMOVED explicit dotenv.config()
+// dotenv.config();
 console.log('db.ts is being loaded');
-console.log('DB_HOST:', process.env.DB_HOST);
+console.log('DB_HOST:', process.env.DB_HOST ? '******' : 'Not Set'); // Avoid logging sensitive info
+console.log('DB_PORT:', process.env.DB_PORT);
 console.log('DB_USER:', process.env.DB_USER);
-console.log('DB_PASS:', process.env.DB_PASS);
+console.log('DB_PASS:', process.env.DB_PASS ? '******' : 'Not Set'); // Avoid logging sensitive info
 console.log('DB_NAME:', process.env.DB_NAME);
 
 // Ensure required environment variables are loaded
@@ -18,6 +18,7 @@ const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]
 if (missingEnvVars.length > 0) {
   const errorMessage = `Missing required database environment variables: ${missingEnvVars.join(', ')}. Please ensure they are set in your .env file and the server has been restarted.`;
   console.error(`FATAL ERROR: ${errorMessage}`);
+  // Throwing here might prevent the app from starting, ensure variables are set
   throw new Error(errorMessage);
 }
 
@@ -47,6 +48,7 @@ try {
   );
 } catch (error) {
   console.error('FATAL ERROR: Failed to create database pool.', error);
+  // Rethrow or handle appropriately
   throw new Error('Failed to create database pool.');
 }
 
@@ -78,7 +80,11 @@ export async function testDbConnection() {
       friendlyMessage = 'Database authentication failed. Check DB_USER and DB_PASS.';
     } else if (err.code === '3D000') {
       friendlyMessage = `Database "${process.env.DB_NAME}" does not exist. Please create it before running the application.`;
+    } else {
+        // Include the original error message for other DB errors
+        friendlyMessage = `Database error: ${err.message} (Code: ${err.code || 'N/A'})`;
     }
+
 
     console.error(`[DB Test Error Details] Code: ${err.code}, Message: ${err.message}`);
     return { success: false, message: friendlyMessage, error: err };

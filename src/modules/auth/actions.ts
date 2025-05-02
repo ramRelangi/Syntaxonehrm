@@ -12,6 +12,10 @@ import { redirect } from 'next/navigation'; // Import redirect
 import { headers } from 'next/headers'; // Import headers to potentially get domain in logout
 import { initializeDatabase } from '@/lib/init-db'; // Import initializeDatabase
 
+// Force this module to use the Node.js runtime because bcrypt needs it
+export const runtime = 'nodejs';
+
+
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
 
 // Helper function to create transporter (similar to the one in communication module)
@@ -239,7 +243,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
              fromName: `${companyName} (SyntaxHive Hrm)`,
          };
          // Ensure updateEmailSettings accepts tenantId in its data
-         await updateEmailSettings(defaultSettings); // Upsert the default settings
+         await updateEmailSettings(newTenant.id, defaultSettings); // Pass tenantId and settings
          console.log(`[registerTenantAction] Default email settings initialized for tenant ${newTenant.id}.`);
 
 
@@ -326,6 +330,12 @@ export async function logoutAction() {
       console.log(`[logoutAction] Redirecting to tenant login page: ${redirectUrl}`);
   } else {
        console.log(`[logoutAction] Tenant domain not found, redirecting to root login: ${redirectUrl}`);
+       // Construct the root login URL properly
+       const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
+       const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : '';
+       const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+       redirectUrl = `${protocol}://${rootDomain}${port}/login`;
+       console.log(`[logoutAction] Redirecting to root login page: ${redirectUrl}`);
   }
 
   // Redirect to the appropriate login page after clearing session
