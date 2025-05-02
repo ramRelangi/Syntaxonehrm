@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from '@/components/ui/switch';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Save, AlertTriangle } from 'lucide-react';
+import { Loader2, Save, AlertTriangle, PlugZap } from 'lucide-react'; // Added PlugZap for test connection
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 interface EmailSettingsFormProps {
@@ -20,7 +20,8 @@ interface EmailSettingsFormProps {
 
 export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsFormProps) {
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = React.useState(false);
+  const [isLoadingSave, setIsLoadingSave] = React.useState(false);
+  const [isLoadingTest, setIsLoadingTest] = React.useState(false);
 
   const form = useForm<EmailSettings>({
     resolver: zodResolver(emailSettingsSchema),
@@ -36,7 +37,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
   });
 
    const onSubmit = async (data: EmailSettings) => {
-    setIsLoading(true);
+    setIsLoadingSave(true);
     const apiUrl = '/api/communication/settings';
     const method = 'PUT';
 
@@ -70,9 +71,56 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
         });
         form.setError("root.serverError", { message: error.message || "An unexpected server error occurred." });
     } finally {
-        setIsLoading(false);
+        setIsLoadingSave(false);
     }
   };
+
+  const handleTestConnection = async () => {
+    // Trigger validation to ensure required fields are filled
+    const isValid = await form.trigger();
+    if (!isValid) {
+        toast({
+            title: "Incomplete Settings",
+            description: "Please fill in all required SMTP fields before testing.",
+            variant: "destructive",
+        });
+        return;
+    }
+
+    setIsLoadingTest(true);
+    const settingsData = form.getValues(); // Get current form values
+
+    try {
+      const response = await fetch('/api/communication/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settingsData),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || result.error || `Test failed. Status: ${response.status}`);
+      }
+
+      toast({
+        title: "Connection Successful",
+        description: "Successfully connected to the SMTP server.",
+        className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+      });
+
+    } catch (error: any) {
+      console.error("Test connection error:", error);
+      toast({
+        title: "Connection Failed",
+        description: `Could not connect to SMTP server: ${error.message}`,
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingTest(false);
+    }
+  };
+
 
   return (
     <Form {...form}>
@@ -97,7 +145,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
                 name="smtpHost"
                 render={({ field }) => (
                     <FormItem>
-                    <FormLabel>SMTP Host</FormLabel>
+                    <FormLabel>SMTP Host *</FormLabel>
                     <FormControl>
                         <Input placeholder="e.g., smtp.mailgun.org" {...field} />
                     </FormControl>
@@ -110,7 +158,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
                 name="smtpPort"
                 render={({ field }) => (
                     <FormItem>
-                    <FormLabel>SMTP Port</FormLabel>
+                    <FormLabel>SMTP Port *</FormLabel>
                     <FormControl>
                         <Input type="number" placeholder="e.g., 587 or 465" {...field} />
                     </FormControl>
@@ -126,7 +174,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
                 name="smtpUser"
                 render={({ field }) => (
                     <FormItem>
-                    <FormLabel>SMTP Username</FormLabel>
+                    <FormLabel>SMTP Username *</FormLabel>
                     <FormControl>
                         <Input placeholder="Your SMTP username" {...field} />
                     </FormControl>
@@ -139,7 +187,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
                 name="smtpPassword"
                 render={({ field }) => (
                     <FormItem>
-                    <FormLabel>SMTP Password</FormLabel>
+                    <FormLabel>SMTP Password *</FormLabel>
                     <FormControl>
                         {/* Use password type to mask input */}
                         <Input type="password" placeholder="Your SMTP password" {...field} />
@@ -178,7 +226,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
                 name="fromEmail"
                 render={({ field }) => (
                     <FormItem>
-                    <FormLabel>Default "From" Email</FormLabel>
+                    <FormLabel>Default "From" Email *</FormLabel>
                     <FormControl>
                         <Input type="email" placeholder="e.g., noreply@yourcompany.com" {...field} />
                     </FormControl>
@@ -191,7 +239,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
                 name="fromName"
                 render={({ field }) => (
                     <FormItem>
-                    <FormLabel>Default "From" Name</FormLabel>
+                    <FormLabel>Default "From" Name *</FormLabel>
                     <FormControl>
                         <Input placeholder="e.g., Your Company Name" {...field} />
                     </FormControl>
@@ -202,14 +250,20 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
         </div>
 
 
-        <div className="flex justify-end gap-2 pt-4">
-          {/* No Cancel button needed if it's not in a dialog */}
-          <Button type="submit" disabled={isLoading || !form.formState.isDirty}> {/* Disable if no changes */}
-            {isLoading ? (
+        <div className="flex justify-end gap-2 pt-4 border-t mt-6">
+          <Button type="button" variant="outline" onClick={handleTestConnection} disabled={isLoadingTest || isLoadingSave}>
+              {isLoadingTest ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : ( <PlugZap className="mr-2 h-4 w-4" />)
+              }
+              {isLoadingTest ? 'Testing...' : "Test Connection"}
+          </Button>
+          <Button type="submit" disabled={isLoadingSave || isLoadingTest || !form.formState.isDirty}> {/* Disable if no changes or testing */}
+            {isLoadingSave ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : ( <Save className="mr-2 h-4 w-4" />)
             }
-            {isLoading ? 'Saving...' : "Save Settings"}
+            {isLoadingSave ? 'Saving...' : "Save Settings"}
           </Button>
         </div>
       </form>
