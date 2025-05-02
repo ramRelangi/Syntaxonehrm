@@ -1,7 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getTenantByDomain } from '@/modules/auth/lib/db'; // Import DB function
+// Removed: import { getTenantByDomain } from '@/modules/auth/lib/db'; // Import DB function - Causes Edge Runtime error
 
 // Subdomains to ignore (e.g., www, api)
 const IGNORED_SUBDOMAINS = ['www', 'api'];
@@ -45,8 +45,6 @@ export async function middleware(request: NextRequest) {
 
      // Redirect root path '/' to registration page (or login, depending on default preference)
      if (url.pathname === '/') {
-      // console.log('[Middleware] Redirecting root / to /register');
-      // url.pathname = '/register';
        console.log('[Middleware] Redirecting root / to /login');
        url.pathname = '/login';
        return NextResponse.redirect(url);
@@ -67,38 +65,24 @@ export async function middleware(request: NextRequest) {
   if (subdomain && !IGNORED_SUBDOMAINS.includes(subdomain)) {
     // Subdomain detected
 
-    // Verify tenant exists before rewriting (optional but recommended)
-    try {
-        const tenant = await getTenantByDomain(subdomain);
-        if (!tenant) {
-            console.log(`[Middleware] Tenant domain "${subdomain}" not found in DB. Redirecting to registration.`);
-            const registerUrl = request.nextUrl.clone();
-             const port = registerUrl.port ? `:${registerUrl.port}` : '';
-             registerUrl.host = `${ROOT_DOMAIN}${port}`; // Ensure redirect goes to ROOT_DOMAIN
-             registerUrl.pathname = '/register';
-             registerUrl.searchParams.set('error', 'tenant_not_found');
-             return NextResponse.redirect(registerUrl);
-        }
-        console.log(`[Middleware] Tenant domain "${subdomain}" verified.`);
-    } catch (error) {
-        console.error(`[Middleware] Error verifying tenant domain "${subdomain}":`, error);
-        // Decide how to handle DB errors - fail open (rewrite) or fail closed (redirect)?
-        // Redirecting to an error page or root login might be safer.
-         const errorUrl = request.nextUrl.clone();
-         const port = errorUrl.port ? `:${errorUrl.port}` : '';
-         errorUrl.host = `${ROOT_DOMAIN}${port}`;
-         errorUrl.pathname = '/login'; // Redirect to root login on error
-         errorUrl.searchParams.set('error', 'db_error');
-         return NextResponse.redirect(errorUrl);
-    }
-
+    // ---- Removed Tenant Verification from Middleware ----
+    // Verification will happen within the application route (e.g., layout)
+    // try {
+    //     const tenant = await getTenantByDomain(subdomain); // This line caused the error
+    //     if (!tenant) { ... }
+    // } catch (error) { ... }
+    // ---- End Removed Section ----
 
     // Rewrite URL to include subdomain context for application routes
     // Example: Rewrite `subdomain.domain.com/dashboard` to `domain.com/[subdomain]/dashboard`
     const originalPath = url.pathname;
-    // Set a header to easily access the tenant ID/domain in API routes and server components
+    // Set a header to easily access the tenant domain in API routes and server components
     const requestHeaders = new Headers(request.headers);
-    requestHeaders.set('X-Tenant-Id', subdomain); // Set tenant identifier
+    // Set the *domain* not necessarily the ID. The application can resolve ID from domain later.
+    requestHeaders.set('X-Tenant-Domain', subdomain);
+
+    // The API route utility `getTenantId` will need to be updated to use X-Tenant-Domain
+    // and potentially resolve the ID from the domain if needed. For now, just pass the domain.
 
     url.pathname = `/${subdomain}${originalPath}`;
     console.log(`[Middleware] Rewriting ${hostname}${originalPath} to ${url.pathname}`);
