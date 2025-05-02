@@ -1,5 +1,5 @@
 import type { LeaveRequest, LeaveType, LeaveRequestStatus } from '@/modules/leave/types'; // Updated import
-import { getAllEmployees } from '@/modules/employees/actions'; // Updated import to use employee module action
+import { getEmployees } from '@/modules/employees/actions'; // Updated import to use employee module action
 
 // --- Mock Leave Types ---
 let leaveTypes: LeaveType[] = [
@@ -153,7 +153,8 @@ export function getLeaveRequestById(id: string): LeaveRequest | undefined {
 
 // Async function to get all employees - needed for adding request
 async function fetchAllEmployees() {
-  return await getAllEmployees();
+  // Use the correct imported function name
+  return await getEmployees();
 }
 
 // Function to add a new leave request - adjusted to be async
