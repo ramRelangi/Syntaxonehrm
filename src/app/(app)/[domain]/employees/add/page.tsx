@@ -2,17 +2,27 @@
 // src/app/(app)/[domain]/employees/add/page.tsx
 "use client"; // AddEmployeePage needs to be a client component to use the form
 
+import * as React from "react"; // Import React
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmployeeForm } from '@/modules/employees/components/employee-form';
 import { UserPlus } from "lucide-react";
-import { useParams } from 'next/navigation';
+import { useParams } from 'next/navigation'; // Import useParams
 
-interface AddEmployeePageProps {
-  params: { domain: string };
-}
+// Remove the interface and params prop, as we'll use the hook
+// interface AddEmployeePageProps {
+//   params: { domain: string };
+// }
 
-export default function TenantAddEmployeePage({ params }: AddEmployeePageProps) {
-  const tenantDomain = params.domain;
+export default function TenantAddEmployeePage() {
+  // Use the useParams hook to get route parameters
+  const params = useParams();
+  const tenantDomain = params.domain as string; // Cast to string as needed
+
+  // Handle cases where domain might not be available (though middleware should prevent this)
+  if (!tenantDomain) {
+    // Optionally show a loading state or error, though this page relies on the domain
+    return <p>Loading tenant information...</p>;
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -34,7 +44,7 @@ export default function TenantAddEmployeePage({ params }: AddEmployeePageProps) 
              formDescription="Enter the employee's information below."
              submitButtonText="Add Employee"
              // tenantId could be passed if needed, but action should derive it
-             // tenantId={tenantId} // Assuming you derive tenantId from domain
+             // Assuming the EmployeeForm or its underlying action can derive tenantId from context or session
            />
         </CardContent>
       </Card>
