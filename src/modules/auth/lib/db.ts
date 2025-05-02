@@ -14,6 +14,7 @@ function mapRowToTenant(row: any): Tenant {
 
 export async function addTenant(tenantData: Pick<Tenant, 'name' | 'domain'>): Promise<Tenant> {
     const client = await pool.connect();
+    console.log(`[DB addTenant] Attempting to add tenant: ${tenantData.name}, Domain: ${tenantData.domain}`);
     const query = `
         INSERT INTO tenants (name, domain)
         VALUES ($1, $2)
@@ -22,41 +23,53 @@ export async function addTenant(tenantData: Pick<Tenant, 'name' | 'domain'>): Pr
     const values = [tenantData.name, tenantData.domain.toLowerCase()];
     try {
         const res = await client.query(query, values);
-        return mapRowToTenant(res.rows[0]);
+        const tenant = mapRowToTenant(res.rows[0]);
+        console.log(`[DB addTenant] Tenant added successfully: ID ${tenant.id}`);
+        return tenant;
     } catch (err: any) {
-        console.error('Error adding tenant:', err);
+        console.error('[DB addTenant] Error adding tenant:', err);
         if (err.code === '23505' && err.constraint === 'tenants_domain_key') {
             throw new Error('Tenant domain already exists.');
         }
         throw err; // Re-throw other errors
     } finally {
         client.release();
+        console.log('[DB addTenant] Client released.');
     }
 }
 
 export async function getTenantById(id: string): Promise<Tenant | undefined> {
     const client = await pool.connect();
+    console.log(`[DB getTenantById] Fetching tenant with ID: ${id}`);
     try {
         const res = await client.query('SELECT * FROM tenants WHERE id = $1', [id]);
-        return res.rows.length > 0 ? mapRowToTenant(res.rows[0]) : undefined;
+        const tenant = res.rows.length > 0 ? mapRowToTenant(res.rows[0]) : undefined;
+        console.log(`[DB getTenantById] Tenant found: ${!!tenant}`);
+        return tenant;
     } catch (err) {
-        console.error(`Error fetching tenant ${id}:`, err);
+        console.error(`[DB getTenantById] Error fetching tenant ${id}:`, err);
         throw err;
     } finally {
         client.release();
+        console.log('[DB getTenantById] Client released.');
     }
 }
 
 export async function getTenantByDomain(domain: string): Promise<Tenant | undefined> {
     const client = await pool.connect();
+    const lowerCaseDomain = domain.toLowerCase();
+    console.log(`[DB getTenantByDomain] Fetching tenant with domain: ${lowerCaseDomain}`);
     try {
-        const res = await client.query('SELECT * FROM tenants WHERE domain = $1', [domain.toLowerCase()]);
-        return res.rows.length > 0 ? mapRowToTenant(res.rows[0]) : undefined;
+        const res = await client.query('SELECT * FROM tenants WHERE domain = $1', [lowerCaseDomain]);
+        const tenant = res.rows.length > 0 ? mapRowToTenant(res.rows[0]) : undefined;
+        console.log(`[DB getTenantByDomain] Tenant found: ${!!tenant}`);
+        return tenant;
     } catch (err) {
-        console.error(`Error fetching tenant by domain ${domain}:`, err);
+        console.error(`[DB getTenantByDomain] Error fetching tenant by domain ${lowerCaseDomain}:`, err);
         throw err;
     } finally {
         client.release();
+        console.log('[DB getTenantByDomain] Client released.');
     }
 }
 
@@ -78,6 +91,7 @@ function mapRowToUser(row: any): User {
 
 export async function addUser(userData: Omit<User, 'id' | 'createdAt'>): Promise<User> {
     const client = await pool.connect();
+    console.log(`[DB addUser] Attempting to add user: ${userData.email} for tenant ${userData.tenantId}`);
     const query = `
         INSERT INTO users (tenant_id, email, password_hash, name, role, is_active)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -93,9 +107,11 @@ export async function addUser(userData: Omit<User, 'id' | 'createdAt'>): Promise
     ];
     try {
         const res = await client.query(query, values);
-        return mapRowToUser(res.rows[0]);
+        const user = mapRowToUser(res.rows[0]);
+        console.log(`[DB addUser] User added successfully: ID ${user.id}`);
+        return user;
     } catch (err: any) {
-        console.error('Error adding user:', err);
+        console.error('[DB addUser] Error adding user:', err);
          if (err.code === '23505') { // Handle unique constraint violations
             if (err.constraint === 'users_email_key') { // Global email uniqueness
                  throw new Error('User email already exists.');
@@ -108,27 +124,34 @@ export async function addUser(userData: Omit<User, 'id' | 'createdAt'>): Promise
         throw err;
     } finally {
         client.release();
+        console.log('[DB addUser] Client released.');
     }
 }
 
 export async function getUserById(id: string): Promise<User | undefined> {
     const client = await pool.connect();
+     console.log(`[DB getUserById] Fetching user with ID: ${id}`);
     try {
         const res = await client.query('SELECT * FROM users WHERE id = $1', [id]);
-        return res.rows.length > 0 ? mapRowToUser(res.rows[0]) : undefined;
+        const user = res.rows.length > 0 ? mapRowToUser(res.rows[0]) : undefined;
+        console.log(`[DB getUserById] User found: ${!!user}`);
+        return user;
     } catch (err) {
-        console.error(`Error fetching user ${id}:`, err);
+        console.error(`[DB getUserById] Error fetching user ${id}:`, err);
         throw err;
     } finally {
         client.release();
+        console.log('[DB getUserById] Client released.');
     }
 }
 
 // Get user by email (globally, or filter by tenantId if needed)
 export async function getUserByEmail(email: string, tenantId?: string): Promise<User | undefined> {
     const client = await pool.connect();
+    const lowerCaseEmail = email.toLowerCase();
+    console.log(`[DB getUserByEmail] Fetching user with email: ${lowerCaseEmail}` + (tenantId ? ` for tenant ${tenantId}` : ' (globally)'));
     let query = 'SELECT * FROM users WHERE email = $1';
-    const values = [email.toLowerCase()];
+    const values = [lowerCaseEmail];
 
     if (tenantId) {
         query += ' AND tenant_id = $2';
@@ -137,12 +160,15 @@ export async function getUserByEmail(email: string, tenantId?: string): Promise<
 
     try {
         const res = await client.query(query, values);
-        return res.rows.length > 0 ? mapRowToUser(res.rows[0]) : undefined;
+        const user = res.rows.length > 0 ? mapRowToUser(res.rows[0]) : undefined;
+        console.log(`[DB getUserByEmail] User found: ${!!user}`);
+        return user;
     } catch (err) {
-        console.error(`Error fetching user by email ${email}:`, err);
+        console.error(`[DB getUserByEmail] Error fetching user by email ${lowerCaseEmail}:`, err);
         throw err;
     } finally {
         client.release();
+         console.log('[DB getUserByEmail] Client released.');
     }
 }
 

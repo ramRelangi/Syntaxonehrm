@@ -12,13 +12,15 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
-import { registrationSchema, type RegistrationFormData } from '@/modules/auth/types'; // Import schema and type
-import { registerTenantAction } from '@/modules/auth/actions'; // Import server action
+import { registrationSchema, type RegistrationFormData } from '@/modules/auth/types'; // Correct import
+import { registerTenantAction } from '@/modules/auth/actions'; // Correct import
 
 export default function RegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+
+  console.log("Rendering RegisterPage component"); // Debug log
 
   const form = useForm<RegistrationFormData>({
     resolver: zodResolver(registrationSchema),
@@ -33,11 +35,12 @@ export default function RegisterPage() {
 
   const onSubmit: SubmitHandler<RegistrationFormData> = async (data) => {
     setIsLoading(true);
-    console.log("Registration data:", data);
+    console.log("Registration form submitted with data:", data); // Debug log
 
     try {
         // Call the server action
         const result = await registerTenantAction(data);
+        console.log("Server action result:", result); // Debug log
 
         if (result.success && result.tenant) {
              toast({
@@ -49,6 +52,7 @@ export default function RegisterPage() {
              // No need to setIsLoading(false) as we navigate away
         } else {
             const errorMessage = result.errors?.[0]?.message || 'Registration failed. Please try again.';
+            console.error("Registration failed:", errorMessage, result.errors); // Debug log
             toast({
                 title: "Registration Failed",
                 description: errorMessage,
@@ -65,7 +69,7 @@ export default function RegisterPage() {
             }
         }
     } catch (error) {
-        console.error("Unexpected error during registration:", error);
+        console.error("Unexpected error during registration submission:", error); // Debug log
         toast({
             title: "Registration Error",
             description: "An unexpected error occurred. Please try again later.",
