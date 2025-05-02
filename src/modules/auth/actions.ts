@@ -6,7 +6,7 @@ import bcrypt from 'bcrypt';
 import nodemailer from 'nodemailer';
 import { registrationSchema, type RegistrationFormData, type Tenant, type User } from '@/modules/auth/types';
 import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db';
-import { testDbConnection } from '@/lib/db'; // Import only the test function
+import pool, { testDbConnection } from '@/lib/db'; // Import pool as default and test function
 import { getEmailSettings } from '@/modules/communication/lib/db'; // Import function to get settings
 import type { EmailSettings } from '@/modules/communication/types'; // Import EmailSettings type
 import { redirect } from 'next/navigation'; // Import redirect
@@ -56,7 +56,8 @@ async function sendWelcomeEmail(tenantId: string, adminName: string, adminEmail:
     try {
         // Fetch settings specific to the newly created tenant using tenantId
         console.log(`[sendWelcomeEmail] Fetching email settings from DB for tenant ${tenantId}...`);
-        settings = await getEmailSettings(tenantId); // Pass tenant ID
+        // Correctly call getEmailSettings with tenantId
+        settings = await getEmailSettings(tenantId);
 
         // Log retrieved settings (mask password)
         console.log('[sendWelcomeEmail] Retrieved settings:', settings ? JSON.stringify({ ...settings, smtpPassword: '***' }) : 'null');
@@ -79,7 +80,7 @@ async function sendWelcomeEmail(tenantId: string, adminName: string, adminEmail:
         const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app'; // Use configured root domain
         // Construct the subdomain URL
         const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-        const loginUrl = `${protocol}://${companyDomain}.${rootDomain}/login`; // Construct subdomain login URL
+        const loginUrl = `${protocol}://${companyDomain}.${rootDomain}`; // Construct subdomain login URL (point to root, middleware handles redirect)
         console.log(`[sendWelcomeEmail] Constructed Tenant Login URL: ${loginUrl}`);
 
         const mailOptions = {
@@ -144,16 +145,29 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
 
     // Ensure database schema is initialized before proceeding
     try {
+        console.log("[registerTenantAction] Verifying schema by checking 'tenants' table...");
         await pool.query('SELECT 1 FROM tenants LIMIT 1');
         console.log("[registerTenantAction] Database schema seems initialized (tenants table exists).");
     } catch (schemaError: any) {
+         console.error("[registerTenantAction] Error verifying schema:", schemaError); // Log the detailed error
         if (schemaError.code === '42P01') { // undefined_table
             console.error("[registerTenantAction] Database schema is not initialized. Relation 'tenants' does not exist.");
-            return { success: false, errors: [{ code: 'custom', path: ['root'], message: "Database schema is not initialized. Please run 'npm run db:init' and restart the server." }] };
+            // Instead of returning an error, try to initialize the schema
+            console.log("[registerTenantAction] Attempting to initialize database schema...");
+            try {
+                // Dynamically import and run the init script
+                const { initializeDatabase } = await import('@/lib/init-db');
+                await initializeDatabase();
+                console.log("[registerTenantAction] Database schema initialization successful.");
+            } catch (initError: any) {
+                console.error("[registerTenantAction] Failed to initialize database schema:", initError);
+                 const initErrorMessage = `Failed to initialize database schema: ${initError.message || 'Unknown initialization error'}. Please run 'npm run db:init' manually and restart the server.`;
+                 return { success: false, errors: [{ code: 'custom', path: ['root'], message: initErrorMessage }] };
+            }
+        } else {
+            // Handle other potential errors during schema check with more detail
+            return { success: false, errors: [{ code: 'custom', path: ['root'], message: `Failed to verify database schema. DB Error: ${schemaError.message || 'Unknown error'}` }] };
         }
-        // Handle other potential errors during check
-        console.error("[registerTenantAction] Error checking schema:", schemaError);
-        return { success: false, errors: [{ code: 'custom', path: ['root'], message: "Failed to verify database schema." }] };
     }
 
     try {
@@ -173,17 +187,16 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
 
 
         // 4. Check if admin email already exists WITHIN THIS TENANT
-        console.log(`[registerTenantAction] Checking if email '${adminEmail}' exists for tenant ${newTenant.id}...`);
-        const existingUser = await getUserByEmail(adminEmail, newTenant.id); // Pass tenant ID
-        if (existingUser) {
-            // This shouldn't happen if tenant creation was successful, but check defensively
-            console.warn(`[registerTenantAction] Email '${adminEmail}' already exists for tenant ${newTenant.id}.`);
-            // Handle potential cleanup or just error out
-             // Rollback tenant creation? For now, just error.
-             // await deleteTenant(newTenant.id); // Need a deleteTenant function
-            return { success: false, errors: [{ code: 'custom', path: ['adminEmail'], message: 'This email address is already in use for this company.' }] };
-        }
-        console.log(`[registerTenantAction] Email '${adminEmail}' is available for tenant ${newTenant.id}.`);
+        // This check is technically redundant now due to the UNIQUE constraint (tenant_id, email)
+        // but kept for logical flow clarity. The DB constraint is the ultimate guard.
+        // console.log(`[registerTenantAction] Checking if email '${adminEmail}' exists for tenant ${newTenant.id}...`);
+        // const existingUser = await getUserByEmail(adminEmail, newTenant.id); // Pass tenant ID
+        // if (existingUser) {
+        //     console.warn(`[registerTenantAction] Email '${adminEmail}' already exists for tenant ${newTenant.id}.`);
+        //     // Rollback tenant creation? For now, just error. DB constraint will likely catch this first in addUser.
+        //     return { success: false, errors: [{ code: 'custom', path: ['adminEmail'], message: 'This email address is already in use for this company.' }] };
+        // }
+        // console.log(`[registerTenantAction] Email '${adminEmail}' is available for tenant ${newTenant.id}.`);
 
 
         // 5. Hash the Admin Password
@@ -263,18 +276,13 @@ export async function logoutAction() {
       //   tenantDomain = session.user.tenantDomain;
       // }
 
-      // Option 2: Infer from request headers (less reliable, depends on proxy setup)
-      // This won't work correctly inside a server action without passing headers explicitly.
-      // const headersList = headers();
-      // const host = headersList.get('host') || '';
-      // const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app';
-      // const match = host.match(`^(.*)\\.${rootDomain}$`);
-      // tenantDomain = match ? match[1] : null;
-
-      // **For now, assume we can get the domain (replace this mock)**
-      // This is a temporary mock, replace with real logic
-      console.warn("[logoutAction] Using mock tenant domain for redirect. Implement session/user retrieval.");
-      tenantDomain = 'demo'; // MOCK - Replace with actual domain retrieval
+      // Option 2: Infer from request headers (less reliable, requires passing headers explicitly)
+      const headersList = headers();
+      const host = headersList.get('host') || '';
+      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app';
+      const match = host.match(`^(.*)\\.${rootDomain}$`);
+      tenantDomain = match ? match[1] : null;
+      console.log(`[logoutAction] Inferred tenant domain from host "${host}": ${tenantDomain}`);
 
   } catch (error) {
       console.error("[logoutAction] Error retrieving tenant domain for redirect:", error);
@@ -283,11 +291,11 @@ export async function logoutAction() {
   // --- Redirect Logic ---
   let redirectUrl = '/login'; // Default redirect to root login page
   if (tenantDomain) {
-      // Construct the tenant-specific login URL
+      // Construct the tenant-specific login URL (subdomain root)
       const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app';
       const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}/login`;
-      console.log(`[logoutAction] Redirecting to tenant login: ${redirectUrl}`);
+      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}`; // Redirect to subdomain root
+      console.log(`[logoutAction] Redirecting to tenant root: ${redirectUrl}`);
   } else {
        console.log(`[logoutAction] Tenant domain not found, redirecting to root login: ${redirectUrl}`);
   }

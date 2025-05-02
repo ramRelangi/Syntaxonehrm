@@ -320,7 +320,7 @@ SELECT 'All triggers checked/applied.';
 
 `;
 
-async function initializeDatabase() {
+export async function initializeDatabase() {
   let client;
   try {
     console.log('Attempting to connect to database for schema initialization...');
@@ -333,18 +333,27 @@ async function initializeDatabase() {
     console.error('Error during database schema initialization:', err.message);
     console.error('Stack:', err.stack);
     console.error('-----------------------------------------');
-    // Exit process with error if initialization fails
-    process.exit(1);
+    // Re-throw the error so it can be caught by the caller (e.g., registerTenantAction)
+    throw err;
   } finally {
     if (client) {
       await client.release();
       console.log('Database client released after schema initialization.');
     }
-    // Ensure the pool is closed after initialization to allow the script to exit
-    await pool.end();
-    console.log('Database pool closed after schema initialization.');
+    // Do NOT close the pool here if it's meant to be reused by the application
+    // await pool.end();
+    // console.log('Database pool closed after schema initialization.');
   }
 }
 
-// Run the initialization
-initializeDatabase();
+// Check if the script is being run directly (e.g., `npm run db:init`)
+if (require.main === module) {
+  initializeDatabase().then(() => {
+    console.log("Manual DB initialization complete.");
+    pool.end(() => console.log('Database pool closed after manual initialization.')); // Close pool when run manually
+  }).catch(err => {
+    console.error("Manual DB initialization failed:", err);
+    pool.end(() => console.log('Database pool closed after failed manual initialization.')); // Close pool on manual failure
+    process.exit(1);
+  });
+}
