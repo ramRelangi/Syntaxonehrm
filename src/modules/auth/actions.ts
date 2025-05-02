@@ -1,3 +1,4 @@
+
 'use server';
 
 import { z } from 'zod';
@@ -8,6 +9,7 @@ import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules
 import { testDbConnection } from '@/lib/db'; // Import only the test function
 import { getEmailSettings } from '@/modules/communication/lib/db'; // Import function to get settings
 import type { EmailSettings } from '@/modules/communication/types'; // Import EmailSettings type
+import { redirect } from 'next/navigation'; // Import redirect
 
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
 
@@ -200,7 +202,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.error("[registerTenantAction] Error during tenant registration:", error);
          let errorMessage = error.message || 'Failed to register tenant due to a server error.';
 
-         // Refine error message for missing tables
+         // Refine error message for missing tables or other DB issues
          if (error.code === '42P01' || error.message?.includes('relation') && error.message?.includes('does not exist')) {
              const relationMatch = error.message?.match(/relation "([^"]+)" does not exist/);
              const missingTable = relationMatch ? relationMatch[1] : 'required tables';
@@ -219,6 +221,19 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         return { success: false, errors: [{ code: 'custom', path: ['root'], message: errorMessage }] };
     }
 }
+
+// Simple Logout Action
+export async function logoutAction() {
+  // 'use server'; // Indicate this is a server action
+  console.log("[logoutAction] Logging out user...");
+  // In a real app, you would clear the session/cookie here.
+  // For example, if using next-auth: await signOut();
+  // If using custom session management: destroy session cookie
+
+  // Redirect to login page after clearing session
+  redirect('/login');
+}
+
 
 // Placeholder for Login action (to be implemented)
 // export async function loginAction(...) { ... }

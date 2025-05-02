@@ -2,7 +2,7 @@
 'use client'; // Add 'use client' directive
 
 import * as React from 'react';
-import { usePathname } from 'next/navigation'; // Import usePathname
+import { usePathname, useRouter } from 'next/navigation'; // Import usePathname and useRouter
 import {
   Sidebar,
   SidebarContent,
@@ -19,6 +19,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Home, Users, FileText, Briefcase, Calendar, BarChart2, LogOut, UploadCloud, Settings, Mail } from 'lucide-react'; // Added Mail icon
 import Link from 'next/link';
 import Image from 'next/image';
+import { logoutAction } from '@/modules/auth/actions'; // Import the logout action
+import { useToast } from '@/hooks/use-toast'; // Import useToast for feedback
 
 // Mock user data - replace with actual session/auth data
 const user = {
@@ -43,6 +45,22 @@ const navItems = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname(); // Get current path
+  const router = useRouter();
+  const { toast } = useToast();
+
+  const handleLogout = async () => {
+    try {
+      await logoutAction();
+       toast({ title: "Logged Out", description: "You have been successfully logged out." });
+       // Redirect happens inside the action, but good practice to handle client-side too
+       router.push('/login');
+       router.refresh(); // Ensure page refresh after logout
+    } catch (error) {
+       console.error("Logout failed:", error);
+       toast({ title: "Logout Failed", description: "Could not log out. Please try again.", variant: "destructive" });
+    }
+  };
+
 
   return (
     <div className="flex min-h-screen">
@@ -103,8 +121,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                          </SidebarMenuButton>
                       </SidebarMenuItem>
                       <SidebarMenuItem>
-                         {/* In real app, this button would trigger logout logic */}
-                          <SidebarMenuButton tooltip="Logout" className="text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/20">
+                          {/* Attach the handleLogout function to onClick */}
+                          <SidebarMenuButton
+                             tooltip="Logout"
+                             className="text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/20"
+                             onClick={handleLogout}
+                          >
                              <LogOut className="h-5 w-5"/>
                              <span>Logout</span>
                           </SidebarMenuButton>
