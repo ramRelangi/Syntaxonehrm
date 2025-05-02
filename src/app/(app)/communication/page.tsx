@@ -119,10 +119,10 @@ export default function CommunicationPage() {
       </div>
 
       <Tabs defaultValue="templates" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 md:grid-cols-3"> {/* Adjust grid cols as needed */}
+          <TabsList className="grid w-full grid-cols-3"> {/* Adjusted grid cols */}
               <TabsTrigger value="templates">Email Templates</TabsTrigger>
-              <TabsTrigger value="send" disabled>Send Email</TabsTrigger> {/* Placeholder */}
-              <TabsTrigger value="settings" disabled>Settings</TabsTrigger> {/* Placeholder */}
+              <TabsTrigger value="send" disabled>Send Email</TabsTrigger> {/* Ensured disabled */}
+              <TabsTrigger value="settings" disabled>Settings</TabsTrigger> {/* Ensured disabled */}
           </TabsList>
 
           {/* Email Templates Tab */}
