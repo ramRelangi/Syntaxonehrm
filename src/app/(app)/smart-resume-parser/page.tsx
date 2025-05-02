@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { parseResume, ParseResumeOutput } from '@/ai/flows/smart-resume-parser';
+import { parseResume, ParseResumeOutput } from '@/modules/ai/flows/smart-resume-parser'; // Updated import path
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";

@@ -1,11 +1,12 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { getEmployeeById } from '@/actions/employee-actions';
+import { getEmployeeById } from '@/modules/employees/actions'; // Updated import path
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { User, Mail, Phone, Briefcase, Building, Calendar, Activity, Pencil, ArrowLeft } from 'lucide-react';
 import { Badge } from "@/components/ui/badge";
 import { format, parseISO } from 'date-fns'; // For date formatting
+import type { Employee } from '@/modules/employees/types'; // Updated import path
 
 interface EmployeeDetailPageProps {
   params: { id: string };
@@ -24,18 +25,6 @@ const getStatusVariant = (status: Employee['status']): "default" | "secondary" |
       return 'outline';
   }
 };
-
-// Define Employee type locally or import if available globally
-interface Employee {
-  id: string;
-  name: string;
-  email: string;
-  phone?: string;
-  position: string;
-  department: string;
-  hireDate: string;
-  status: 'Active' | 'Inactive' | 'On Leave';
-}
 
 
 export default async function EmployeeDetailPage({ params }: EmployeeDetailPageProps) {

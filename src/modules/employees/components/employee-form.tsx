@@ -4,8 +4,8 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
-import { employeeSchema, type EmployeeFormData } from '@/types/employee'; // Updated import path
-import type { Employee } from '@/types/employee';
+import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types'; // Updated import path
+import type { Employee } from '@/modules/employees/types'; // Updated import path
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

@@ -1,8 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { EmployeeForm } from '@/components/features/employees/employee-form';
-import { getEmployeeById, updateEmployee } from '@/actions/employee-actions';
+import { EmployeeForm } from '@/modules/employees/components/employee-form'; // Updated import path
+import { getEmployeeById, updateEmployee } from '@/modules/employees/actions'; // Updated import path
 import { notFound } from 'next/navigation';
 import { Pencil } from "lucide-react";
+import type { Employee } from '@/modules/employees/types'; // Import Employee type locally for the page
 
 interface EditEmployeePageProps {
   params: { id: string };

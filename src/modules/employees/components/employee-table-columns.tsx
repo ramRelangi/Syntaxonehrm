@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import type { Employee } from "@/types/employee";
+import type { Employee } from "@/modules/employees/types"; // Updated import path
 import { Button } from "@/components/ui/button";
 import { ArrowUpDown, MoreHorizontal, Pencil, Trash2, Eye } from "lucide-react";
 import {
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import { deleteEmployeeAction } from '@/actions/employee-actions';
+import { deleteEmployeeAction } from '@/modules/employees/actions'; // Updated import path
 import { useToast } from '@/hooks/use-toast';
 import {
   AlertDialog,

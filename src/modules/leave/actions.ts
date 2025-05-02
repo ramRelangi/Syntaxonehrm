@@ -1,8 +1,7 @@
-
 'use server';
 
-import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus } from '@/types/leave';
-import { leaveRequestSchema } from '@/types/leave';
+import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus } from '@/modules/leave/types'; // Updated import
+import { leaveRequestSchema } from '@/modules/leave/types'; // Updated import
 import {
   getAllLeaveRequests as dbGetAllLeaveRequests,
   getLeaveRequestById as dbGetLeaveRequestById,
@@ -15,7 +14,7 @@ import {
   updateLeaveType as dbUpdateLeaveType,
   deleteLeaveType as dbDeleteLeaveType,
   getLeaveBalancesForEmployee as dbGetLeaveBalances,
-} from '@/lib/leave-mock-db';
+} from '@/modules/leave/lib/mock-db'; // Updated import
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { differenceInDays } from 'date-fns';

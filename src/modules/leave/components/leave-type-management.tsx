@@ -1,16 +1,15 @@
-
 "use client";
 
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import type { LeaveType } from '@/types/leave';
+import type { LeaveType } from '@/modules/leave/types'; // Updated import path
 import {
   addLeaveTypeAction,
   updateLeaveTypeAction,
   deleteLeaveTypeAction,
-} from '@/actions/leave-actions';
+} from '@/modules/leave/actions'; // Updated import path
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,7 +38,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  DialogClose, // Import DialogClose
+  DialogClose,
 } from '@/components/ui/dialog';
 import {
   AlertDialog,
@@ -52,7 +51,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'; // Added FormDescription
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form';
 import { PlusCircle, Edit, Trash2, Loader2, Save } from 'lucide-react';
 
 // --- Zod Schema for Leave Type Form ---

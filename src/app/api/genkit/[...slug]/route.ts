@@ -5,7 +5,7 @@ import { defineFlow } from "genkit";
 import { z } from "zod";
 import { handleRequest } from "@genkit-ai/next";
 
-import '@/ai/flows/smart-resume-parser'; // Ensure your flows are imported
+import '@/modules/ai/flows/smart-resume-parser'; // Ensure your flows are imported from the module
 
 export const config = {
   runtime: 'edge', // Specify the runtime environment

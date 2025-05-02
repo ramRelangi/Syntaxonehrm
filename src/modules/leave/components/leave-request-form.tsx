@@ -1,11 +1,10 @@
-
 "use client";
 
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
-import { leaveRequestSchema, type LeaveRequestFormData, type LeaveType } from '@/types/leave';
+import { leaveRequestSchema, type LeaveRequestFormData, type LeaveType } from '@/modules/leave/types'; // Updated import path
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input"; // Not used directly, but kept for consistency
 import { Label } from "@/components/ui/label";

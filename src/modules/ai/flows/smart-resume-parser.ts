@@ -8,7 +8,7 @@
  * - ParseResumeOutput - The return type for the parseResume function.
  */
 
-import {ai} from '@/ai/ai-instance';
+import {ai} from '@/modules/ai/lib/ai-instance'; // Updated import path
 import {z} from 'genkit';
 
 const ParseResumeInputSchema = z.object({

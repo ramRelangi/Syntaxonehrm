@@ -1,14 +1,14 @@
 'use server';
 
-import type { Employee } from '@/types/employee';
-import { employeeSchema, type EmployeeFormData } from '@/types/employee'; // Import from types
+import type { Employee } from '@/modules/employees/types'; // Updated import path
+import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types'; // Updated import path
 import {
   getAllEmployees as dbGetAllEmployees,
   getEmployeeById as dbGetEmployeeById,
   addEmployee as dbAddEmployee,
   updateEmployee as dbUpdateEmployee,
   deleteEmployee as dbDeleteEmployee,
-} from '@/lib/employee-mock-db';
+} from '@/modules/employees/lib/mock-db'; // Updated import path
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 

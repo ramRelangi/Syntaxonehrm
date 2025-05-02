@@ -1,9 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Users, UserPlus } from "lucide-react";
-import { getEmployees } from '@/actions/employee-actions';
-import { EmployeeDataTable } from '@/components/features/employees/employee-data-table';
-import { columns } from '@/components/features/employees/employee-table-columns';
+import { getEmployees } from '@/modules/employees/actions'; // Updated import path
+import { EmployeeDataTable } from '@/modules/employees/components/employee-data-table'; // Updated import path
+import { columns } from '@/modules/employees/components/employee-table-columns'; // Updated import path
 import Link from "next/link";
 
 export default async function EmployeesPage() {

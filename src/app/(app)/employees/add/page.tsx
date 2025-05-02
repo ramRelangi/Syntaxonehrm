@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { EmployeeForm } from '@/components/features/employees/employee-form';
-import { addEmployee } from '@/actions/employee-actions';
+import { EmployeeForm } from '@/modules/employees/components/employee-form'; // Updated import path
+import { addEmployee } from '@/modules/employees/actions'; // Updated import path
 import { UserPlus } from "lucide-react";
 
 export default function AddEmployeePage() {

@@ -1,6 +1,5 @@
-
-import type { LeaveRequest, LeaveType, LeaveRequestStatus } from '@/types/leave';
-import { getAllEmployees } from './employee-mock-db'; // To link employees
+import type { LeaveRequest, LeaveType, LeaveRequestStatus } from '@/modules/leave/types'; // Updated import
+import { getAllEmployees } from '@/modules/employees/actions'; // Updated import to use employee module action
 
 // --- Mock Leave Types ---
 let leaveTypes: LeaveType[] = [
@@ -36,7 +35,7 @@ export function addLeaveType(typeData: Omit<LeaveType, 'id'>): LeaveType {
   };
   leaveTypes.push(newType);
   // When adding a new type, potentially initialize balances for existing employees?
-  // initializeBalancesForNewType(newId, newType.defaultBalance); // See below
+  initializeBalancesForNewType(newId, newType.defaultBalance ?? 0); // Pass defaultBalance
   return JSON.parse(JSON.stringify(newType));
 }
 
@@ -62,6 +61,8 @@ export function deleteLeaveType(id: string): boolean {
 
   if (index !== -1) {
     leaveTypes.splice(index, 1);
+    // Also remove corresponding balances
+    leaveBalances = leaveBalances.filter(bal => bal.leaveTypeId !== id);
     return true;
   }
   return false;
@@ -150,10 +151,16 @@ export function getLeaveRequestById(id: string): LeaveRequest | undefined {
    return request ? JSON.parse(JSON.stringify(request)) : undefined;
 }
 
-// Function to add a new leave request
-export function addLeaveRequest(requestData: Omit<LeaveRequest, 'id' | 'requestDate' | 'status' | 'leaveTypeName' | 'employeeName'>): LeaveRequest {
+// Async function to get all employees - needed for adding request
+async function fetchAllEmployees() {
+  return await getAllEmployees();
+}
+
+// Function to add a new leave request - adjusted to be async
+export async function addLeaveRequest(requestData: Omit<LeaveRequest, 'id' | 'requestDate' | 'status' | 'leaveTypeName' | 'employeeName'>): Promise<LeaveRequest> {
+  const allEmployees = await fetchAllEmployees(); // Fetch employees asynchronously
   const newId = `lr-${String(leaveRequests.length + 1).padStart(3, '0')}`;
-  const employee = getAllEmployees().find(emp => emp.id === requestData.employeeId);
+  const employee = allEmployees.find(emp => emp.id === requestData.employeeId);
   const leaveType = getLeaveTypeById(requestData.leaveTypeId);
 
   if (!employee || !leaveType) {
@@ -172,6 +179,7 @@ export function addLeaveRequest(requestData: Omit<LeaveRequest, 'id' | 'requestD
   // TODO: If auto-approved, deduct balance immediately? Or on approval for Pending?
   return JSON.parse(JSON.stringify(newRequest));
 }
+
 
 // Function to update a leave request (e.g., change status)
 export function updateLeaveRequest(id: string, updates: Partial<Omit<LeaveRequest, 'id' | 'employeeId' | 'leaveTypeId' | 'requestDate'>>): LeaveRequest | undefined {
@@ -225,19 +233,28 @@ export function deleteLeaveRequest(id: string): boolean {
 // Initialize balances based on default values from leave types
 let leaveBalances: { employeeId: string; leaveTypeId: string; balance: number }[] = [];
 
-function initializeEmployeeBalances(employeeId: string) {
-  leaveTypes.forEach(lt => {
+// Make initialization async to handle employee fetching
+async function initializeEmployeeBalances(employeeId: string) {
+  const currentLeaveTypes = getAllLeaveTypes(); // Get current types
+  currentLeaveTypes.forEach(lt => {
     if (!leaveBalances.some(b => b.employeeId === employeeId && b.leaveTypeId === lt.id)) {
         leaveBalances.push({ employeeId, leaveTypeId: lt.id, balance: lt.defaultBalance ?? 0 });
     }
   });
 }
-// Initialize for existing employees
-getAllEmployees().forEach(emp => initializeEmployeeBalances(emp.id));
+
+// Initialize for existing employees asynchronously
+async function initializeAllBalances() {
+  const allEmployees = await fetchAllEmployees();
+  allEmployees.forEach(emp => initializeEmployeeBalances(emp.id));
+}
+initializeAllBalances(); // Call async initialization
+
 
 // Helper to initialize balances for a newly added leave type across all employees
-function initializeBalancesForNewType(leaveTypeId: string, defaultBalance: number) {
-  getAllEmployees().forEach(emp => {
+async function initializeBalancesForNewType(leaveTypeId: string, defaultBalance: number) {
+  const allEmployees = await fetchAllEmployees();
+  allEmployees.forEach(emp => {
      if (!leaveBalances.some(b => b.employeeId === emp.id && b.leaveTypeId === leaveTypeId)) {
          leaveBalances.push({ employeeId: emp.id, leaveTypeId, balance: defaultBalance });
      }
@@ -245,9 +262,9 @@ function initializeBalancesForNewType(leaveTypeId: string, defaultBalance: numbe
 }
 
 
-export function getLeaveBalancesForEmployee(employeeId: string) {
+export async function getLeaveBalancesForEmployee(employeeId: string) {
     // Ensure balances are initialized for the employee if they somehow weren't
-    initializeEmployeeBalances(employeeId);
+    await initializeEmployeeBalances(employeeId); // Make sure initialization is awaited
     return JSON.parse(JSON.stringify(leaveBalances.filter(bal => bal.employeeId === employeeId)));
 }
 
@@ -267,10 +284,12 @@ function adjustLeaveBalance(employeeId: string, leaveTypeId: string, amount: num
 
 // Note: Functions for accrual logic (e.g., running a monthly job) would be needed.
 // Placeholder for accrual - in real app, run this periodically
-function runMonthlyAccrual() {
+async function runMonthlyAccrual() {
   console.log("Running monthly leave accrual...");
-  getAllEmployees().forEach(emp => {
-    leaveTypes.forEach(lt => {
+  const allEmployees = await fetchAllEmployees();
+  const currentLeaveTypes = getAllLeaveTypes();
+  allEmployees.forEach(emp => {
+    currentLeaveTypes.forEach(lt => {
       if (lt.accrualRate && lt.accrualRate > 0) {
         adjustLeaveBalance(emp.id, lt.id, lt.accrualRate);
       }

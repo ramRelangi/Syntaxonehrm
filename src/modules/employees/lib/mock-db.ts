@@ -1,4 +1,4 @@
-import type { Employee } from '@/types/employee';
+import type { Employee } from '@/modules/employees/types'; // Updated import path
 
 // Simple in-memory store for employees
 let employees: Employee[] = [

@@ -1,8 +1,7 @@
-
 "use client";
 
 import * as React from "react";
-import type { LeaveRequest, LeaveRequestStatus, LeaveType } from "@/types/leave"; // Import LeaveType
+import type { LeaveRequest, LeaveRequestStatus, LeaveType } from "@/modules/leave/types"; // Updated import
 import { format, parseISO } from 'date-fns';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,7 +20,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { updateLeaveRequestStatus, cancelLeaveRequest } from "@/actions/leave-actions"; // Import actions
+import { updateLeaveRequestStatus, cancelLeaveRequest } from "@/modules/leave/actions"; // Updated import path
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 

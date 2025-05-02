@@ -1,4 +1,3 @@
-
 import { z } from 'zod';
 
 // --- Leave Type ---
@@ -52,5 +51,3 @@ export interface LeaveBalance {
     balance: number; // e.g., number of days or hours
     lastUpdated: string; // ISO string
 }
-    
-    

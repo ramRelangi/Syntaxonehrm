@@ -1,10 +1,9 @@
-
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Users, Briefcase, FileText, Calendar, BarChart2, UploadCloud } from "lucide-react";
 import Link from "next/link";
-import { getEmployees } from "@/actions/employee-actions"; // Example action
-import { getLeaveRequests } from "@/actions/leave-actions"; // Import leave action
+import { getEmployees } from "@/modules/employees/actions"; // Updated import path
+import { getLeaveRequests } from "@/modules/leave/actions"; // Updated import path
 import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 

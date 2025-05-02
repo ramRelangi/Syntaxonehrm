@@ -1,12 +1,11 @@
-
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar, PlusCircle, ListChecks, Settings } from "lucide-react";
-import { LeaveRequestForm } from "@/components/features/leave/leave-request-form";
-import { LeaveRequestList } from "@/components/features/leave/leave-request-list";
-import { getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances, addLeaveRequest } from "@/actions/leave-actions";
+import { LeaveRequestForm } from "@/modules/leave/components/leave-request-form"; // Updated import
+import { LeaveRequestList } from "@/modules/leave/components/leave-request-list"; // Updated import
+import { getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances, addLeaveRequest } from "@/modules/leave/actions"; // Updated import
 import { Badge } from "@/components/ui/badge";
-import { LeaveTypeManagement } from "@/components/features/leave/leave-type-management"; // Corrected import path
+import { LeaveTypeManagement } from "@/modules/leave/components/leave-type-management"; // Updated import path
 
 // Mock current user ID and admin status - replace with actual auth context
 const MOCK_USER_ID = "emp-001"; // Example: Alice Wonderland
@@ -124,5 +123,3 @@ export default async function LeavePage() {
     </div>
   );
 }
-    
-    

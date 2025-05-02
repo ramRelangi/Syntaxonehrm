@@ -31,11 +31,11 @@ import {
   DropdownMenuTrigger,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuItem, // Added import
+  DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { ChevronDown, Search, Filter } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import type { Employee } from "@/types/employee"; // Import Employee type
+import type { Employee } from "@/modules/employees/types"; // Updated import path
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
