@@ -30,7 +30,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
       smtpPort: 587, // Common default for TLS
       smtpUser: '',
       smtpPassword: '',
-      smtpSecure: true,
+      smtpSecure: true, // Often true for 587 (STARTTLS), but depends on provider. Check provider docs.
       fromEmail: '',
       fromName: '',
     },
@@ -100,6 +100,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
       const result = await response.json();
 
       if (!response.ok) {
+        // Use the detailed message from the API response
         throw new Error(result.message || result.error || `Test failed. Status: ${response.status}`);
       }
 
@@ -113,8 +114,10 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
       console.error("Test connection error:", error);
       toast({
         title: "Connection Failed",
-        description: `Could not connect to SMTP server: ${error.message}`,
+        // Display the detailed error message from the API or the caught error
+        description: error.message || "Could not connect to SMTP server.",
         variant: "destructive",
+        duration: 8000, // Show error for longer
       });
     } finally {
       setIsLoadingTest(false);
@@ -204,9 +207,9 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
             render={({ field }) => (
             <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
                 <div className="space-y-0.5">
-                <FormLabel>Use TLS/SSL</FormLabel>
+                <FormLabel>Use Encryption (TLS/SSL)</FormLabel>
                 <FormDescription>
-                    Enable secure connection (Recommended). Usually used with port 587 (TLS) or 465 (SSL).
+                    Enable secure connection. Usually `true` for port 587 (STARTTLS) or 465 (SSL). Check provider docs.
                 </FormDescription>
                 </div>
                 <FormControl>
