@@ -2,16 +2,17 @@ import { Pool } from 'pg';
 
 // Ensure environment variables are loaded
 // DB_PORT is made optional as it has a default fallback
-// DB_PASSWORD is changed to DB_PASS to match user's .env
 const requiredEnvVars = ['DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME'];
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
 if (missingEnvVars.length > 0) {
-    console.error(`FATAL ERROR: Missing required database environment variables: ${missingEnvVars.join(', ')}`);
+    const errorMessage = `Missing required database environment variables: ${missingEnvVars.join(', ')}. Please ensure they are set in your .env file and the server has been restarted.`;
+    console.error(`FATAL ERROR: ${errorMessage}`);
     // In a real app, you might want to throw an error or exit,
     // but for Next.js build process, console error might be better initially.
     // process.exit(1); // Exit if critical env vars are missing
-    throw new Error(`Missing required database environment variables: ${missingEnvVars.join(', ')}`);
+    // Throwing the error is correct to prevent proceeding without config.
+    throw new Error(errorMessage);
 }
 
 let pool: Pool;
