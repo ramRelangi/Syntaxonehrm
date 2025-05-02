@@ -4,7 +4,7 @@
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation'; // Keep useRouter if needed elsewhere, but remove usage for cancel
 import { jobPostingSchema, type JobPostingFormData, type JobPosting, jobPostingStatusSchema } from '@/modules/recruitment/types';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,8 +15,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, CalendarIcon, Save, PlusCircle, Trash2 } from 'lucide-react';
-import { format, parseISO, isValid } from 'date-fns';
+import { format, parseISO, isValid, formatISO } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { DialogClose } from '@/components/ui/dialog'; // Import DialogClose
 
 interface JobPostingFormProps {
   jobPosting?: JobPosting; // Optional data for editing
@@ -24,7 +25,7 @@ interface JobPostingFormProps {
 }
 
 export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
-  const router = useRouter();
+  const router = useRouter(); // Keep router if potentially needed for other actions
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
   const [closingDatePickerOpen, setClosingDatePickerOpen] = React.useState(false);
@@ -59,14 +60,15 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
 
    const onSubmit = async (data: JobPostingFormData) => {
     setIsLoading(true);
-    const apiUrl = isEditMode ? `/api/recruitment/postings/${jobPosting.id}` : '/api/recruitment/postings';
+    const apiUrl = isEditMode ? `/api/recruitment/postings/${jobPosting!.id}` : '/api/recruitment/postings';
     const method = isEditMode ? 'PUT' : 'POST';
 
-    // Format closing date back to ISO string if present
-    const payload = {
-        ...data,
-        closingDate: data.closingDate ? formatISO(new Date(data.closingDate)) : undefined,
-    };
+    // Format closing date back to ISO string if present and valid
+     const payload = {
+         ...data,
+         closingDate: data.closingDate && isValid(parseISO(data.closingDate)) ? formatISO(parseISO(data.closingDate)) : undefined,
+     };
+
 
     try {
         const response = await fetch(apiUrl, {
@@ -263,9 +265,12 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
 
 
         <div className="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="outline" onClick={() => router.back()} disabled={isLoading}>
-            Cancel
-          </Button>
+           {/* Use DialogClose for the Cancel button */}
+          <DialogClose asChild>
+              <Button type="button" variant="outline" disabled={isLoading}>
+                Cancel
+              </Button>
+          </DialogClose>
           <Button type="submit" disabled={isLoading || !form.formState.isValid}>
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
