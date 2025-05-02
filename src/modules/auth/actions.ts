@@ -6,7 +6,7 @@ import bcrypt from 'bcrypt';
 import nodemailer from 'nodemailer';
 import { registrationSchema, type RegistrationFormData, type Tenant, type User } from '@/modules/auth/types';
 import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db';
-import pool, { testDbConnection } from '@/lib/db'; // Import pool as default and test function
+import pool, { testDbConnection } from '@/lib/db'; // Import default pool and test function
 import { getEmailSettings, updateEmailSettings } from '@/modules/communication/lib/db'; // Import function to get settings
 import type { EmailSettings } from '@/modules/communication/types'; // Import EmailSettings type
 import { redirect } from 'next/navigation'; // Import redirect
@@ -57,8 +57,8 @@ async function sendWelcomeEmail(tenantId: string, adminName: string, adminEmail:
     try {
         // Fetch settings specific to the newly created tenant using tenantId
         console.log(`[sendWelcomeEmail] Fetching email settings from DB for tenant ${tenantId}...`);
-        // Correctly call getEmailSettings with tenantId
-        settings = await getEmailSettings(tenantId);
+        // Use the DB function directly, passing tenantId
+        settings = await getEmailSettings(tenantId); // Pass tenantId here
 
         // Log retrieved settings (mask password)
         console.log('[sendWelcomeEmail] Retrieved settings:', settings ? JSON.stringify({ ...settings, smtpPassword: '***' }) : 'null');
@@ -68,7 +68,7 @@ async function sendWelcomeEmail(tenantId: string, adminName: string, adminEmail:
 
         if (!isSettingsValid) {
             console.error('[sendWelcomeEmail] Email settings are incomplete or not configured in DB for this tenant. Cannot send welcome email.');
-            // TODO: Optionally, send a fallback email from a central address here
+            // Optionally, send a fallback email from a central address here
             return false; // Indicate failure to send
         }
         console.log('[sendWelcomeEmail] Email settings validated.');
@@ -228,7 +228,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
              smtpPort: 587,
              smtpUser: 'user@example.com',
              smtpPassword: '', // Should be encrypted if set, leave empty for user to set
-             smtpSecure: true,
+             smtpSecure: true, // Default to true, common for 587 (STARTTLS) and 465 (SSL)
              fromEmail: `noreply@${lowerCaseDomain}.syntaxhivehrm.app`, // Placeholder
              fromName: `${companyName} (SyntaxHive Hrm)`,
          };
