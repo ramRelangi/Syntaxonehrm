@@ -16,7 +16,7 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Home, Users, FileText, Briefcase, Calendar, BarChart2, LogOut, UploadCloud, Settings } from 'lucide-react';
+import { Home, Users, FileText, Briefcase, Calendar, BarChart2, LogOut, UploadCloud, Settings, Mail } from 'lucide-react'; // Added Mail icon
 import Link from 'next/link';
 import Image from 'next/image';
 
@@ -37,6 +37,7 @@ const navItems = [
   { href: '/leave', label: 'Leave', icon: Calendar }, // Added Leave
   { href: '/documents', label: 'Documents', icon: FileText }, // Using FileText for Documents
   { href: '/reports', label: 'Reports', icon: BarChart2 }, // Added Reports
+  { href: '/communication', label: 'Communication', icon: Mail }, // Added Communication
   { href: '/smart-resume-parser', label: 'Resume Parser', icon: UploadCloud },
 ];
 
@@ -128,5 +129,3 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-    
