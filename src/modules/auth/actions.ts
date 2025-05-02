@@ -1,4 +1,3 @@
-
 'use server';
 
 import { z } from 'zod';
@@ -146,24 +145,17 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     const lowerCaseDomain = companyDomain.toLowerCase();
 
     // 2. Ensure database schema is initialized before proceeding
+    let schemaInitialized = false;
     try {
         console.log("[registerTenantAction] Verifying schema by checking 'tenants' table...");
         await pool.query('SELECT 1 FROM tenants LIMIT 1');
         console.log("[registerTenantAction] Database schema seems initialized (tenants table exists).");
+        schemaInitialized = true;
     } catch (schemaError: any) {
          console.error("[registerTenantAction] Error verifying schema:", schemaError); // Log the detailed error
         if (schemaError.code === '42P01') { // undefined_table
-            console.error("[registerTenantAction] Database schema is not initialized. Relation 'tenants' does not exist.");
-            // Instead of returning an error, try to initialize the schema
-            console.log("[registerTenantAction] Attempting to initialize database schema...");
-            try {
-                await initializeDatabase();
-                console.log("[registerTenantAction] Database schema initialization successful.");
-            } catch (initError: any) {
-                console.error("[registerTenantAction] Failed to initialize database schema:", initError);
-                 const initErrorMessage = `Failed to initialize database schema: ${initError.message || 'Unknown initialization error'}. Please run 'npm run db:init' manually and restart the server.`;
-                 return { success: false, errors: [{ code: 'custom', path: ['root'], message: initErrorMessage }] };
-            }
+            console.warn("[registerTenantAction] Database schema is not initialized. Relation 'tenants' does not exist.");
+            // Schema is not initialized, proceed to initialize it
         } else {
             // Handle other potential errors during schema check with more detail
             const verifyErrorMessage = `Failed to verify database schema. DB Error: ${schemaError.message || 'Unknown error'}`;
@@ -171,6 +163,20 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
             return { success: false, errors: [{ code: 'custom', path: ['root'], message: verifyErrorMessage }] };
         }
     }
+
+    // Initialize schema if it wasn't found
+    if (!schemaInitialized) {
+        console.log("[registerTenantAction] Attempting to initialize database schema...");
+        try {
+            await initializeDatabase();
+            console.log("[registerTenantAction] Database schema initialization successful.");
+        } catch (initError: any) {
+            console.error("[registerTenantAction] Failed to initialize database schema:", initError);
+             const initErrorMessage = `Failed to initialize database schema: ${initError.message || 'Unknown initialization error'}. Please run 'npm run db:init' manually and restart the server.`;
+             return { success: false, errors: [{ code: 'custom', path: ['root'], message: initErrorMessage }] };
+        }
+    }
+
 
     try {
         // 3. Check if domain already exists
@@ -229,9 +235,10 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
              smtpUser: 'user@example.com',
              smtpPassword: '', // Should be encrypted if set, leave empty for user to set
              smtpSecure: true, // Default to true, common for 587 (STARTTLS) and 465 (SSL)
-             fromEmail: `noreply@${lowerCaseDomain}.syntaxhivehrm.app`, // Placeholder
+             fromEmail: `noreply@${lowerCaseDomain}.${process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost'}`, // More specific default
              fromName: `${companyName} (SyntaxHive Hrm)`,
          };
+         // Ensure updateEmailSettings accepts tenantId in its data
          await updateEmailSettings(defaultSettings); // Upsert the default settings
          console.log(`[registerTenantAction] Default email settings initialized for tenant ${newTenant.id}.`);
 
@@ -297,17 +304,11 @@ export async function logoutAction() {
 
       // Option 2: Infer from request headers (more reliable if middleware sets it)
       const headersList = headers();
-      tenantDomain = headersList.get('X-Tenant-Id'); // Use header set by middleware
-      console.log(`[logoutAction] Tenant domain from X-Tenant-Id header: ${tenantDomain}`);
-
-      // Fallback to host header if X-Tenant-Id is not present
-      if (!tenantDomain) {
-         const host = headersList.get('host') || '';
-         const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-         const match = host.match(`^(.*)\\.${rootDomain}$`);
-         tenantDomain = match ? match[1] : null;
-         console.log(`[logoutAction] Inferred tenant domain from host "${host}": ${tenantDomain}`);
-      }
+      const host = headersList.get('host') || '';
+      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
+      const match = host.match(`^(.*)\\.${rootDomain}$`);
+      tenantDomain = match ? match[1] : null;
+      console.log(`[logoutAction] Inferred tenant domain from host "${host}": ${tenantDomain}`);
 
   } catch (error) {
       console.error("[logoutAction] Error retrieving tenant domain for redirect:", error);
