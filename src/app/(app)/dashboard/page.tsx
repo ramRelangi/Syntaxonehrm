@@ -1,21 +1,60 @@
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Users, Briefcase, FileText, Calendar, BarChart2, UploadCloud } from "lucide-react";
 import Link from "next/link";
+import { getEmployees } from "@/actions/employee-actions"; // Example action
+import { getLeaveRequests } from "@/actions/leave-actions"; // Import leave action
+import { Suspense } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
+
+// Async component to fetch metrics
+async function MetricCard({ title, icon: Icon, valuePromise, link, linkText, changeText }: { title: string, icon: React.ElementType, valuePromise: Promise<any>, link?: string, linkText?: string, changeText?: string }) {
+    const value = await valuePromise;
+    return (
+        <Card className="shadow-sm hover:shadow-md transition-shadow duration-200">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">{title}</CardTitle>
+            <Icon className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{value}</div>
+            {link && linkText ? (
+                 <Link href={link} className="text-xs text-primary hover:underline">{linkText}</Link>
+            ) : (
+                 changeText && <p className="text-xs text-muted-foreground">{changeText}</p>
+            )}
+          </CardContent>
+        </Card>
+    );
+}
+
+// --- Async Data Fetching Functions ---
+async function getTotalEmployees() {
+    const employees = await getEmployees();
+    return employees.length;
+}
+
+async function getUpcomingLeavesCount() {
+    const today = new Date();
+    const upcomingRequests = await getLeaveRequests({ status: 'Approved' }); // Fetch approved requests
+    // Filter for requests starting today or later
+    const count = upcomingRequests.filter(req => new Date(req.startDate) >= today).length;
+    return count;
+}
+
+// Mock functions for other metrics
+async function getOpenPositionsCount() { await new Promise(res => setTimeout(res, 80)); return 8; }
+async function getPendingTasksCount() { await new Promise(res => setTimeout(res, 50)); return 3; }
+// --- End Data Fetching Functions ---
+
 
 export default function DashboardPage() {
-  // Mock data - replace with actual data fetching
-  const metrics = {
-    totalEmployees: 125,
-    openPositions: 8,
-    upcomingLeaves: 5,
-    pendingTasks: 3, // Example: Pending approvals, onboarding steps etc.
-  };
-
+  // Define quick links
   const quickLinks = [
     { href: '/employees/add', label: 'Add New Employee', icon: Users },
     { href: '/recruitment/create', label: 'Create Job Posting', icon: Briefcase },
-    { href: '/leave/request', label: 'Request Leave', icon: Calendar },
+    { href: '/leave#request', label: 'Request Leave', icon: Calendar }, // Updated href to target tab
     { href: '/smart-resume-parser', label: 'Parse Resume', icon: UploadCloud },
   ];
 
@@ -23,48 +62,20 @@ export default function DashboardPage() {
     <div className="flex flex-col gap-6">
       <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Dashboard</h1>
 
-      {/* Key Metrics Section */}
+      {/* Key Metrics Section with Suspense */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="shadow-sm hover:shadow-md transition-shadow duration-200">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Employees</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics.totalEmployees}</div>
-            <p className="text-xs text-muted-foreground">+2 since last month</p>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm hover:shadow-md transition-shadow duration-200">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Open Positions</CardTitle>
-            <Briefcase className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics.openPositions}</div>
-             <Link href="/recruitment" className="text-xs text-primary hover:underline">View jobs</Link>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm hover:shadow-md transition-shadow duration-200">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Upcoming Leaves</CardTitle>
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics.upcomingLeaves}</div>
-             <Link href="/leave" className="text-xs text-primary hover:underline">View calendar</Link>
-          </CardContent>
-        </Card>
-         <Card className="shadow-sm hover:shadow-md transition-shadow duration-200">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Tasks</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics.pendingTasks}</div>
-             <p className="text-xs text-muted-foreground">Requires attention</p>
-          </CardContent>
-        </Card>
+         <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
+            <MetricCard title="Total Employees" icon={Users} valuePromise={getTotalEmployees()} changeText="+2 since last month" />
+         </Suspense>
+          <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
+             <MetricCard title="Open Positions" icon={Briefcase} valuePromise={getOpenPositionsCount()} link="/recruitment" linkText="View jobs" />
+          </Suspense>
+         <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
+             <MetricCard title="Upcoming Leaves" icon={Calendar} valuePromise={getUpcomingLeavesCount()} link="/leave" linkText="View calendar" />
+         </Suspense>
+          <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
+            <MetricCard title="Pending Tasks" icon={FileText} valuePromise={getPendingTasksCount()} changeText="Requires attention"/>
+          </Suspense>
       </div>
 
       {/* Quick Links Section */}
@@ -105,11 +116,12 @@ export default function DashboardPage() {
                 <CardDescription>Placeholder for activity feed.</CardDescription>
               </CardHeader>
               <CardContent>
+                  {/* In a real app, fetch recent activities */}
                   <ul className="space-y-2 text-sm text-muted-foreground">
-                      <li>- John Doe requested leave.</li>
+                      <li>- John Doe requested leave. (Approved)</li>
                       <li>- New hire Jane Smith onboarded.</li>
-                      <li>- Payroll processed for May.</li>
-                       <li>- Performance review scheduled for Alex B.</li>
+                      <li>- Payroll processed for July.</li>
+                      <li>- Alice W. requested leave. (Pending)</li>
                   </ul>
               </CardContent>
            </Card>
@@ -117,3 +129,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+```

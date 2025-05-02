@@ -1,4 +1,6 @@
+
 import * as React from 'react';
+import { usePathname } from 'next/navigation'; // Import usePathname
 import {
   Sidebar,
   SidebarContent,
@@ -8,7 +10,7 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  SidebarProvider, // Already in RootLayout, but conceptually good here
+  SidebarProvider, // Conceptually here, but RootLayout handles provider
   SidebarTrigger,
 } from '@/components/ui/sidebar';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -29,17 +31,15 @@ const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: Home },
   { href: '/employees', label: 'Employees', icon: Users },
   { href: '/recruitment', label: 'Recruitment', icon: Briefcase },
-  { href: '/payroll', label: 'Payroll', icon: FileText },
-  { href: '/leave', label: 'Leave', icon: Calendar },
-  { href: '/documents', label: 'Documents', icon: FileText }, // Consider more specific icon?
+  { href: '/payroll', label: 'Payroll', icon: FileText }, // Using FileText for Payroll
+  { href: '/leave', label: 'Leave', icon: Calendar }, // Added Leave
+  { href: '/documents', label: 'Documents', icon: FileText }, // Using FileText for Documents
   { href: '/reports', label: 'Reports', icon: BarChart2 },
   { href: '/smart-resume-parser', label: 'Resume Parser', icon: UploadCloud },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  // In a real app, you'd use usePathname from 'next/navigation'
-  // to determine the active route. We'll simulate it for now.
-  const currentPath = '/dashboard'; // Mock current path
+  const pathname = usePathname(); // Get current path
 
   return (
     <div className="flex min-h-screen">
@@ -64,7 +64,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         <SidebarMenuItem key={item.href}>
                             <SidebarMenuButton
                                 asChild
-                                isActive={currentPath === item.href} // Simple active state check
+                                isActive={pathname === item.href} // Check against current pathname
                                 tooltip={item.label} // Tooltip shown when collapsed
                             >
                                 <Link href={item.href}>
@@ -93,6 +93,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                  {/* <SidebarSeparator /> */}
                  <SidebarMenu className="mt-4">
                       <SidebarMenuItem>
+                         {/* Ideally link to a settings page */}
                          <SidebarMenuButton tooltip="Settings">
                             <Settings className="h-5 w-5"/>
                             <span>Settings</span>
@@ -100,10 +101,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       </SidebarMenuItem>
                       <SidebarMenuItem>
                          {/* In real app, this button would trigger logout logic */}
-                         <SidebarMenuButton tooltip="Logout" className="text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/20">
-                            <LogOut className="h-5 w-5"/>
-                            <span>Logout</span>
-                         </SidebarMenuButton>
+                          <SidebarMenuButton tooltip="Logout" className="text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/20">
+                             <LogOut className="h-5 w-5"/>
+                             <span>Logout</span>
+                          </SidebarMenuButton>
                      </SidebarMenuItem>
                  </SidebarMenu>
             </SidebarFooter>
