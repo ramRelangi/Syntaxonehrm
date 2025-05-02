@@ -10,15 +10,21 @@ import { Input } from "@/components/ui/input";
 import { Switch } from '@/components/ui/switch';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Save, AlertTriangle, PlugZap } from 'lucide-react'; // Added PlugZap for test connection
+import { Loader2, Save, AlertTriangle, PlugZap, CheckCircle, XCircle } from 'lucide-react'; // Added CheckCircle, XCircle
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { cn } from '@/lib/utils'; // Import cn for conditional classes
+
+// Define connection status type again or import if shared
+type ConnectionStatus = 'idle' | 'checking' | 'success' | 'failed' | 'unconfigured';
 
 interface EmailSettingsFormProps {
   initialSettings?: EmailSettings | null; // Optional initial data
-  onSuccess: () => void; // Callback on success
+  onSuccess: () => void; // Callback on save success
+  onTestResult: (success: boolean) => void; // Callback for manual test result
+  connectionStatus: ConnectionStatus; // Receive connection status from parent
 }
 
-export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsFormProps) {
+export function EmailSettingsForm({ initialSettings, onSuccess, onTestResult, connectionStatus }: EmailSettingsFormProps) {
   const { toast } = useToast();
   const [isLoadingSave, setIsLoadingSave] = React.useState(false);
   const [isLoadingTest, setIsLoadingTest] = React.useState(false);
@@ -119,6 +125,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
 
     setIsLoadingTest(true);
     const settingsData = form.getValues(); // Get current form values
+    let testSuccess = false; // Track test outcome
 
     try {
       const response = await fetch('/api/communication/test-connection', {
@@ -156,36 +163,60 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.indexOf("application/json") !== -1) {
           const result = await response.json(); // Now parse JSON safely
-          // Success toast
-          toast({
-            title: "Connection Successful",
-            description: result.message || "Successfully connected to the SMTP server.", // Use message from response
-            className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
-          });
+          // Success message - Removed toast, rely on parent state change
+          testSuccess = true;
       } else {
           // Handle non-JSON success response? Unlikely for this API, but good practice
           const responseText = await response.text();
           console.warn("Test Connection - Received non-JSON success response:", responseText);
           // Assume success if status is ok, even if format is wrong
-           toast({
-            title: "Connection Test Completed (Unexpected Response)",
-            description: "The connection likely succeeded, but the server sent an unexpected response.",
-          });
+          testSuccess = true; // Still consider it a success for status update
       }
 
     } catch (error: any) {
       console.error("Test connection error object:", error); // Log the full error object
-      toast({
-        title: "Connection Failed",
-        // Display the detailed error message from the API or the caught error
-        description: error.message || "Could not connect to SMTP server.",
-        variant: "destructive",
-        duration: 8000, // Show error for longer
-      });
+       // Failure message - Removed toast, rely on parent state change
+       testSuccess = false;
+       // Optionally, still show a specific error toast for the *manual* test failure details
+       toast({
+           title: "Manual Connection Test Failed",
+           description: error.message || "Could not connect to SMTP server.",
+           variant: "destructive",
+           duration: 8000,
+       });
     } finally {
       setIsLoadingTest(false);
+      onTestResult(testSuccess); // Call callback with the result
     }
   };
+
+    // Determine button color based on connection status
+    const getButtonClass = () => {
+        if (isLoadingTest || connectionStatus === 'checking') return ""; // Default while loading
+        if (connectionStatus === 'success') return "bg-green-600 hover:bg-green-700 text-white";
+        if (connectionStatus === 'failed') return "bg-red-600 hover:bg-red-700 text-white";
+        if (connectionStatus === 'unconfigured') return "bg-yellow-500 hover:bg-yellow-600 text-white";
+        return "bg-primary hover:bg-primary/90 text-primary-foreground"; // Default button style
+    };
+
+    // Determine button icon based on status
+     const getButtonIcon = () => {
+        if (isLoadingTest || connectionStatus === 'checking') return <Loader2 className="mr-2 h-4 w-4 animate-spin" />;
+        if (connectionStatus === 'success') return <CheckCircle className="mr-2 h-4 w-4" />;
+        if (connectionStatus === 'failed') return <XCircle className="mr-2 h-4 w-4" />;
+        if (connectionStatus === 'unconfigured') return <AlertTriangle className="mr-2 h-4 w-4" />;
+        return <PlugZap className="mr-2 h-4 w-4" />; // Default icon
+     };
+
+    // Determine button text
+     const getButtonText = () => {
+        if (isLoadingTest) return "Testing...";
+        if (connectionStatus === 'checking') return "Checking...";
+        if (connectionStatus === 'success') return "Connected";
+        if (connectionStatus === 'failed') return "Test Failed";
+        if (connectionStatus === 'unconfigured') return "Configure";
+        return "Test Connection";
+     };
 
 
   return (
@@ -317,13 +348,16 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
 
 
         <div className="flex justify-end gap-2 pt-4 border-t mt-6">
-          <Button type="button" variant="outline" onClick={handleTestConnection} disabled={isLoadingTest || isLoadingSave}>
-              {isLoadingTest ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : ( <PlugZap className="mr-2 h-4 w-4" />)
-              }
-              {isLoadingTest ? 'Testing...' : "Test Connection"}
-          </Button>
+          <Button
+             type="button"
+             variant={connectionStatus === 'success' || connectionStatus === 'failed' || connectionStatus === 'unconfigured' ? 'default' : 'outline'} // Use default variant for status colors
+             className={cn(getButtonClass())} // Apply status-based color class
+             onClick={handleTestConnection}
+             disabled={isLoadingTest || isLoadingSave} // Disable while saving or testing
+           >
+             {getButtonIcon()} {/* Dynamic Icon */}
+             {getButtonText()} {/* Dynamic Text */}
+           </Button>
           <Button type="submit" disabled={isLoadingSave || isLoadingTest || !form.formState.isDirty}> {/* Disable if no changes or testing */}
             {isLoadingSave ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

@@ -4,7 +4,7 @@
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Mail, PlusCircle, MessageSquareText, Settings } from "lucide-react";
+import { Mail, PlusCircle, MessageSquareText, Settings, CheckCircle, XCircle, AlertTriangle, Loader2, PlugZap } from "lucide-react"; // Added CheckCircle, XCircle
 import { EmailTemplateList } from "@/modules/communication/components/email-template-list";
 import { EmailTemplateForm } from "@/modules/communication/components/email-template-form";
 import { EmailSettingsForm } from "@/modules/communication/components/email-settings-form"; // Import settings form
@@ -21,7 +21,9 @@ import { useToast } from "@/hooks/use-toast";
 import type { EmailTemplate, EmailSettings } from "@/modules/communication/types"; // Import EmailSettings type
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle } from 'lucide-react';
+
+// Define connection status type
+type ConnectionStatus = 'idle' | 'checking' | 'success' | 'failed' | 'unconfigured';
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
@@ -39,13 +41,22 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
                 // If JSON parsing fails, use the raw text if available
                 errorMessage = errorText || errorMessage;
             }
+             // Special handling for 404 on settings fetch
+            if (response.status === 404 && url.includes('/api/communication/settings')) {
+                console.log("Settings not found (404), returning {}");
+                return {} as T; // Return empty object if settings not found
+            }
             throw new Error(errorMessage);
         }
         // Handle cases where response might be empty (e.g., GET settings before configured)
         const text = await response.text();
         return text ? JSON.parse(text) : ({} as T) // Return empty object if no content
     } catch (error: any) {
-           throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
+           // Log error but rethrow
+           console.error(`Failed to fetch ${fullUrl}: ${error.message}`);
+           throw error;
+           // Throw original error for specific handling (like 404 above) or rethrow a generic one
+          // throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
     }
 }
 
@@ -61,6 +72,7 @@ export default function CommunicationPage() {
   const [editingTemplate, setEditingTemplate] = React.useState<EmailTemplate | null>(null);
   const { toast } = useToast();
   const [activeTab, setActiveTab] = React.useState("templates"); // Default to templates tab
+  const [connectionStatus, setConnectionStatus] = React.useState<ConnectionStatus>('idle'); // State for connection status
 
   // --- Fetch Templates ---
   const fetchTemplates = React.useCallback(async () => {
@@ -82,30 +94,78 @@ export default function CommunicationPage() {
   }, [toast]);
 
   // --- Fetch Settings ---
-  const fetchSettings = React.useCallback(async () => {
+ const fetchSettings = React.useCallback(async () => {
     setIsLoadingSettings(true);
     setSettingsError(null);
+    setConnectionStatus('idle'); // Reset status on fetch
     try {
-      const data = await fetchData<EmailSettings | null>('/api/communication/settings');
-      // API returns {} if not set, handle this case
-      setSettings(data && Object.keys(data).length > 0 ? data : null);
+        const data = await fetchData<EmailSettings | null>('/api/communication/settings');
+        // Check if data is null or empty object
+        if (data && Object.keys(data).length > 0) {
+            setSettings(data);
+        } else {
+            setSettings(null); // Explicitly set to null if no settings
+            setConnectionStatus('unconfigured'); // Set status if no settings found
+        }
     } catch (err: any) {
-      setSettingsError("Failed to load email settings.");
-      toast({
-        title: "Error Loading Settings",
-        description: err.message || "Could not fetch settings.",
-        variant: "destructive",
-      });
+         // Don't set 'unconfigured' status on fetch error, only if 404 or empty
+        setSettingsError("Failed to load email settings.");
+        setConnectionStatus('failed'); // Indicate failure to fetch settings
+        toast({
+            title: "Error Loading Settings",
+            description: err.message || "Could not fetch settings.",
+            variant: "destructive",
+        });
     } finally {
-      setIsLoadingSettings(false);
+        setIsLoadingSettings(false);
     }
-  }, [toast]);
+}, [toast]);
 
-  // --- Initial Data Fetch ---
+
+   // --- Background Connection Check ---
+  const checkConnectionInBackground = React.useCallback(async (currentSettings: EmailSettings) => {
+    if (!currentSettings || !currentSettings.smtpHost) {
+        setConnectionStatus('unconfigured');
+        return;
+    }
+    setConnectionStatus('checking');
+    try {
+        const response = await fetch('/api/communication/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(currentSettings),
+        });
+
+        if (!response.ok) {
+            // Don't throw, just set status to failed
+            console.error('Background connection check failed:', await response.text());
+            setConnectionStatus('failed');
+        } else {
+            setConnectionStatus('success');
+        }
+    } catch (error) {
+        console.error('Error during background connection check:', error);
+        setConnectionStatus('failed');
+    }
+  }, []); // No dependencies, relies on passed settings
+
+   // --- Initial Data Fetch and Background Check ---
   React.useEffect(() => {
     fetchTemplates();
     fetchSettings();
   }, [fetchTemplates, fetchSettings]);
+
+  // --- Run Background Check When Settings Load/Change ---
+  React.useEffect(() => {
+      if (settings && !isLoadingSettings) {
+          checkConnectionInBackground(settings);
+      } else if (!settings && !isLoadingSettings) {
+          setConnectionStatus('unconfigured');
+      }
+      // Avoid running on initial mount before settings are fetched
+      // Run check when `settings` state updates (after fetch or save)
+  }, [settings, isLoadingSettings, checkConnectionInBackground]);
+
 
   // --- Handlers ---
   const handleTemplateFormSuccess = () => {
@@ -132,11 +192,36 @@ export default function CommunicationPage() {
     }
 
     const handleSettingsSuccess = () => {
-        fetchSettings(); // Refetch settings after successful save
+        fetchSettings(); // Refetch settings after successful save, which triggers background check
     }
 
-  // Determine if email sending is configured (kept for potential future use or display logic)
-  const isEmailConfigured = !!settings && settings.smtpHost && settings.smtpUser;
+    const handleManualTestConnectionResult = (success: boolean) => {
+        setConnectionStatus(success ? 'success' : 'failed');
+    }
+
+
+  // Determine if email sending is configured (based on state, not just presence of settings)
+  const isEmailConfigured = connectionStatus === 'success';
+  const isEmailMisconfigured = connectionStatus === 'failed';
+  const isEmailUnconfigured = connectionStatus === 'unconfigured';
+
+
+    // Helper to render connection status indicator
+    const renderConnectionStatus = () => {
+        switch (connectionStatus) {
+            case 'checking':
+                return <span className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Checking...</span>;
+            case 'success':
+                return <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Connected</span>;
+            case 'failed':
+                return <span className="text-xs text-red-600 flex items-center gap-1"><XCircle className="h-3 w-3" /> Connection Failed</span>;
+             case 'unconfigured':
+                 return <span className="text-xs text-yellow-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Unconfigured</span>;
+            case 'idle':
+            default:
+                return <span className="text-xs text-muted-foreground">Status: Idle</span>; // Should quickly change
+        }
+    };
 
   return (
     <div className="flex flex-col gap-6">
@@ -167,17 +252,19 @@ export default function CommunicationPage() {
          </Dialog>
       </div>
 
-       {/* Alert if email sending is not configured */}
-        {!isEmailConfigured && !isLoadingSettings && (
-            <Alert variant="destructive" className="bg-yellow-50 border-yellow-300 text-yellow-800 [&>svg]:text-yellow-600 dark:bg-yellow-950 dark:border-yellow-800 dark:text-yellow-300 dark:[&>svg]:text-yellow-500">
+       {/* Alert if email sending is not configured or misconfigured */}
+        {(isEmailUnconfigured || isEmailMisconfigured) && !isLoadingSettings && (
+             <Alert variant={isEmailUnconfigured ? "default" : "destructive"} className={isEmailUnconfigured ? "bg-yellow-50 border-yellow-300 text-yellow-800 [&>svg]:text-yellow-600 dark:bg-yellow-950 dark:border-yellow-800 dark:text-yellow-300 dark:[&>svg]:text-yellow-500" : ""}>
                 <AlertTriangle className="h-4 w-4" />
-                <AlertTitle>Email Sending Not Configured</AlertTitle>
+                <AlertTitle>Email Sending {isEmailUnconfigured ? 'Not Configured' : 'Configuration Issue'}</AlertTitle>
                 <AlertDescription>
-                Email sending functionality might be limited. Please configure your SMTP settings in the{' '}
-                <button onClick={() => setActiveTab("settings")} className="font-medium underline hover:text-yellow-900 dark:hover:text-yellow-200">
+                {isEmailUnconfigured
+                    ? 'Email sending functionality is unavailable. Please configure your SMTP settings in the '
+                    : 'There seems to be an issue with your email settings. Please review and test them in the '}
+                <button onClick={() => setActiveTab("settings")} className={`font-medium underline ${isEmailUnconfigured ? 'hover:text-yellow-900 dark:hover:text-yellow-200' : 'hover:text-destructive/80'}`}>
                     Settings tab
                 </button>
-                {' '}to enable full sending capabilities.
+                .
                 </AlertDescription>
             </Alert>
         )}
@@ -185,9 +272,18 @@ export default function CommunicationPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="templates">Email Templates</TabsTrigger>
-              {/* Removed the disabled attribute to always enable the tab */}
-              <TabsTrigger value="send">Send Email</TabsTrigger>
-              <TabsTrigger value="settings">Settings</TabsTrigger> {/* Always enabled */}
+              {/* Send tab might be disabled based on configuration status */}
+              <TabsTrigger value="send" disabled={!isEmailConfigured && !isLoadingSettings}>
+                  Send Email
+                  {!isEmailConfigured && !isLoadingSettings && <AlertTriangle className="ml-2 h-3 w-3 text-yellow-600 dark:text-yellow-500" />}
+              </TabsTrigger>
+              <TabsTrigger value="settings">
+                 Settings
+                 {connectionStatus === 'checking' && <Loader2 className="ml-2 h-3 w-3 animate-spin"/>}
+                 {connectionStatus === 'success' && <CheckCircle className="ml-2 h-3 w-3 text-green-600"/>}
+                 {connectionStatus === 'failed' && <XCircle className="ml-2 h-3 w-3 text-red-600"/>}
+                 {connectionStatus === 'unconfigured' && <AlertTriangle className="ml-2 h-3 w-3 text-yellow-600"/>}
+              </TabsTrigger>
           </TabsList>
 
           {/* Email Templates Tab */}
@@ -230,14 +326,13 @@ export default function CommunicationPage() {
                       <CardTitle>Send Email</CardTitle>
                       <CardDescription>Compose and send emails using saved templates or custom content.</CardDescription>
                   </CardHeader>
-                  <CardContent className="flex items-center justify-center h-40 bg-muted rounded-md">
-                       {/* Keep the content indicating development status */}
+                   <CardContent className="flex items-center justify-center h-40 bg-muted rounded-md">
                        <p className="text-muted-foreground"><MessageSquareText className="inline h-5 w-5 mr-1" /> Email sending UI is under development.</p>
-                       {/* Show warning if not configured */}
-                       {!isEmailConfigured && !isLoadingSettings && (
-                            <p className="text-yellow-600 dark:text-yellow-400 text-sm ml-4">(Email settings not configured)</p>
+                       {/* Only show warning if explicitly not configured or failed */}
+                       {(isEmailUnconfigured || isEmailMisconfigured) && !isLoadingSettings && (
+                            <p className="text-yellow-600 dark:text-yellow-400 text-sm ml-4">({isEmailUnconfigured ? 'Email settings not configured' : 'Email settings invalid'})</p>
                        )}
-                  </CardContent>
+                   </CardContent>
               </Card>
           </TabsContent>
 
@@ -245,7 +340,10 @@ export default function CommunicationPage() {
            <TabsContent value="settings">
                 <Card className="shadow-sm mt-4">
                     <CardHeader>
-                        <CardTitle>Communication Settings</CardTitle>
+                        <CardTitle className="flex items-center justify-between">
+                            <span>Communication Settings</span>
+                            {renderConnectionStatus()} {/* Display connection status */}
+                        </CardTitle>
                         <CardDescription>Configure how emails are sent from the system (e.g., SMTP server details).</CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -262,6 +360,8 @@ export default function CommunicationPage() {
                             <EmailSettingsForm
                                 initialSettings={settings}
                                 onSuccess={handleSettingsSuccess}
+                                onTestResult={handleManualTestConnectionResult} // Pass handler for manual test result
+                                connectionStatus={connectionStatus} // Pass down status for button styling
                              />
                          )}
                     </CardContent>
@@ -271,4 +371,5 @@ export default function CommunicationPage() {
     </div>
   );
 }
+
 

@@ -3,8 +3,85 @@ import { NextRequest, NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 import { emailSettingsSchema, type EmailSettings } from '@/modules/communication/types';
 
+// Define admin email - fetch from environment variables
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@example.com'; // Fallback for local dev
+
+// Function to send notification email
+async function sendAdminNotification(settings: EmailSettings | null, error: any) {
+    if (!ADMIN_EMAIL) {
+        console.error("Admin email not configured. Cannot send failure notification.");
+        return;
+    }
+
+    // Use a default simple transport if settings are invalid/missing for the notification itself
+    let notificationTransporter: nodemailer.Transporter;
+    try {
+        // Attempt to use provided settings first, might fail if they are the cause of the error
+        if (settings && settings.smtpHost && settings.smtpPort && settings.smtpUser && settings.smtpPassword) {
+             let transportOptions: nodemailer.TransportOptions = {
+                 host: settings.smtpHost,
+                 port: settings.smtpPort,
+                 auth: { user: settings.smtpUser, pass: settings.smtpPassword },
+                 connectionTimeout: 10000, // Shorter timeout for notification
+             };
+             if (settings.smtpPort === 465) { transportOptions.secure = true; }
+             else if (settings.smtpPort === 587) { transportOptions.secure = false; transportOptions.requireTLS = true; }
+             else { transportOptions.secure = settings.smtpSecure; }
+             notificationTransporter = nodemailer.createTransport(transportOptions);
+             // Quick verify, but don't block notification if verify fails (might be the issue!)
+             await notificationTransporter.verify().catch(verifyErr => console.warn("Could not verify settings for sending admin notification:", verifyErr.message));
+        } else {
+            // Fallback: Use a simple, less secure method if main settings are bad/missing
+            // This is a placeholder - ideally, use a separate, reliable email service for notifications
+            console.warn("Main SMTP settings unavailable/invalid, using fallback transport for admin notification (this may fail).");
+            // Example using ethereal.email for testing - replace in production
+            // let testAccount = await nodemailer.createTestAccount();
+            // notificationTransporter = nodemailer.createTransport({
+            //     host: "smtp.ethereal.email",
+            //     port: 587,
+            //     secure: false,
+            //     auth: { user: testAccount.user, pass: testAccount.pass },
+            // });
+            // Or use SendGrid/Mailgun API key directly if available as env vars
+             throw new Error("Fallback email transport not implemented.");
+        }
+
+    } catch (setupError: any) {
+         console.error("Failed to create transporter for admin notification:", setupError.message);
+         return; // Cannot send notification
+    }
+
+
+    const mailOptions = {
+        from: settings?.fromEmail || '"StreamlineHR Alert" <noreply@example.com>', // Use configured or fallback From
+        to: ADMIN_EMAIL,
+        subject: 'SMTP Connection Failure Alert - StreamlineHR',
+        text: `An attempt to connect to the configured SMTP server failed.\n\nHost: ${settings?.smtpHost || 'N/A'}\nPort: ${settings?.smtpPort || 'N/A'}\nUser: ${settings?.smtpUser || 'N/A'}\n\nError Code: ${error.code || 'N/A'}\nError Message: ${error.message || 'Unknown error'}\n\nPlease check the communication settings in StreamlineHR.`,
+        html: `<p>An attempt to connect to the configured SMTP server failed.</p>
+               <p><strong>Host:</strong> ${settings?.smtpHost || 'N/A'}<br/>
+               <strong>Port:</strong> ${settings?.smtpPort || 'N/A'}<br/>
+               <strong>User:</strong> ${settings?.smtpUser || 'N/A'}</p>
+               <p><strong>Error Code:</strong> ${error.code || 'N/A'}<br/>
+               <strong>Error Message:</strong> ${error.message || 'Unknown error'}</p>
+               <p>Please check the communication settings in StreamlineHR.</p>`,
+    };
+
+    try {
+        console.log(`Sending failure notification to ${ADMIN_EMAIL}...`);
+        let info = await notificationTransporter.sendMail(mailOptions);
+        console.log('Admin notification email sent: %s', info.messageId);
+         // Log Ethereal URL if testing
+         // if (notificationTransporter.options.host === 'smtp.ethereal.email') {
+         //    console.log("Preview URL: %s", nodemailer.getTestMessageUrl(info));
+         // }
+    } catch (sendError) {
+        console.error('Error sending admin notification email:', sendError);
+    }
+}
+
+
 export async function POST(request: NextRequest) {
-  let settings: EmailSettings | null = null; // Define settings outside try for use in catch
+  let settings: EmailSettings | null = null; // Define settings outside try for use in catch/finally
   try {
     const body = await request.json();
     console.log('[Test Connection] Received request with body:', body); // Log received data
@@ -28,41 +105,28 @@ export async function POST(request: NextRequest) {
             user: settings.smtpUser,
             pass: settings.smtpPassword,
         },
-        // Add reasonable timeout options
         connectionTimeout: 15000, // 15 seconds
         greetingTimeout: 15000,   // 15 seconds
         socketTimeout: 15000,     // 15 seconds
-        // Enable logging for debugging nodemailer issues
-        logger: process.env.NODE_ENV === 'development', // Only log in dev
-        debug: process.env.NODE_ENV === 'development', // Only debug in dev
+        logger: process.env.NODE_ENV === 'development',
+        debug: process.env.NODE_ENV === 'development',
     };
 
-    // Specific configurations for common ports
     if (settings.smtpPort === 465) {
-        transportOptions.secure = true; // Use SSL/TLS from the start
+        transportOptions.secure = true;
         console.log('[Test Connection] Configuring for Port 465 (SSL/TLS)');
     } else if (settings.smtpPort === 587) {
         transportOptions.secure = false; // STARTTLS happens after connection
         transportOptions.requireTLS = true; // Force STARTTLS upgrade
         console.log('[Test Connection] Configuring for Port 587 (STARTTLS)');
     } else {
-        // For other ports, rely on the 'smtpSecure' value from the form, but log a warning
         transportOptions.secure = settings.smtpSecure;
         console.warn(`[Test Connection] Using provided 'secure' value (${settings.smtpSecure}) for non-standard port ${settings.smtpPort}.`);
     }
-     // Allow overriding TLS options if needed for specific servers (e.g., self-signed certs - USE WITH CAUTION)
-     // transportOptions.tls = {
-     //    rejectUnauthorized: process.env.NODE_ENV !== 'development' // Allow self-signed in dev ONLY
-     // };
-    // --- End transport option adjustment ---
 
-
-    // Create a Nodemailer transporter object using the adjusted options
     const transporter = nodemailer.createTransport(transportOptions);
 
-
     console.log('[Test Connection] Attempting transporter.verify()...');
-    // Verify connection configuration
     await transporter.verify();
     console.log('[Test Connection] SMTP connection verified successfully.');
 
@@ -75,54 +139,57 @@ export async function POST(request: NextRequest) {
     const host = settings?.smtpHost ?? 'the specified host';
     const port = settings?.smtpPort ?? 'the specified port';
 
-    // Provide more specific error messages based on common nodemailer error codes
     let errorMessage = `Failed to connect to SMTP server (${host}:${port}).`;
     let statusCode = 500; // Default to Internal Server Error
-    let details = error.message || 'Unknown error during connection test.'; // Default details
+    let details = error.message || 'Unknown error during connection test.';
 
-    // Check for specific SSL/TLS errors
-    if (error.code === 'ESOCKET' && error.message?.includes('wrong version number')) {
-        errorMessage = `SSL/TLS handshake failed with ${host}:${port}. The server might be expecting a different security protocol (SSL/TLS vs STARTTLS) for this port. Check port and 'Use Encryption' settings.`;
-        statusCode = 400; // Bad request (likely configuration error)
-        details = error.message;
-    } else if (error.code) {
-       // Handle other common error codes
+    // Handle specific Nodemailer/network errors
+    if (error.code) {
        switch (error.code) {
+           case 'ESOCKET':
+               if (error.message?.includes('wrong version number')) {
+                   errorMessage = `SSL/TLS handshake failed with ${host}:${port}. The server might be expecting a different security protocol (SSL/TLS vs STARTTLS) for this port. Check port and 'Use Encryption' settings.`;
+                   statusCode = 400;
+               } else {
+                    errorMessage = `Socket error connecting to ${host}:${port}. Check host/port/firewall.`;
+                    statusCode = 400;
+               }
+               break;
            case 'ECONNREFUSED':
                errorMessage = `Connection refused by ${error.address || host}:${error.port || port}. Check host, port, and firewall settings.`;
-               statusCode = 400; // Bad request (likely wrong host/port)
+               statusCode = 400;
                break;
            case 'ETIMEDOUT':
            case 'ESOCKETTIMEDOUT':
                errorMessage = 'Connection timed out. Check network connectivity, firewall, host, and port.';
-               statusCode = 408; // Request Timeout
+               statusCode = 408;
                break;
-           case 'EAUTH': // General authentication error
+           case 'EAUTH':
                errorMessage = 'Authentication failed. Check username and password.';
-               statusCode = 401; // Unauthorized
+               statusCode = 401;
                break;
            case 'ENOTFOUND':
                errorMessage = `Could not resolve hostname '${host}'. Check the SMTP host address.`;
-               statusCode = 400; // Bad request
+               statusCode = 400;
                break;
            case 'EHOSTUNREACH':
                errorMessage = `Host unreachable '${host}'. Check network or host address.`;
                statusCode = 400;
                break;
-            case 'ECONNECTION': // Generic connection issue
+            case 'ECONNECTION':
                 errorMessage = `Could not establish connection to ${host}:${port}. Check host, port, and network.`;
                 statusCode = 400;
                 break;
            default:
                errorMessage += ` Error code: ${error.code}.`;
-               details = error.message || details;
        }
+        details = error.message || details;
     } else if (error.responseCode) {
-         // Handle SMTP response codes after connection is established
+         // Handle SMTP response codes after connection
          switch (error.responseCode) {
              case 535:
                  errorMessage = 'Authentication failed (SMTP 535). Check username and password.';
-                 statusCode = 401; // Unauthorized
+                 statusCode = 401;
                  break;
              case 550:
                  errorMessage = `Mailbox unavailable or access denied (SMTP 550). Check 'From' address or server permissions.`;
@@ -132,24 +199,27 @@ export async function POST(request: NextRequest) {
                  errorMessage = `Syntax error in parameters or arguments (SMTP 501). Review settings.`;
                  statusCode = 400;
                  break;
-             // Add more SMTP codes as needed
              default:
                  errorMessage += ` SMTP Response Code: ${error.responseCode}.`;
-                 details = error.message || details;
          }
+         details = error.message || details;
     } else if (error instanceof SyntaxError) {
-        // Handle potential JSON parsing errors if the request body was invalid
         errorMessage = 'Invalid request format received.';
         statusCode = 400;
         details = error.message;
     }
 
-    // Include the original error message for debugging if available and not already set
     errorMessage += ` (Details: ${details})`;
 
+    // --- Send notification on failure ---
+    // Check if the error indicates a connection/auth failure (not just bad input)
+    if (statusCode >= 400 && statusCode !== 400 && !(error instanceof SyntaxError)) { // Avoid notifying for simple input errors
+        await sendAdminNotification(settings, error);
+    }
+    // ---------------------------------
+
     console.error(`[Test Connection] Responding with status ${statusCode}: ${errorMessage}`);
-    // Return status code based on error type, ensuring JSON format
-    // Using error.toString() for details might provide more context in some cases.
     return NextResponse.json({ error: 'Connection failed', message: errorMessage, details: error.toString() }, { status: statusCode });
   }
 }
+
