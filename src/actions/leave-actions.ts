@@ -11,7 +11,10 @@ import {
   deleteLeaveRequest as dbDeleteLeaveRequest,
   getAllLeaveTypes as dbGetAllLeaveTypes,
   getLeaveTypeById as dbGetLeaveTypeById,
-  getLeaveBalancesForEmployee as dbGetLeaveBalances, // Example usage
+  addLeaveType as dbAddLeaveType,
+  updateLeaveType as dbUpdateLeaveType,
+  deleteLeaveType as dbDeleteLeaveType,
+  getLeaveBalancesForEmployee as dbGetLeaveBalances,
 } from '@/lib/leave-mock-db';
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
@@ -111,12 +114,64 @@ export async function getLeaveTypes(): Promise<LeaveType[]> {
   return dbGetAllLeaveTypes();
 }
 
-// Add/Update/Delete actions for Leave Types would follow a similar pattern
-// For simplicity, they are omitted in this step, assuming types are pre-configured.
+// Add action for adding leave types - omitted schema definition for brevity
+export async function addLeaveTypeAction(formData: Omit<LeaveType, 'id'>): Promise<{ success: boolean; leaveType?: LeaveType; errors?: z.ZodIssue[] }> {
+  // Basic validation example (add zod schema in real app)
+  if (!formData.name || !formData.name.trim()) {
+     return { success: false, errors: [{ code: 'custom', path: ['name'], message: 'Leave type name is required' }] };
+  }
+
+  try {
+    const newLeaveType = dbAddLeaveType(formData);
+    revalidatePath('/leave'); // Revalidate page where types are displayed/managed
+    return { success: true, leaveType: newLeaveType };
+  } catch (error) {
+    console.error("Error adding leave type:", error);
+    return { success: false };
+  }
+}
+
+// Update action for leave types - omitted schema definition for brevity
+export async function updateLeaveTypeAction(id: string, formData: Partial<Omit<LeaveType, 'id'>>): Promise<{ success: boolean; leaveType?: LeaveType; errors?: z.ZodIssue[] }> {
+   // Basic validation example
+   if (formData.name !== undefined && !formData.name.trim()) {
+     return { success: false, errors: [{ code: 'custom', path: ['name'], message: 'Leave type name cannot be empty' }] };
+   }
+
+  try {
+    const updatedLeaveType = dbUpdateLeaveType(id, formData);
+    if (updatedLeaveType) {
+      revalidatePath('/leave');
+      return { success: true, leaveType: updatedLeaveType };
+    } else {
+      return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Leave type not found' }] };
+    }
+  } catch (error) {
+    console.error("Error updating leave type:", error);
+    return { success: false };
+  }
+}
+
+// Delete action for leave types
+export async function deleteLeaveTypeAction(id: string): Promise<{ success: boolean }> {
+  try {
+    // Consider adding checks here: can't delete if requests use this type?
+    const deleted = dbDeleteLeaveType(id);
+    if (deleted) {
+      revalidatePath('/leave');
+      return { success: true };
+    } else {
+      return { success: false }; // Not found or couldn't delete
+    }
+  } catch (error) {
+    console.error("Error deleting leave type:", error);
+    return { success: false };
+  }
+}
+
 
 // --- Leave Balance Actions ---
 export async function getEmployeeLeaveBalances(employeeId: string) {
     // Example action to fetch balances
     return dbGetLeaveBalances(employeeId);
 }
-```
