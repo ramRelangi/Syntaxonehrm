@@ -14,25 +14,38 @@ import {
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import nodemailer from 'nodemailer';
+import { getTenantIdFromAuth } from '@/lib/auth'; // Assuming a function to get tenantId
+
+// --- Helper Functions ---
+async function getTenantId(): Promise<string> {
+    const tenantId = await getTenantIdFromAuth(); // Implement this using your auth solution
+    if (!tenantId) {
+        throw new Error("Tenant context not found. User may not be authenticated or associated with a tenant.");
+    }
+    return tenantId;
+}
 
 // --- Email Template Server Actions ---
 
 export async function getEmailTemplatesAction(): Promise<EmailTemplate[]> {
-    return dbGetAllTemplates();
+    const tenantId = await getTenantId();
+    return dbGetAllTemplates(tenantId);
 }
 
 export async function getEmailTemplateByIdAction(id: string): Promise<EmailTemplate | undefined> {
-    return dbGetTemplateById(id);
+    const tenantId = await getTenantId();
+    return dbGetTemplateById(id, tenantId);
 }
 
 export async function addEmailTemplateAction(formData: EmailTemplateFormData): Promise<{ success: boolean; template?: EmailTemplate; errors?: z.ZodIssue[] }> {
-    const validation = emailTemplateSchema.omit({ id: true }).safeParse(formData);
+    const tenantId = await getTenantId();
+    const validation = emailTemplateSchema.omit({ id: true, tenantId: true }).safeParse(formData);
     if (!validation.success) {
         console.error("Add Template Validation Error:", validation.error.flatten());
         return { success: false, errors: validation.error.errors };
     }
     try {
-        const newTemplate = await dbAddTemplate(validation.data);
+        const newTemplate = await dbAddTemplate({ ...validation.data, tenantId }); // Add tenantId
         revalidatePath('/communication'); // Revalidate the main communication page
         return { success: true, template: newTemplate };
     } catch (error: any) {
@@ -42,13 +55,15 @@ export async function addEmailTemplateAction(formData: EmailTemplateFormData): P
 }
 
 export async function updateEmailTemplateAction(id: string, formData: Partial<EmailTemplateFormData>): Promise<{ success: boolean; template?: EmailTemplate; errors?: z.ZodIssue[] }> {
-     const validation = emailTemplateSchema.omit({ id: true }).partial().safeParse(formData);
+     const tenantId = await getTenantId();
+     const validation = emailTemplateSchema.omit({ id: true, tenantId: true }).partial().safeParse(formData);
      if (!validation.success) {
          console.error("Update Template Validation Error:", validation.error.flatten());
          return { success: false, errors: validation.error.errors };
      }
     try {
-        const updatedTemplate = await dbUpdateTemplate(id, validation.data);
+        // Pass tenantId for verification in the DB layer
+        const updatedTemplate = await dbUpdateTemplate(id, tenantId, validation.data);
         if (updatedTemplate) {
             revalidatePath('/communication');
             return { success: true, template: updatedTemplate };
@@ -62,8 +77,10 @@ export async function updateEmailTemplateAction(id: string, formData: Partial<Em
 }
 
 export async function deleteEmailTemplateAction(id: string): Promise<{ success: boolean; error?: string }> {
+    const tenantId = await getTenantId();
     try {
-        const deleted = await dbDeleteTemplate(id);
+        // Pass tenantId for verification in the DB layer
+        const deleted = await dbDeleteTemplate(id, tenantId);
         if (deleted) {
             revalidatePath('/communication');
             return { success: true };
@@ -78,9 +95,10 @@ export async function deleteEmailTemplateAction(id: string): Promise<{ success: 
 
 // --- Email Settings Server Actions ---
 
-export async function getEmailSettingsAction(): Promise<EmailSettings | null> {
+export async function getEmailSettingsAction(): Promise<Omit<EmailSettings, 'smtpPassword'> | null> {
+    const tenantId = await getTenantId();
     // Important: Do NOT expose password in actions returned to the client
-    const settings = await dbGetEmailSettings();
+    const settings = await dbGetEmailSettings(tenantId);
     if (settings) {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { smtpPassword, ...safeSettings } = settings; // Omit password
@@ -89,15 +107,17 @@ export async function getEmailSettingsAction(): Promise<EmailSettings | null> {
     return null;
 }
 
-export async function updateEmailSettingsAction(settingsData: EmailSettings): Promise<{ success: boolean; settings?: Omit<EmailSettings, 'smtpPassword'>; errors?: z.ZodIssue[] }> {
-    const validation = emailSettingsSchema.safeParse(settingsData);
+export async function updateEmailSettingsAction(settingsData: Omit<EmailSettings, 'tenantId'>): Promise<{ success: boolean; settings?: Omit<EmailSettings, 'smtpPassword'>; errors?: z.ZodIssue[] }> {
+    const tenantId = await getTenantId();
+    // Validate data excluding tenantId, as we get it from auth
+    const validation = emailSettingsSchema.omit({ tenantId: true }).safeParse(settingsData);
     if (!validation.success) {
         console.error("Update Settings Validation Error:", validation.error.flatten());
         return { success: false, errors: validation.error.errors };
     }
     try {
-        // dbUpdateEmailSettings handles upsert and returns without password
-        const updatedSettings = await dbUpdateEmailSettings(validation.data);
+        // Pass tenantId explicitly along with validated data
+        const updatedSettings = await dbUpdateEmailSettings(tenantId, validation.data);
         revalidatePath('/communication'); // Revalidate page displaying settings status
         return { success: true, settings: updatedSettings };
     } catch (error: any) {
@@ -108,20 +128,38 @@ export async function updateEmailSettingsAction(settingsData: EmailSettings): Pr
 
 
 // --- Test Connection Action ---
-export async function testSmtpConnectionAction(settingsData: EmailSettings): Promise<{ success: boolean; message: string }> {
-     const validation = emailSettingsSchema.safeParse(settingsData);
+export async function testSmtpConnectionAction(settingsData: Omit<EmailSettings, 'tenantId'> & { smtpPassword?: string }): Promise<{ success: boolean; message: string }> {
+     // Validate incoming data (excluding tenantId, password optional for testing existing)
+     const validation = emailSettingsSchema.omit({ tenantId: true }).safeParse(settingsData);
      if (!validation.success) {
-         return { success: false, message: 'Invalid settings provided.' };
+         // Be more specific about validation errors if possible
+          const errorPath = validation.error.errors[0]?.path[0] || 'settings';
+          const errorMessage = validation.error.errors[0]?.message || 'Invalid settings provided.';
+         return { success: false, message: `Validation Error (${errorPath}): ${errorMessage}` };
      }
 
-     const settings = validation.data; // Use validated data
+     const tenantId = await getTenantId(); // Get tenantId for potential existing password fetch
+     let finalSettings: EmailSettings;
+
+     // If password is not provided in the test data, try fetching the existing one securely
+     if (!settingsData.smtpPassword) {
+         const existingSettings = await dbGetEmailSettings(tenantId);
+         if (!existingSettings?.smtpPassword) {
+             return { success: false, message: 'Password is required to test connection (or save settings first).' };
+         }
+         finalSettings = { ...validation.data, tenantId: tenantId, smtpPassword: existingSettings.smtpPassword };
+     } else {
+          finalSettings = { ...validation.data, tenantId: tenantId, smtpPassword: settingsData.smtpPassword };
+     }
+
+     // Now finalSettings contains the full data needed for the test
 
     let transportOptions: nodemailer.TransportOptions = {
-        host: settings.smtpHost,
-        port: settings.smtpPort,
+        host: finalSettings.smtpHost,
+        port: finalSettings.smtpPort,
         auth: {
-            user: settings.smtpUser,
-            pass: settings.smtpPassword, // Use password directly for testing
+            user: finalSettings.smtpUser,
+            pass: finalSettings.smtpPassword, // Use password directly for testing
         },
         connectionTimeout: 15000,
         greetingTimeout: 15000,
@@ -130,13 +168,13 @@ export async function testSmtpConnectionAction(settingsData: EmailSettings): Pro
         debug: process.env.NODE_ENV === 'development',
     };
 
-    if (settings.smtpPort === 465) {
+    if (finalSettings.smtpPort === 465) {
         transportOptions.secure = true;
-    } else if (settings.smtpPort === 587) {
+    } else if (finalSettings.smtpPort === 587) {
         transportOptions.secure = false;
         transportOptions.requireTLS = true;
     } else {
-        transportOptions.secure = settings.smtpSecure;
+        transportOptions.secure = finalSettings.smtpSecure;
     }
 
     const transporter = nodemailer.createTransport(transportOptions);
@@ -157,45 +195,12 @@ export async function testSmtpConnectionAction(settingsData: EmailSettings): Pro
          } else if (error.code === 'ETIMEDOUT' || error.code === 'ESOCKETTIMEDOUT') {
              errorMessage = 'Connection timed out. Check network, host, and port.';
          } else if (error.code === 'ENOTFOUND') {
-             errorMessage = `Hostname '${settings.smtpHost}' not found. Check the host address.`;
+             errorMessage = `Hostname '${finalSettings.smtpHost}' not found. Check the host address.`;
          } else if (error.message?.includes('wrong version number')) {
-            errorMessage = `SSL/TLS handshake failed. Check port and encryption settings (port ${settings.smtpPort} with secure=${transportOptions.secure}).`;
+            errorMessage = `SSL/TLS handshake failed. Check port and encryption settings (port ${finalSettings.smtpPort} with secure=${transportOptions.secure}).`;
+         } else if (error.message?.includes('Authentication unsuccessful')) {
+              errorMessage = `Authentication unsuccessful. SMTP authentication might be disabled for the tenant or credentials invalid. (Detail: ${error.message})`;
          }
         return { success: false, message: errorMessage };
     }
 }
-
-// --- Send Email Action --- (Placeholder - Needs template engine and recipient logic)
-/*
-export async function sendEmailAction(to: string, templateId: string, context: Record<string, any>): Promise<{ success: boolean; error?: string }> {
-    const settings = await dbGetEmailSettings();
-    if (!settings) {
-        return { success: false, error: "Email settings not configured." };
-    }
-    const template = await dbGetTemplateById(templateId);
-    if (!template) {
-        return { success: false, error: "Email template not found." };
-    }
-
-    // 1. Configure Nodemailer transporter (similar to test action)
-    // ... use settings ...
-
-    // 2. Compile template body and subject with context (using Handlebars, etc.)
-    // const compiledSubject = compileTemplate(template.subject, context);
-    // const compiledBody = compileTemplate(template.body, context);
-
-    // 3. Send mail
-    try {
-        await transporter.sendMail({
-            from: `"${settings.fromName}" <${settings.fromEmail}>`,
-            to: to,
-            subject: compiledSubject,
-            html: compiledBody, // or text: compiledBody
-        });
-        return { success: true };
-    } catch (error: any) {
-        console.error("Error sending email:", error);
-        return { success: false, error: error.message || "Failed to send email." };
-    }
-}
-*/

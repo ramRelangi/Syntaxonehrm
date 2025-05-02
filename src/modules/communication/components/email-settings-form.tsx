@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { emailSettingsSchema, type EmailSettings } from '@/modules/communication/types';
+import { updateEmailSettingsAction, testSmtpConnectionAction } from '@/modules/communication/actions'; // Import actions
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from '@/components/ui/switch';
@@ -15,8 +16,11 @@ import { cn } from '@/lib/utils';
 
 type ConnectionStatus = 'idle' | 'checking' | 'success' | 'failed' | 'unconfigured';
 
+// Form data excludes tenantId, which comes from auth context in the action
+type EmailSettingsFormData = Omit<EmailSettings, 'tenantId'>;
+
 interface EmailSettingsFormProps {
-  initialSettings?: Omit<EmailSettings, 'smtpPassword'> | null; // Receive settings without password
+  initialSettings?: Omit<EmailSettings, 'smtpPassword' | 'tenantId'> | null; // Receive settings without password or tenantId
   onSuccess: () => void;
   onTestResult: (success: boolean) => void;
   connectionStatus: ConnectionStatus;
@@ -27,67 +31,47 @@ export function EmailSettingsForm({ initialSettings, onSuccess, onTestResult, co
   const [isLoadingSave, setIsLoadingSave] = React.useState(false);
   const [isLoadingTest, setIsLoadingTest] = React.useState(false);
 
-  const form = useForm<EmailSettings>({
-    resolver: zodResolver(emailSettingsSchema),
+  const form = useForm<EmailSettingsFormData>({
+    resolver: zodResolver(emailSettingsSchema.omit({ tenantId: true })), // Validate without tenantId
     defaultValues: {
       smtpHost: initialSettings?.smtpHost ?? '',
       smtpPort: initialSettings?.smtpPort ?? 587,
       smtpUser: initialSettings?.smtpUser ?? '',
       smtpPassword: '', // Always start with empty password field
-      smtpSecure: initialSettings?.smtpSecure ?? true,
+      smtpSecure: initialSettings?.smtpSecure ?? true, // Default secure based on port 587 being common TLS
       fromEmail: initialSettings?.fromEmail ?? '',
       fromName: initialSettings?.fromName ?? '',
     },
   });
 
-   const onSubmit = async (data: EmailSettings) => {
+   const onSubmit = async (data: EmailSettingsFormData) => {
     setIsLoadingSave(true);
-    console.log("[Settings Form] Submitting settings via API (password masked):", JSON.stringify({ ...data, smtpPassword: '***' }));
-    const apiUrl = '/api/communication/settings';
-    const method = 'PUT';
-
-    // IMPORTANT: If the password field is empty, use the existing password
-    // This requires fetching the current full settings securely on the server-side
-    // OR passing a flag indicating password shouldn't be updated.
-    // Simple approach for now: If password field is empty, DO NOT send it in the payload.
-    // More robust: Server-side should handle this logic.
-    const payload = { ...data };
-    if (!payload.smtpPassword) {
-       // If password is empty, we implicitly want to keep the old one.
-       // The API route needs to handle this logic (fetch old, keep if new is empty).
-       // For now, we'll just send the empty password, assuming API handles it.
-       // A better approach might be to fetch the current settings securely first,
-       // or have a separate 'change password' flow.
-        console.warn("[Settings Form] Password field is empty. The API should retain the existing password.");
-        // delete payload.smtpPassword; // Option 1: Don't send password field
-        // payload.keepPassword = true; // Option 2: Send a flag (requires API change)
-    }
-
+    console.log("[Settings Form] Submitting settings via action (password masked):", JSON.stringify({ ...data, smtpPassword: '***' }));
 
     try {
-        const response = await fetch(apiUrl, {
-            method: method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload), // Send potentially incomplete payload
-        });
+        // Pass data excluding tenantId to the action
+        const result = await updateEmailSettingsAction(data);
 
-        let result: any;
-        let responseText: string | null = null;
-        try {
-           responseText = await response.text();
-           if(responseText) result = JSON.parse(responseText);
-        } catch (e) {
-           if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-           result = {}; // OK but no JSON
+        if (!result.success) {
+            console.error("[Settings Form] Action Save Error:", result.errors);
+            // Handle validation errors specifically
+            if (result.errors) {
+                result.errors.forEach((err: any) => {
+                    if (err.path && err.path.length > 0) {
+                        form.setError(err.path[0] as keyof EmailSettingsFormData, { message: err.message });
+                    } else {
+                         form.setError("root.serverError", { message: err.message || "An unknown validation error occurred." });
+                    }
+                });
+                 toast({ title: "Validation Error", description: "Please check the form fields.", variant: "destructive" });
+            } else {
+                 form.setError("root.serverError", { message: "Failed to save settings due to a server error." });
+                 toast({ title: "Error Saving Settings", description: "An unexpected server error occurred.", variant: "destructive" });
+            }
+             throw new Error("Failed to save settings."); // Throw to prevent success toast
         }
 
-
-        if (!response.ok) {
-            console.error("[Settings Form] API Save Error:", result);
-            throw new Error(result?.error || result?.message || `Failed to save settings. Status: ${response.status}`);
-        }
-
-         console.log("[Settings Form] API Save Success (response masked):", result ? JSON.stringify({...result, smtpPassword: '***'}) : '{}');
+         console.log("[Settings Form] Action Save Success (response masked):", result.settings ? JSON.stringify({...result.settings, smtpPassword: '***'}) : '{}');
 
          toast({
             title: "Settings Saved",
@@ -102,13 +86,16 @@ export function EmailSettingsForm({ initialSettings, onSuccess, onTestResult, co
          onSuccess(); // Trigger parent refresh
 
     } catch (error: any) {
-        console.error("[Settings Form] Submission error:", error);
-        toast({
-            title: "Error Saving Settings",
-            description: error.message || "An unexpected error occurred.",
-            variant: "destructive",
-        });
-        form.setError("root.serverError", { message: error.message || "An unexpected server error occurred." });
+        // Errors already handled above or caught here
+        if (!form.formState.errors.root?.serverError && !form.formState.errors) { // Avoid double-toasting
+             console.error("[Settings Form] Submission error:", error);
+             toast({
+                title: "Error Saving Settings",
+                description: error.message || "An unexpected error occurred.",
+                variant: "destructive",
+             });
+             form.setError("root.serverError", { message: error.message || "An unexpected server error occurred." });
+        }
     } finally {
         setIsLoadingSave(false);
     }
@@ -122,52 +109,40 @@ export function EmailSettingsForm({ initialSettings, onSuccess, onTestResult, co
     }
 
     setIsLoadingTest(true);
-    const settingsData = form.getValues();
-    // If password field is empty, the test *will likely fail* unless handled server-side.
-    // This highlights the need for better password management. For testing, require password entry.
-     if (!settingsData.smtpPassword && isNaN(initialSettings?.smtpPort ?? NaN)) { // Require password if it wasn't pre-filled (meaning it exists)
+    const settingsData = form.getValues(); // Includes smtpPassword if entered
+
+    // Require password for testing if it wasn't pre-filled (indicating it exists but isn't shown)
+    // or if it's explicitly empty now.
+    const passwordRequired = !initialSettings || !settingsData.smtpPassword;
+    // if (!settingsData.smtpPassword && initialSettings) {
+    //      // Allow testing without re-entering password if initial settings existed
+    //      console.warn("[Settings Form] Testing connection using previously saved password (not shown).");
+    //      // Action will fetch the existing password.
+    // } else
+     if (!settingsData.smtpPassword) {
           setIsLoadingTest(false);
           toast({ title: "Password Required", description: "Please enter the SMTP password to test the connection.", variant: "destructive" });
           form.setFocus("smtpPassword");
           return;
       }
-      // If initialSettings exist, but password is empty, it implies user hasn't changed it.
-      // The API needs the *actual* password to test. This form doesn't have it.
-      // The API *could* fetch the real password if testing existing settings, but that's complex.
-      // Simplest for now: Require password input for test.
 
-    console.log("[Settings Form] Testing connection via API (password masked):", JSON.stringify({ ...settingsData, smtpPassword: '***' }));
+
+    console.log("[Settings Form] Testing connection via action (password masked):", JSON.stringify({ ...settingsData, smtpPassword: '***' }));
 
     let testSuccess = false;
 
     try {
-      const response = await fetch('/api/communication/test-connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // Send the current form data, including potentially empty password
-        body: JSON.stringify(settingsData),
-      });
+        // Pass current form data (including password if entered) to the action
+        const result = await testSmtpConnectionAction(settingsData);
 
-       let result: any;
-       let responseText: string | null = null;
-       try {
-           responseText = await response.text();
-           if(responseText) result = JSON.parse(responseText);
-       } catch(e){
-           if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-           result = {}; // OK, no body
-       }
+        if (!result.success) {
+            console.error("[Settings Form] Action Test Error:", result.message);
+            throw new Error(result.message || `Test failed.`);
+        }
 
-
-      if (!response.ok) {
-          console.error("[Settings Form] API Test Error:", result);
-          throw new Error(result?.error || result?.message || `Test failed. Status: ${response.status}`);
-      }
-
-      console.log("[Settings Form] API Test Success:", result);
-      testSuccess = true;
-      // Success toast is optional, rely on button change
-      // toast({ title: "Connection Successful", description: result.message, className: "bg-green-100..." });
+        console.log("[Settings Form] Action Test Success:", result.message);
+        testSuccess = true;
+        toast({ title: "Connection Successful", description: result.message, className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100" });
 
 
     } catch (error: any) {
@@ -210,6 +185,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess, onTestResult, co
         return "Test Connection";
      };
 
+     // Disable save if loading, testing, or form hasn't changed
      const isSaveDisabled = isLoadingSave || isLoadingTest || !form.formState.isDirty;
 
 
@@ -217,16 +193,16 @@ export function EmailSettingsForm({ initialSettings, onSuccess, onTestResult, co
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
          {form.formState.errors.root?.serverError && (
-          <FormMessage className="text-destructive text-center">
+          <FormMessage className="text-destructive text-center bg-destructive/10 p-3 rounded-md">
             {form.formState.errors.root.serverError.message}
           </FormMessage>
         )}
 
-        <Alert variant="destructive" className="bg-yellow-50 border-yellow-300 text-yellow-800 [&>svg]:text-yellow-600 dark:bg-yellow-950 dark:border-yellow-800 dark:text-yellow-300 dark:[&>svg]:text-yellow-500">
+        <Alert variant="destructive" className="bg-yellow-50 border-yellow-300 text-yellow-800 [&gt;svg]:text-yellow-600 dark:bg-yellow-950 dark:border-yellow-800 dark:text-yellow-300 dark:[&gt;svg]:text-yellow-500">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Important Security Note</AlertTitle>
             <AlertDescription>
-                Storing SMTP passwords directly is insecure. Use environment variables or a secrets manager in production. The password field is required for testing. Saved passwords are not displayed.
+                Storing SMTP passwords directly is insecure. Use environment variables or a secrets manager in production. The password field is required for testing. Saved passwords are not displayed after saving.
             </AlertDescription>
          </Alert>
 
@@ -255,8 +231,8 @@ export function EmailSettingsForm({ initialSettings, onSuccess, onTestResult, co
 
         <FormField control={form.control} name="smtpSecure" render={({ field }) => (
             <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
-                <div className="space-y-0.5"><FormLabel>Use Encryption (TLS/SSL)</FormLabel>
-                <FormDescription>Enable secure connection. Common for ports 587/465. Check provider.</FormDescription></div>
+                <div className="space-y-0.5"><FormLabel>Use Encryption (Implicit TLS/SSL)</FormLabel>
+                <FormDescription>Enable secure connection (usually for port 465). Port 587 uses STARTTLS (set false).</FormDescription></div>
                 <FormControl><Switch checked={field.value} onCheckedChange={field.onChange}/></FormControl>
             </FormItem>
         )}/>

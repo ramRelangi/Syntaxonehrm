@@ -17,6 +17,10 @@ function mapRowToEmailTemplate(row: any): EmailTemplate {
 
 // Get templates for a specific tenant
 export async function getAllTemplates(tenantId: string): Promise<EmailTemplate[]> {
+    if (!tenantId) {
+        console.warn("[DB getAllTemplates] Missing tenantId.");
+        return [];
+    }
     const client = await pool.connect();
     try {
         const res = await client.query('SELECT * FROM email_templates WHERE tenant_id = $1 ORDER BY name ASC', [tenantId]);
@@ -31,6 +35,10 @@ export async function getAllTemplates(tenantId: string): Promise<EmailTemplate[]
 
 // Get template by ID (ensure it belongs to the tenant - requires tenantId context)
 export async function getTemplateById(id: string, tenantId: string): Promise<EmailTemplate | undefined> {
+    if (!tenantId || !id) {
+        console.warn("[DB getTemplateById] Missing tenantId or id.");
+        return undefined;
+    }
     const client = await pool.connect();
     try {
         const res = await client.query('SELECT * FROM email_templates WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
@@ -77,6 +85,10 @@ export async function addTemplate(templateData: Omit<EmailTemplate, 'id'>): Prom
 
 // Update template (ensure it belongs to the tenant)
 export async function updateTemplate(id: string, tenantId: string, updates: Partial<Omit<EmailTemplate, 'id' | 'tenantId'>>): Promise<EmailTemplate | undefined> {
+     if (!tenantId || !id) {
+        console.warn("[DB updateTemplate] Missing tenantId or id.");
+        return undefined;
+    }
     const client = await pool.connect();
     const setClauses: string[] = [];
     const values: any[] = [];
@@ -128,6 +140,10 @@ export async function updateTemplate(id: string, tenantId: string, updates: Part
 
 // Delete template (ensure it belongs to the tenant)
 export async function deleteTemplate(id: string, tenantId: string): Promise<boolean> {
+     if (!tenantId || !id) {
+        console.warn("[DB deleteTemplate] Missing tenantId or id.");
+        return false;
+    }
     const client = await pool.connect();
     const query = 'DELETE FROM email_templates WHERE id = $1 AND tenant_id = $2';
     try {
@@ -167,6 +183,10 @@ function mapRowToEmailSettings(row: any): EmailSettings | null {
 
 // Function to get settings for a specific tenant
 export async function getEmailSettings(tenantId: string): Promise<EmailSettings | null> {
+    if (!tenantId) {
+        console.warn("[DB getEmailSettings] Missing tenantId.");
+        return null;
+    }
     const client = await pool.connect();
     console.log(`[DB getEmailSettings] Fetching email settings row for tenant ${tenantId}...`);
     try {
@@ -194,9 +214,9 @@ export async function getEmailSettings(tenantId: string): Promise<EmailSettings 
 }
 
 // Function to update/insert settings for a specific tenant
-export async function updateEmailSettings(settingsData: EmailSettings): Promise<EmailSettings> {
+export async function updateEmailSettings(tenantId: string, settingsData: Omit<EmailSettings, 'tenantId'>): Promise<Omit<EmailSettings, 'smtpPassword'>> {
     const client = await pool.connect();
-    if (!settingsData.tenantId) {
+    if (!tenantId) {
         throw new Error("Tenant ID is required to update email settings.");
     }
     // In a real app, encrypt smtpPassword before saving
@@ -209,7 +229,7 @@ export async function updateEmailSettings(settingsData: EmailSettings): Promise<
             smtp_host = EXCLUDED.smtp_host,
             smtp_port = EXCLUDED.smtp_port,
             smtp_user = EXCLUDED.smtp_user,
-            smtp_password = EXCLUDED.smtp_password,
+            smtp_password = EXCLUDED.smtp_password, -- Always update encrypted password
             smtp_secure = EXCLUDED.smtp_secure,
             from_email = EXCLUDED.from_email,
             from_name = EXCLUDED.from_name,
@@ -217,7 +237,7 @@ export async function updateEmailSettings(settingsData: EmailSettings): Promise<
         RETURNING *;
     `;
     const values = [
-        settingsData.tenantId,
+        tenantId, // Use the explicit tenantId parameter
         settingsData.smtpHost,
         settingsData.smtpPort,
         settingsData.smtpUser,
@@ -227,7 +247,7 @@ export async function updateEmailSettings(settingsData: EmailSettings): Promise<
         settingsData.fromName,
     ];
     try {
-        console.log("[DB updateEmailSettings] Attempting upsert with data for tenant:", settingsData.tenantId, JSON.stringify({ ...settingsData, smtpPassword: '***' }));
+        console.log("[DB updateEmailSettings] Attempting upsert with data for tenant:", tenantId, JSON.stringify({ ...settingsData, smtpPassword: '***' }));
         const res = await client.query(query, values);
         console.log("[DB updateEmailSettings] Upsert successful. Returning mapped settings.");
         // Return the saved data, potentially decrypting password if needed (but generally don't return password)
@@ -236,7 +256,9 @@ export async function updateEmailSettings(settingsData: EmailSettings): Promise<
               throw new Error("Failed to retrieve settings after update."); // Should not happen if query returns data
          }
          // DO NOT return the password, even encrypted
-         return { ...savedSettings, smtpPassword: '' }; // Return with password cleared
+         // eslint-disable-next-line @typescript-eslint/no-unused-vars
+         const { smtpPassword, ...safeSettings } = savedSettings;
+         return safeSettings; // Return settings without password
     } catch (err) {
         console.error('Error updating email settings:', err);
         throw err;

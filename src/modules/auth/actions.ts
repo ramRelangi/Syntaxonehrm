@@ -1,126 +1,24 @@
-
 'use server';
+
+// export const runtime = 'nodejs'; // Removed - bcrypt should work in default runtime now
 
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
-import nodemailer from 'nodemailer';
+// import nodemailer from 'nodemailer'; // Removed - Not sending email from here anymore
 import { registrationSchema, type RegistrationFormData, type Tenant, type User } from '@/modules/auth/types';
 import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db';
 import pool, { testDbConnection } from '@/lib/db'; // Import pool and test function
-import { getEmailSettings, updateEmailSettings } from '@/modules/communication/lib/db'; // Import function to get settings
-import type { EmailSettings } from '@/modules/communication/types'; // Import EmailSettings type
+// import { getEmailSettings, updateEmailSettings } from '@/modules/communication/lib/db'; // Removed dependency
+// import type { EmailSettings } from '@/modules/communication/types'; // Removed dependency
 import { redirect } from 'next/navigation'; // Import redirect
 import { headers } from 'next/headers'; // Import headers to potentially get domain in logout
 import { initializeDatabase } from '@/lib/init-db'; // Import initializeDatabase
 
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
 
-// Helper function to create transporter (similar to the one in communication module)
-function createTransporter(settings: EmailSettings): nodemailer.Transporter {
-    console.log(`[Auth Action - createTransporter] Creating transporter with settings: host=${settings.smtpHost}, port=${settings.smtpPort}, user=${settings.smtpUser ? '***' : 'null'}, secure=${settings.smtpSecure}`);
-    let transportOptions: nodemailer.TransportOptions = {
-        host: settings.smtpHost,
-        port: settings.smtpPort,
-        auth: {
-            user: settings.smtpUser,
-            pass: settings.smtpPassword, // Assuming password from DB is decrypted/usable
-        },
-        connectionTimeout: 15000, // 15 seconds
-        greetingTimeout: 15000,
-        socketTimeout: 15000,
-        logger: process.env.NODE_ENV === 'development', // Log SMTP commands in development
-        debug: process.env.NODE_ENV === 'development', // Log connection details in development
-    };
+// Removed createTransporter function as it's no longer needed here
 
-    // Explicitly handle common ports 465 (SSL) and 587 (TLS)
-    if (settings.smtpPort === 465) {
-        transportOptions.secure = true;
-        console.log('[Auth Action - createTransporter] Using secure=true for port 465');
-    } else if (settings.smtpPort === 587) {
-        transportOptions.secure = false; // STARTTLS will be used automatically by Nodemailer
-        transportOptions.requireTLS = true; // Often needed for port 587
-        console.log('[Auth Action - createTransporter] Using secure=false, requireTLS=true for port 587');
-    } else {
-        // For other ports, rely on the 'smtpSecure' flag from settings
-        transportOptions.secure = settings.smtpSecure;
-        console.warn(`[Auth Action - createTransporter] Using provided 'secure' value (${settings.smtpSecure}) for non-standard port ${settings.smtpPort}.`);
-    }
-
-
-    return nodemailer.createTransport(transportOptions);
-}
-
-// Function to send the welcome email
-async function sendWelcomeEmail(tenantId: string, adminName: string, adminEmail: string, companyDomain: string): Promise<boolean> {
-    console.log(`[sendWelcomeEmail] Attempting to send welcome email to ${adminEmail} for domain ${companyDomain} (Tenant ID: ${tenantId}).`);
-    let settings: EmailSettings | null = null;
-    try {
-        // Fetch settings specific to the newly created tenant using tenantId
-        console.log(`[sendWelcomeEmail] Fetching email settings from DB for tenant ${tenantId}...`);
-        // Use the DB function directly, passing tenantId
-        settings = await getEmailSettings(tenantId); // Pass tenantId here
-
-        // Log retrieved settings (mask password)
-        console.log('[sendWelcomeEmail] Retrieved settings:', settings ? JSON.stringify({ ...settings, smtpPassword: '***' }) : 'null');
-
-        // Validate essential settings
-        // Ensure password check works even if it's an empty string initially (allow empty for initial setup)
-        const isSettingsValid = settings && settings.smtpHost && settings.smtpPort && settings.smtpUser && settings.smtpPassword !== undefined && settings.fromEmail && settings.fromName;
-
-
-        if (!isSettingsValid) {
-             console.error(`[sendWelcomeEmail] Email settings are incomplete or not configured in DB for tenant ${tenantId}. Cannot send welcome email. Check if DB save/fetch is working.`);
-             // Optionally, try to send a fallback email from a central address if the primary settings are bad/missing
-             // For now, just return false
-             return false; // Indicate failure to send
-         }
-        console.log('[sendWelcomeEmail] Email settings retrieved and validated.');
-
-
-        console.log('[sendWelcomeEmail] Creating Nodemailer transporter...');
-        const transporter = createTransporter(settings); // Pass validated settings
-
-        // Construct tenant-specific login URL using tenant domain and root domain
-        const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost'; // Use configured root domain
-        // Construct the subdomain URL
-        const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : ''; // Add port for non-production
-        const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-        const loginUrl = `${protocol}://${companyDomain}.${rootDomain}${port}/login`; // Construct subdomain login URL
-        console.log(`[sendWelcomeEmail] Constructed Tenant Login URL: ${loginUrl}`);
-
-        const mailOptions = {
-            from: `"${settings.fromName}" <${settings.fromEmail}>`,
-            to: adminEmail,
-            subject: 'Welcome to SyntaxHive Hrm!',
-            text: `Hi ${adminName},\n\nWelcome to SyntaxHive Hrm!\n\nYour company account "${companyDomain}" has been created.\n\nYou can log in using your email (${adminEmail}) and the password you set during registration.\n\nYour unique login URL is: ${loginUrl}\n\nPlease bookmark this link for future access.\n\nThanks,\nThe SyntaxHive Hrm Team`,
-            html: `<p>Hi ${adminName},</p>
-                   <p>Welcome to SyntaxHive Hrm!</p>
-                   <p>Your company account "<strong>${companyDomain}</strong>" has been created.</p>
-                   <p>You can log in using your email (<strong>${adminEmail}</strong>) and the password you set during registration.</p>
-                   <p>Your unique login URL is: <a href="${loginUrl}">${loginUrl}</a></p>
-                   <p>Please bookmark this link for future access.</p>
-                   <p>Thanks,<br/>The SyntaxHive Hrm Team</p>`,
-        };
-
-        console.log('[sendWelcomeEmail] Prepared mail options (recipient/sender only):', { from: mailOptions.from, to: mailOptions.to, subject: mailOptions.subject });
-        console.log('[sendWelcomeEmail] Attempting to send mail via Nodemailer...');
-        const info = await transporter.sendMail(mailOptions);
-        console.log(`[sendWelcomeEmail] Welcome email sent successfully to ${adminEmail}. Message ID: ${info.messageId}`);
-        return true; // Indicate success
-
-    } catch (error: any) {
-        console.error(`[sendWelcomeEmail] Failed to send welcome email to ${adminEmail}:`, error);
-        // Log specific SMTP errors if available
-        if (error.code) {
-            console.error(`[sendWelcomeEmail] SMTP Error Code: ${error.code}, Command: ${error.command}`);
-        }
-        if (error.responseCode) {
-            console.error(`[sendWelcomeEmail] SMTP Response Code: ${error.responseCode}, Response: ${error.response}`);
-        }
-        // Don't fail the whole registration if email sending fails, but log it.
-        return false; // Indicate failure to send
-    }
-}
+// Removed sendWelcomeEmail function as it's no longer called from here
 
 
 export async function registerTenantAction(formData: RegistrationFormData): Promise<{ success: boolean; tenant?: Tenant; user?: User; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
@@ -226,27 +124,37 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.log(`[registerTenantAction] Admin user created successfully with ID: ${newUser.id}`);
 
 
-        // 8. Initialize default Email Settings for the new tenant
+        // 8. Initialize default Email Settings for the new tenant (Removed - No longer done here)
+        /*
          console.log(`[registerTenantAction] Initializing default email settings for tenant ${newTenant.id}...`);
-         const defaultSettings: EmailSettings = {
-             tenantId: newTenant.id, // Include tenantId here
+         const defaultSettings: Omit<EmailSettings, 'smtpPassword'> & { smtpPassword?: string } = { // Make password optional for initial save
+             tenantId: newTenant.id, // Ensure tenantId is here
              smtpHost: 'smtp.example.com', // Placeholder - user MUST configure this later
              smtpPort: 587,
              smtpUser: 'user@example.com',
-             smtpPassword: '', // Leave empty for user to set (or use placeholder if encryption is handled)
+             smtpPassword: '', // Leave empty for user to set
              smtpSecure: false, // Default to false (use TLS for port 587)
              fromEmail: `noreply@${lowerCaseDomain}.${process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost'}`, // More specific default
              fromName: `${companyName} (SyntaxHive Hrm)`,
          };
-         // Pass the complete settings object to updateEmailSettings
-         // Need to ensure updateEmailSettings accepts tenantId
-          await updateEmailSettings(defaultSettings.tenantId, defaultSettings);
+         // updateEmailSettings requires the full EmailSettings object including password
+         // We need to ensure the types match or adjust updateEmailSettings
+         const settingsToSave: EmailSettings = {
+             ...defaultSettings,
+             smtpPassword: defaultSettings.smtpPassword || '' // Ensure password is a string
+         };
+
+         if (!settingsToSave.tenantId) {
+             throw new Error("Tenant ID is missing before saving email settings.");
+         }
+
+         await updateEmailSettings(settingsToSave.tenantId, settingsToSave); // Pass tenantId explicitly
          console.log(`[registerTenantAction] Default email settings initialized for tenant ${newTenant.id}.`);
+        */
 
-
-        // 9. Send Welcome Email (Fire-and-forget, don't block registration on email failure)
+        // 9. Send Welcome Email (Removed - No longer sent from here)
+        /*
          console.log("[registerTenantAction] Triggering welcome email sending...");
-         // Pass newTenant.id to sendWelcomeEmail
          sendWelcomeEmail(newTenant.id, adminName, adminEmail, lowerCaseDomain).then(sent => {
              if (sent) {
                  console.log("[registerTenantAction] Welcome email sending initiated successfully (async).");
@@ -256,12 +164,15 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
          }).catch(err => {
               console.error("[registerTenantAction] Unexpected error during async welcome email sending:", err);
          });
+        */
+        console.log("[registerTenantAction] Skipping welcome email sending.");
 
 
         // 10. Return Success (don't return password hash)
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash: _, ...safeUser } = newUser;
         console.log("[registerTenantAction] Registration completed successfully.");
+        // Return the tenant domain so the UI can display the login link hint
         return { success: true, tenant: newTenant, user: safeUser };
 
     } catch (error: any) {
@@ -282,9 +193,6 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
          } else if (error.message?.includes('schema not initialized')) {
              // Catch specific schema error from underlying DB functions
               errorMessage = error.message;
-         } else if (error.message?.includes('Tenant ID is required')) {
-              // Catch error from updateEmailSettings
-              errorMessage = error.message;
          }
 
         return { success: false, errors: [{ code: 'custom', path: ['root'], message: errorMessage }] };
@@ -300,7 +208,7 @@ export async function logoutAction() {
   // --- Attempt to get tenant domain for redirect ---
   let tenantDomain: string | null = null;
   try {
-      // Option 1: From session data (if stored there)
+      // Option 1: From session data (if stored there) - Ideal
       // const session = await getSession(); // Replace with your session retrieval logic
       // if (session?.user?.tenantDomain) {
       //   tenantDomain = session.user.tenantDomain;
@@ -311,7 +219,10 @@ export async function logoutAction() {
       const host = headersList.get('host') || '';
       const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
       const match = host.match(`^(.*)\\.${rootDomain}$`);
-      tenantDomain = match ? match[1] : null;
+       const subdomain = match ? match[1] : null;
+       if (subdomain && subdomain !== 'www' && subdomain !== 'api') {
+           tenantDomain = subdomain;
+       }
       console.log(`[logoutAction] Inferred tenant domain from host "${host}": ${tenantDomain}`);
 
   } catch (error) {
@@ -325,17 +236,13 @@ export async function logoutAction() {
       const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
       const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : ''; // Add port for non-production
       const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-      // Redirect specifically to the subdomain's login page
-      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/login`;
-      console.log(`[logoutAction] Redirecting to tenant login page: ${redirectUrl}`);
+      // Redirect specifically to the subdomain's root (which should redirect to login)
+      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/`; // Redirect to subdomain root
+      console.log(`[logoutAction] Redirecting to tenant root: ${redirectUrl}`);
   } else {
        // If logging out from the root domain, redirect to root login
        console.log(`[logoutAction] Tenant domain not found, redirecting to root login: ${redirectUrl}`);
-       const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-       const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : '';
-       const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-       redirectUrl = `${protocol}://${rootDomain}${port}/login`;
-       console.log(`[logoutAction] Constructing root login URL: ${redirectUrl}`);
+       // Keep redirectUrl as '/login'
   }
 
   // Redirect to the appropriate login page after clearing session
