@@ -7,7 +7,7 @@ import nodemailer from 'nodemailer';
 import { registrationSchema, type RegistrationFormData, type Tenant, type User } from '@/modules/auth/types';
 import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db';
 import pool, { testDbConnection } from '@/lib/db'; // Import pool as default and test function
-import { getEmailSettings } from '@/modules/communication/lib/db'; // Import function to get settings
+import { getEmailSettings, updateEmailSettings } from '@/modules/communication/lib/db'; // Import function to get settings
 import type { EmailSettings } from '@/modules/communication/types'; // Import EmailSettings type
 import { redirect } from 'next/navigation'; // Import redirect
 import { headers } from 'next/headers'; // Import headers to potentially get domain in logout
@@ -157,8 +157,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
             // Instead of returning an error, try to initialize the schema
             console.log("[registerTenantAction] Attempting to initialize database schema...");
             try {
-                // Dynamically import and run the init script
-                await initializeDatabase(); // Removed import, assuming it's available
+                await initializeDatabase();
                 console.log("[registerTenantAction] Database schema initialization successful.");
             } catch (initError: any) {
                 console.error("[registerTenantAction] Failed to initialize database schema:", initError);
@@ -219,21 +218,39 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         });
         console.log(`[registerTenantAction] Admin user created successfully with ID: ${newUser.id}`);
 
-        // 8. Send Welcome Email (Fire-and-forget, don't block registration on email failure)
+
+        // 8. Initialize default Email Settings for the new tenant
+        // Use placeholder values or fetch defaults if applicable
+         console.log(`[registerTenantAction] Initializing default email settings for tenant ${newTenant.id}...`);
+         const defaultSettings: EmailSettings = {
+             tenantId: newTenant.id,
+             smtpHost: 'smtp.example.com', // Placeholder - user MUST configure this later
+             smtpPort: 587,
+             smtpUser: 'user@example.com',
+             smtpPassword: '', // Should be encrypted if set, leave empty for user to set
+             smtpSecure: true,
+             fromEmail: `noreply@${lowerCaseDomain}.syntaxhivehrm.app`, // Placeholder
+             fromName: `${companyName} (SyntaxHive Hrm)`,
+         };
+         await updateEmailSettings(defaultSettings); // Upsert the default settings
+         console.log(`[registerTenantAction] Default email settings initialized for tenant ${newTenant.id}.`);
+
+
+        // 9. Send Welcome Email (Fire-and-forget, don't block registration on email failure)
          console.log("[registerTenantAction] Triggering welcome email sending...");
          // Pass newTenant.id to sendWelcomeEmail
          sendWelcomeEmail(newTenant.id, adminName, adminEmail, lowerCaseDomain).then(sent => {
              if (sent) {
                  console.log("[registerTenantAction] Welcome email sending initiated successfully (async).");
              } else {
-                  console.error("[registerTenantAction] Welcome email sending failed or was skipped due to configuration (async). Check SMTP settings in the database for the new tenant.");
+                  console.error("[registerTenantAction] Welcome email sending failed or was skipped due to configuration (async). User must configure SMTP settings.");
              }
          }).catch(err => {
               console.error("[registerTenantAction] Unexpected error during async welcome email sending:", err);
          });
 
 
-        // 9. Return Success (don't return password hash)
+        // 10. Return Success (don't return password hash)
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash: _, ...safeUser } = newUser;
         console.log("[registerTenantAction] Registration completed successfully.");
@@ -272,7 +289,6 @@ export async function logoutAction() {
   // --- Attempt to get tenant domain for redirect ---
   let tenantDomain: string | null = null;
   try {
-      // **Placeholder:** You need a way to get the current user's tenant domain
       // Option 1: From session data (if stored there)
       // const session = await getSession(); // Replace with your session retrieval logic
       // if (session?.user?.tenantDomain) {
@@ -304,7 +320,8 @@ export async function logoutAction() {
       const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
       const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : ''; // Add port for non-production
       const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/login`; // Redirect to subdomain login page
+      // Redirect specifically to the subdomain's login page
+      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/login`;
       console.log(`[logoutAction] Redirecting to tenant login page: ${redirectUrl}`);
   } else {
        console.log(`[logoutAction] Tenant domain not found, redirecting to root login: ${redirectUrl}`);
@@ -313,5 +330,3 @@ export async function logoutAction() {
   // Redirect to the appropriate login page after clearing session
   redirect(redirectUrl);
 }
-
-```

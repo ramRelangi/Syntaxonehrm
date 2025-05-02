@@ -31,30 +31,46 @@ export default function LoginPage() {
   const [tenantDomain, setTenantDomain] = useState<string | null>(null);
   const [rootDomain, setRootDomain] = useState<string>('localhost');
   const [port, setPort] = useState<string>('9002'); // State for port
+  const [fullTenantUrl, setFullTenantUrl] = useState<string | null>(null); // To store the full tenant URL for display
 
   // Attempt to infer domain from hostname on client-side
   useEffect(() => {
     // This effect runs only on the client side
     const currentRootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
     const currentPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+    const currentProtocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    console.log(`[LoginPage Effect] Hostname: ${hostname}, Root Domain: ${currentRootDomain}, Port: ${currentPort}`); // Log details
+
     setRootDomain(currentRootDomain);
     setPort(currentPort); // Store the port
 
-    const hostname = window.location.hostname;
-    console.log(`[LoginPage Effect] Hostname: ${hostname}, Root Domain: ${currentRootDomain}, Port: ${currentPort}`); // Log details
+    // Handle localhost directly
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        setTenantDomain(null);
+        const rootUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}`;
+        setFullTenantUrl(rootUrl);
+        console.log(`[LoginPage Effect] On root domain (localhost). Full URL: ${rootUrl}`);
+        return; // Stop processing if on localhost directly
+    }
+
     const match = hostname.match(`^(.*)\\.${currentRootDomain}$`);
     const subdomain = match ? match[1] : null;
     console.log(`[LoginPage Effect] Extracted subdomain: ${subdomain}`);
 
     if (subdomain && !['www', 'api'].includes(subdomain)) {
         setTenantDomain(subdomain);
-         console.log(`[LoginPage Effect] Tenant domain set to: ${subdomain}`);
+        const tenantUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}`;
+        setFullTenantUrl(tenantUrl);
+        console.log(`[LoginPage Effect] Tenant domain set to: ${subdomain}. Full URL: ${tenantUrl}`);
     } else {
         // If on root domain or ignored subdomain, clear tenantDomain state
         setTenantDomain(null);
-         console.log(`[LoginPage Effect] No tenant domain detected or on root domain.`);
+         const rootUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}`;
+         setFullTenantUrl(rootUrl);
+         console.log(`[LoginPage Effect] No tenant domain detected or on root domain. Full URL: ${rootUrl}`);
     }
-}, []); // Empty dependency array ensures this runs once on mount
+}, []); // Only run once on mount
 
 
   const form = useForm<LoginFormInputs>({
@@ -105,20 +121,27 @@ export default function LoginPage() {
   };
 
   // Construct forgot password link dynamically, including port for local dev
+  // If on tenant domain, link to /forgot-password/[domain], else to /forgot-password (root)
   const forgotPasswordHref = tenantDomain
-    ? `/forgot-password/${tenantDomain}` // Relative path, middleware handles rewrite
+    ? `/forgot-password/${tenantDomain}` // Relative path for tenant forgot password
     : '/forgot-password'; // Root forgot password page
 
-  const displayDomain = tenantDomain ? `${tenantDomain}.${rootDomain}${port !== '80' && port !== '443' ? `:${port}` : ''}` : `the main login`;
+  // Determine display text based on whether a tenant domain was detected
+  const displayLocation = tenantDomain
+      ? `company: ${tenantDomain}` // Display like "company: demo"
+      : `the main portal`;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold">Login to SyntaxHive Hrm</CardTitle>
-          <CardDescription>
-            {`Enter your credentials for ${displayDomain}`}
-          </CardDescription>
+           {fullTenantUrl && ( // Display the URL if available
+                <CardDescription>
+                    {`Enter your credentials for ${displayLocation}`}
+                    <span className="block text-xs text-muted-foreground mt-1">({fullTenantUrl})</span>
+                </CardDescription>
+           )}
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -170,11 +193,9 @@ export default function LoginPage() {
               </Button>
             </form>
           </Form>
-          {/* Removed "Register Company" link */}
+           {/* Registration link is now removed */}
         </CardContent>
       </Card>
     </div>
   );
 }
-
-```
