@@ -42,10 +42,15 @@ export async function POST(request: NextRequest) {
   try {
     // 1. Get Email Settings
     settings = getEmailSettings();
-    if (!settings || !settings.smtpHost || !settings.fromEmail) {
-      console.error('[Send Email] Email settings are not configured.');
+    console.log('[Send Email API] Retrieved settings from mock DB:', settings); // <<< ADDED LOGGING
+
+    // Re-check the condition carefully, including port > 0
+    if (!settings || !settings.smtpHost || !settings.fromEmail || !settings.smtpUser || !settings.smtpPassword || !(settings.smtpPort > 0) ) {
+      console.error('[Send Email API] Email settings check failed. Settings are considered unconfigured.'); // <<< ADDED LOGGING
       return NextResponse.json({ error: 'Configuration Error', message: 'Email sending is not configured. Please set up SMTP details in Communication Settings.' }, { status: 503 }); // 503 Service Unavailable
     }
+    console.log('[Send Email API] Settings seem configured. Proceeding...'); // <<< ADDED LOGGING
+
 
     // 2. Parse and Validate Request Body
     const body = await request.json();
@@ -62,15 +67,6 @@ export async function POST(request: NextRequest) {
      console.log(`[Send Email] Creating transporter for ${settings.smtpHost}:${settings.smtpPort}`);
     const transporter = createTransporter(settings);
 
-    // Optional: Verify connection before sending (can add overhead)
-    // try {
-    //     await transporter.verify();
-    //     console.log("[Send Email] SMTP connection verified successfully.");
-    // } catch (verifyError: any) {
-    //     console.error("[Send Email] SMTP connection verification failed:", verifyError);
-    //     return NextResponse.json({ error: 'Configuration Error', message: `Failed to connect to SMTP server: ${verifyError.message}` }, { status: 502 }); // 502 Bad Gateway
-    // }
-
     // 4. Define Mail Options
     const mailOptions = {
       from: `"${settings.fromName}" <${settings.fromEmail}>`,
@@ -85,7 +81,6 @@ export async function POST(request: NextRequest) {
     console.log(`[Send Email] Attempting to send email to ${to} via ${settings.smtpHost}`);
     const info = await transporter.sendMail(mailOptions);
     console.log('[Send Email] Email sent successfully:', info.messageId);
-    // console.log('[Send Email] Preview URL (Ethereal): %s', nodemailer.getTestMessageUrl(info)); // Only if using Ethereal
 
     return NextResponse.json({ message: 'Email sent successfully', messageId: info.messageId }, { status: 200 });
 
@@ -113,6 +108,14 @@ export async function POST(request: NextRequest) {
                  errorMessage = 'Connection to SMTP server timed out. Check network/firewall.';
                  statusCode = 504; // Gateway Timeout
                  break;
+              case 'EDNS': // Added DNS error code
+                errorMessage = `Could not resolve SMTP host '${settings?.smtpHost}'. Check the hostname.`;
+                statusCode = 502;
+                break;
+              case 'ESOCKET': // Added generic socket error
+                errorMessage = `Socket error connecting to SMTP server. Check host/port/firewall/TLS settings. (Detail: ${error.message})`;
+                statusCode = 502;
+                break;
              // Add more specific Nodemailer error codes as needed
             default:
                 errorMessage = `SMTP Error: ${error.message}`;

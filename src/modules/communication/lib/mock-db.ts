@@ -3,7 +3,6 @@ import type { EmailTemplate, EmailSettings } from '@/modules/communication/types
 
 // --- Email Templates ---
 let emailTemplates: EmailTemplate[] = [
-  // ... existing templates ...
     {
         id: 'tpl-001',
         name: 'Welcome Email',
@@ -69,21 +68,33 @@ let emailSettings: EmailSettings | {} = {};
 
 
 export function getEmailSettings(): EmailSettings | null {
-    // Check if essential fields exist in the in-memory object
+    // Check if essential fields exist and are valid in the in-memory object
     const potentialSettings = emailSettings as EmailSettings;
-    if (potentialSettings && potentialSettings.smtpHost && potentialSettings.fromEmail && potentialSettings.smtpUser && potentialSettings.smtpPassword && potentialSettings.smtpPort > 0) {
+    // Explicitly check port > 0
+    if (potentialSettings &&
+        potentialSettings.smtpHost &&
+        potentialSettings.fromEmail &&
+        potentialSettings.smtpUser &&
+        potentialSettings.smtpPassword &&
+        potentialSettings.smtpPort && // Check if port exists
+        potentialSettings.smtpPort > 0   // Check if port is positive
+    ) {
        // Return a deep copy ONLY if in-memory settings seem valid and configured
-       console.log("[Mock DB] Returning configured in-memory email settings.");
-       return JSON.parse(JSON.stringify(emailSettings)) as EmailSettings;
+       console.log("[Mock DB - getEmailSettings] Returning configured in-memory settings:", potentialSettings);
+       return JSON.parse(JSON.stringify(potentialSettings)) as EmailSettings;
     }
-    // Return null if no valid settings have been saved to the in-memory store
-    console.log("[Mock DB] No valid in-memory email settings found. Returning null.");
+    // Log the reason for returning null if checks fail
+    if (!potentialSettings || Object.keys(potentialSettings).length === 0) {
+        console.log("[Mock DB - getEmailSettings] No settings found in memory. Returning null.");
+    } else {
+        console.log("[Mock DB - getEmailSettings] In-memory settings are incomplete or invalid. Returning null. Current value:", potentialSettings);
+    }
     return null;
 }
 
 export function updateEmailSettings(settingsData: EmailSettings): EmailSettings {
     // Overwrite existing in-memory settings or create if initially empty
-    console.log("[Mock DB] Updating in-memory email settings.");
+    console.log("[Mock DB - updateEmailSettings] Updating in-memory email settings:", settingsData);
     emailSettings = { ...settingsData };
     // Return a deep copy
     return JSON.parse(JSON.stringify(emailSettings));
@@ -91,6 +102,6 @@ export function updateEmailSettings(settingsData: EmailSettings): EmailSettings 
 
 // Add a function to clear settings (useful for testing)
 export function clearEmailSettings(): void {
-    console.log("[Mock DB] Clearing in-memory email settings.");
+    console.log("[Mock DB - clearEmailSettings] Clearing in-memory email settings.");
     emailSettings = {};
 }
