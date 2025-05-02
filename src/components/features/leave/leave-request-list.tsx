@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import type { LeaveRequest, LeaveRequestStatus } from "@/types/leave";
+import type { LeaveRequest, LeaveRequestStatus, LeaveType } from "@/types/leave"; // Import LeaveType
 import { format, parseISO } from 'date-fns';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,14 +59,21 @@ const getStatusIcon = (status: LeaveRequestStatus) => {
 
 interface LeaveRequestListProps {
   requests: LeaveRequest[];
-  // Add isAdmin or similar prop to conditionally show management actions
+  leaveTypes: LeaveType[]; // Add leaveTypes prop
   isAdminView?: boolean;
   currentUserId?: string; // To check if user can cancel their own request
 }
 
-export function LeaveRequestList({ requests, isAdminView = false, currentUserId }: LeaveRequestListProps) {
+export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, currentUserId }: LeaveRequestListProps) {
   const { toast } = useToast();
   const [actionLoading, setActionLoading] = React.useState<Record<string, boolean>>({}); // Track loading state per request ID
+
+   // Create a map for quick lookup of leave type names
+  const leaveTypeMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    leaveTypes.forEach(lt => map.set(lt.id, lt.name));
+    return map;
+  }, [leaveTypes]);
 
   const handleStatusUpdate = async (id: string, status: 'Approved' | 'Rejected') => {
      setActionLoading(prev => ({ ...prev, [id]: true }));
@@ -110,6 +117,12 @@ export function LeaveRequestList({ requests, isAdminView = false, currentUserId 
      }
   };
 
+  const getLeaveTypeName = (leaveTypeId: string) => {
+      // Use the map, fallback to the stored name (in case type was deleted), or 'Unknown'
+      return leaveTypeMap.get(leaveTypeId) || requests.find(r => r.leaveTypeId === leaveTypeId)?.leaveTypeName || 'Unknown Type';
+  };
+
+
   return (
      <TooltipProvider>
          <Card className="shadow-sm">
@@ -143,7 +156,7 @@ export function LeaveRequestList({ requests, isAdminView = false, currentUserId 
                      requests.map((req) => (
                          <TableRow key={req.id}>
                          {isAdminView && <TableCell>{req.employeeName}</TableCell>}
-                         <TableCell>{req.leaveTypeName}</TableCell>
+                         <TableCell>{getLeaveTypeName(req.leaveTypeId)}</TableCell> {/* Use helper */}
                          <TableCell>
                              {format(parseISO(req.startDate), "MMM d, yyyy")} - {format(parseISO(req.endDate), "MMM d, yyyy")}
                          </TableCell>
@@ -199,7 +212,7 @@ export function LeaveRequestList({ requests, isAdminView = false, currentUserId 
                                          <AlertDialogHeader>
                                              <AlertDialogTitle>Cancel Leave Request?</AlertDialogTitle>
                                              <AlertDialogDescription>
-                                                Are you sure you want to cancel your leave request for {req.leaveTypeName} from {format(parseISO(req.startDate), "MMM d")} to {format(parseISO(req.endDate), "MMM d")}?
+                                                Are you sure you want to cancel your leave request for {getLeaveTypeName(req.leaveTypeId)} from {format(parseISO(req.startDate), "MMM d")} to {format(parseISO(req.endDate), "MMM d")}?
                                              </AlertDialogDescription>
                                          </AlertDialogHeader>
                                          <AlertDialogFooter>
@@ -226,4 +239,5 @@ export function LeaveRequestList({ requests, isAdminView = false, currentUserId 
      </TooltipProvider>
   );
 }
-```
+        
+    

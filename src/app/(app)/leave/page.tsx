@@ -6,7 +6,7 @@ import { LeaveRequestForm } from "@/components/features/leave/leave-request-form
 import { LeaveRequestList } from "@/components/features/leave/leave-request-list";
 import { getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances, addLeaveRequest } from "@/actions/leave-actions";
 import { Badge } from "@/components/ui/badge";
-import { LeaveTypeManagement } from "@/components/features/leave/leave-type-management";
+import { LeaveTypeManagement } from "@/components/features/leave/leave-type-management"; // Corrected import path
 
 // Mock current user ID and admin status - replace with actual auth context
 const MOCK_USER_ID = "emp-001"; // Example: Alice Wonderland
@@ -50,7 +50,7 @@ export default async function LeavePage() {
 
 
        {/* Tabs for Request Form, Lists, and Type Management */}
-       <Tabs defaultValue="request" className="w-full">
+       <Tabs defaultValue="request" className="w-full" id="leave-tabs"> {/* Add id for linking */}
          <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
            <TabsTrigger value="request" className="flex items-center gap-1">
                 <PlusCircle className="h-4 w-4"/> Request Leave
@@ -60,7 +60,7 @@ export default async function LeavePage() {
             </TabsTrigger>
            {MOCK_IS_ADMIN && (
                 <TabsTrigger value="all-requests" className="flex items-center gap-1">
-                   <Settings className="h-4 w-4"/> Manage Requests
+                   <ListChecks className="h-4 w-4"/> Manage Requests {/* Changed Icon */}
                 </TabsTrigger>
            )}
            {MOCK_IS_ADMIN && (
@@ -89,13 +89,13 @@ export default async function LeavePage() {
 
          {/* My Requests Tab */}
          <TabsContent value="my-requests">
-             <LeaveRequestList requests={myRequests} currentUserId={MOCK_USER_ID} isAdminView={false} />
+             <LeaveRequestList requests={myRequests} currentUserId={MOCK_USER_ID} isAdminView={false} leaveTypes={leaveTypes} />
          </TabsContent>
 
          {/* All Requests Tab (Admin Only) */}
          {MOCK_IS_ADMIN && (
             <TabsContent value="all-requests">
-                <LeaveRequestList requests={allRequests} isAdminView={true} />
+                <LeaveRequestList requests={allRequests} isAdminView={true} leaveTypes={leaveTypes} />
             </TabsContent>
          )}
 
@@ -124,3 +124,5 @@ export default async function LeavePage() {
     </div>
   );
 }
+    
+    

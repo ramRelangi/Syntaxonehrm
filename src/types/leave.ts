@@ -7,7 +7,8 @@ export interface LeaveType {
   name: string;
   description?: string;
   requiresApproval: boolean;
-  // Future considerations: accrualRate, maxBalance, etc.
+  defaultBalance?: number; // e.g., initial days granted per year/period
+  accrualRate?: number; // e.g., days accrued per month
 }
 
 // --- Leave Request ---
@@ -51,3 +52,5 @@ export interface LeaveBalance {
     balance: number; // e.g., number of days or hours
     lastUpdated: string; // ISO string
 }
+    
+    
