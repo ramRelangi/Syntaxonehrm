@@ -1,4 +1,5 @@
-"use client"; // Make this a client component to fetch data
+// This component is designated as a Client Component
+"use client";
 
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -9,24 +10,34 @@ import { columns } from '@/modules/employees/components/employee-table-columns';
 import Link from "next/link";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Employee } from "@/modules/employees/types";
+import type { Employee } from '@/modules/employees/types';
 
-// Helper to fetch data from API routes
+// Helper to fetch data from API routes - CLIENT SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
-    // Construct the full URL relative to the application's base URL
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '/'; // Use relative path for client-side fetching
-    const fullUrl = `${baseUrl.endsWith('/') ? baseUrl : baseUrl + '/'}${url.startsWith('/') ? url.substring(1) : url}`;
+    // Use relative paths for client-side fetching
+    const fullUrl = url.startsWith('/') ? url : `/${url}`;
+    console.log(`Fetching data from: ${fullUrl}`); // Log the URL being fetched
 
     try {
-        const response = await fetch(fullUrl, { cache: 'no-store', ...options }); // Use no-store for dynamic data
+        // Fetch relative to the current origin
+        const response = await fetch(fullUrl, { cache: 'no-store', ...options });
+        console.log(`Fetch response status for ${fullUrl}: ${response.status}`); // Log response status
+
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ message: `HTTP error! status: ${response.status}` }));
+            const errorText = await response.text(); // Get raw error text
+            console.error(`Fetch error response body for ${fullUrl}:`, errorText);
+            const errorData = JSON.parse(errorText || '{}'); // Try parsing JSON, default to empty object
             throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
         return await response.json() as T;
     } catch (error) {
-        console.error(`Error fetching ${fullUrl}:`, error);
-        throw error; // Re-throw to be caught by component
+        console.error(`Error in fetchData for ${fullUrl}:`, error);
+        // Rethrow a more specific error if possible, or the original one
+        if (error instanceof Error) {
+           throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
+        } else {
+           throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
+        }
     }
 }
 
@@ -42,24 +53,25 @@ export default function EmployeesPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await fetchData<Employee[]>('api/employees');
+      // Use the relative path directly
+      const data = await fetchData<Employee[]>('/api/employees');
       setEmployees(data);
     } catch (err: any) {
       setError("Failed to load employees. Please try refreshing the page.");
       toast({
         title: "Error",
-        description: "Could not fetch employee data.",
+        description: err.message || "Could not fetch employee data.",
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
     }
-  }, [toast]); // Added toast to dependency array
+  }, [toast]);
 
   // Fetch data on component mount
   React.useEffect(() => {
     fetchEmployees();
-  }, [fetchEmployees]); // Use the memoized fetch function
+  }, [fetchEmployees]);
 
   // Function to handle successful deletion (passed to DataTable)
   const handleEmployeeDeleted = () => {

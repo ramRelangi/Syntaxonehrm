@@ -1,4 +1,5 @@
-"use client"; // Make LeavePage a client component
+// This component is designated as a Client Component
+"use client";
 
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -16,20 +17,32 @@ import type { LeaveType, LeaveRequest, LeaveBalance } from "@/modules/leave/type
 const MOCK_USER_ID = "emp-001"; // Example: Alice Wonderland
 const MOCK_IS_ADMIN = true; // Example: Assume user is admin for testing
 
-// Helper to fetch data from API routes
+// Helper to fetch data from API routes - CLIENT SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '/';
-    const fullUrl = `${baseUrl.endsWith('/') ? baseUrl : baseUrl + '/'}${url.startsWith('/') ? url.substring(1) : url}`;
+    // Use relative paths for client-side fetching
+    const fullUrl = url.startsWith('/') ? url : `/${url}`;
+    console.log(`Fetching data from: ${fullUrl}`); // Log the URL being fetched
+
     try {
+        // Fetch relative to the current origin
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
+        console.log(`Fetch response status for ${fullUrl}: ${response.status}`); // Log response status
+
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ message: `HTTP error! status: ${response.status}` }));
+            const errorText = await response.text(); // Get raw error text
+            console.error(`Fetch error response body for ${fullUrl}:`, errorText);
+            const errorData = JSON.parse(errorText || '{}'); // Try parsing JSON, default to empty object
             throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
         return await response.json() as T;
     } catch (error) {
-        console.error(`Error fetching ${fullUrl}:`, error);
-        throw error;
+        console.error(`Error in fetchData for ${fullUrl}:`, error);
+        // Rethrow a more specific error if possible, or the original one
+        if (error instanceof Error) {
+           throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
+        } else {
+           throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
+        }
     }
 }
 
@@ -49,20 +62,20 @@ export default function LeavePage() {
     setError(null);
     try {
       const [typesData, allReqData, myReqData, balancesData] = await Promise.all([
-        fetchData<LeaveType[]>('api/leave/types'),
-        MOCK_IS_ADMIN ? fetchData<LeaveRequest[]>('api/leave/requests') : Promise.resolve([]), // Only fetch all if admin
-        fetchData<LeaveRequest[]>(`api/leave/requests?employeeId=${MOCK_USER_ID}`),
-        fetchData<LeaveBalance[]>(`api/leave/balances/${MOCK_USER_ID}`),
+        fetchData<LeaveType[]>('/api/leave/types'),
+        MOCK_IS_ADMIN ? fetchData<LeaveRequest[]>('/api/leave/requests') : Promise.resolve([]), // Only fetch all if admin
+        fetchData<LeaveRequest[]>(`/api/leave/requests?employeeId=${MOCK_USER_ID}`),
+        fetchData<LeaveBalance[]>(`/api/leave/balances/${MOCK_USER_ID}`),
       ]);
       setLeaveTypes(typesData);
       setAllRequests(allReqData);
       setMyRequests(myReqData);
       setMyBalances(balancesData);
-    } catch (err) {
+    } catch (err: any) { // Catch specific error type
       setError("Failed to load leave management data. Please try refreshing.");
       toast({
         title: "Error Loading Data",
-        description: "Could not fetch necessary leave information.",
+        description: err.message || "Could not fetch necessary leave information.",
         variant: "destructive",
       });
     } finally {

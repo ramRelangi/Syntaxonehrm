@@ -8,21 +8,48 @@ import type { Employee } from "@/modules/employees/types"; // Keep type import
 import type { LeaveRequest } from "@/modules/leave/types"; // Keep type import
 
 
-// Helper to fetch data from API routes
+// Helper to fetch data from API routes - SERVER SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     // Construct the full URL relative to the application's base URL
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; // Adjust port if needed
-    const fullUrl = `${baseUrl}${url}`;
+    // Ensure NEXT_PUBLIC_BASE_URL is correctly set in your environment or next.config.js
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+    if (!baseUrl) {
+        console.error("Error: NEXT_PUBLIC_BASE_URL environment variable is not set.");
+        throw new Error("Application base URL is not configured.");
+    }
+    // Ensure the URL starts with a '/' and baseUrl doesn't end with '/'
+    const formattedUrl = url.startsWith('/') ? url.substring(1) : url;
+    const fullUrl = `${baseUrl.replace(/\/$/, '')}/${formattedUrl}`;
+
+    console.log(`Fetching server-side data from: ${fullUrl}`); // Log the URL
 
     try {
         const response = await fetch(fullUrl, { cache: 'no-store', ...options }); // Use no-store for dynamic data
+        console.log(`Server-side fetch response status for ${fullUrl}: ${response.status}`);
+
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorText = await response.text();
+            console.error(`Server-side fetch error for ${fullUrl}: ${errorText}`);
+            // Try to parse JSON, but fallback if it's not JSON
+            let errorMessage = `HTTP error! status: ${response.status}`;
+            try {
+                const errorData = JSON.parse(errorText);
+                errorMessage = errorData.message || errorMessage;
+            } catch (parseError) {
+                // If parsing fails, use the raw text or the status code error
+                errorMessage = errorText || errorMessage;
+            }
+             throw new Error(errorMessage);
         }
         return await response.json() as T;
     } catch (error) {
         console.error(`Error fetching ${fullUrl}:`, error);
-        throw error; // Re-throw to be caught by Suspense boundary or error component
+        // Re-throw to be caught by Suspense boundary or error component
+        if (error instanceof Error) {
+           throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
+        } else {
+            throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
+        }
     }
 }
 

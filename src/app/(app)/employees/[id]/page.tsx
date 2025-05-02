@@ -1,4 +1,5 @@
-"use client"; // Make detail page a client component
+// This component is designated as a Client Component
+"use client";
 
 import * as React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -12,21 +13,34 @@ import type { Employee } from '@/modules/employees/types';
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 
-// Helper to fetch data from API routes
+// Helper to fetch data from API routes - CLIENT SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '/';
-    const fullUrl = `${baseUrl.endsWith('/') ? baseUrl : baseUrl + '/'}${url.startsWith('/') ? url.substring(1) : url}`;
+    // Use relative paths for client-side fetching
+    const fullUrl = url.startsWith('/') ? url : `/${url}`;
+    console.log(`Fetching data from: ${fullUrl}`); // Log the URL being fetched
+
     try {
+        // Fetch relative to the current origin
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
+        console.log(`Fetch response status for ${fullUrl}: ${response.status}`); // Log response status
+
+        if (response.status === 404) return undefined as T; // Handle not found specifically
+
         if (!response.ok) {
-            if (response.status === 404) return undefined as T; // Handle not found specifically
-            const errorData = await response.json().catch(() => ({ message: `HTTP error! status: ${response.status}` }));
+            const errorText = await response.text(); // Get raw error text
+            console.error(`Fetch error response body for ${fullUrl}:`, errorText);
+            const errorData = JSON.parse(errorText || '{}'); // Try parsing JSON, default to empty object
             throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
         return await response.json() as T;
     } catch (error) {
-        console.error(`Error fetching ${fullUrl}:`, error);
-        throw error;
+        console.error(`Error in fetchData for ${fullUrl}:`, error);
+        // Rethrow a more specific error if possible, or the original one
+        if (error instanceof Error) {
+           throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
+        } else {
+           throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
+        }
     }
 }
 
@@ -63,7 +77,8 @@ export default function EmployeeDetailPage() {
       setIsLoading(true);
       setError(null);
       try {
-        const data = await fetchData<Employee | undefined>(`api/employees/${employeeId}`);
+        // Use relative path
+        const data = await fetchData<Employee | undefined>(`/api/employees/${employeeId}`);
         if (!data) {
           notFound(); // Trigger 404 if API returns undefined/404
           return;
@@ -73,7 +88,7 @@ export default function EmployeeDetailPage() {
         setError("Failed to load employee data.");
         toast({
           title: "Error",
-          description: "Could not fetch employee details.",
+          description: err.message || "Could not fetch employee details.",
           variant: "destructive",
         });
       } finally {
