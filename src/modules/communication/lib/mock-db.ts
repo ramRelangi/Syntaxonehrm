@@ -69,12 +69,17 @@ console.log(`[Mock DB - Initial State] emailSettings initialized as: ${JSON.stri
 
 
 export function getEmailSettings(): EmailSettings | null {
-    console.log('[Mock DB - getEmailSettings] Accessing current settings...');
+    console.log('[Mock DB - getEmailSettings] Reading current settings...');
+    // Log the raw value of the module-level variable
+    console.log(`[Mock DB - getEmailSettings] Current raw state of 'emailSettings' variable: ${JSON.stringify(emailSettings)}`);
+
     const potentialSettings = emailSettings as EmailSettings; // Cast for easier access
 
     // Check if essential fields exist and are valid in the in-memory object
     const isValid =
         potentialSettings &&
+        typeof potentialSettings === 'object' && // Ensure it's an object and not null/empty
+        Object.keys(potentialSettings).length > 0 && // Ensure it's not an empty object
         potentialSettings.smtpHost &&
         potentialSettings.fromEmail &&
         potentialSettings.smtpUser &&
@@ -82,9 +87,8 @@ export function getEmailSettings(): EmailSettings | null {
         potentialSettings.smtpPort && // Check if port exists
         potentialSettings.smtpPort > 0;  // Check if port is positive
 
-    console.log(`[Mock DB - getEmailSettings] Current in-memory object: ${JSON.stringify(potentialSettings)}`);
-    console.log(`[Mock DB - getEmailSettings] Validation result: ${isValid}`);
-    console.log(`[Mock DB - getEmailSettings] Check details: host=${!!potentialSettings?.smtpHost}, from=${!!potentialSettings?.fromEmail}, user=${!!potentialSettings?.smtpUser}, pass=${!!potentialSettings?.smtpPassword}, port=${potentialSettings?.smtpPort}`);
+    console.log(`[Mock DB - getEmailSettings] Validation result based on current state: ${isValid}`);
+    console.log(`[Mock DB - getEmailSettings] Detailed Check: host=${!!potentialSettings?.smtpHost}, from=${!!potentialSettings?.fromEmail}, user=${!!potentialSettings?.smtpUser}, pass=${!!potentialSettings?.smtpPassword}, port=${potentialSettings?.smtpPort}`);
 
 
     if (isValid) {
@@ -94,7 +98,7 @@ export function getEmailSettings(): EmailSettings | null {
     } else {
         // Log the reason for returning null if checks fail
         if (!potentialSettings || Object.keys(potentialSettings).length === 0) {
-            console.log("[Mock DB - getEmailSettings] No settings found in memory (empty object). Returning null.");
+            console.log("[Mock DB - getEmailSettings] No settings found in memory (variable is empty object). Returning null.");
         } else {
             console.log("[Mock DB - getEmailSettings] In-memory settings are incomplete or invalid. Returning null.");
         }
@@ -105,8 +109,9 @@ export function getEmailSettings(): EmailSettings | null {
 export function updateEmailSettings(settingsData: EmailSettings): EmailSettings {
     // Overwrite existing in-memory settings or create if initially empty
     console.log("[Mock DB - updateEmailSettings] Received data to update settings:", JSON.stringify(settingsData));
+    // Ensure we are updating the module-level variable
     emailSettings = { ...settingsData };
-    console.log("[Mock DB - updateEmailSettings] In-memory emailSettings object updated:", JSON.stringify(emailSettings));
+    console.log("[Mock DB - updateEmailSettings] Module-level 'emailSettings' variable updated:", JSON.stringify(emailSettings));
     // Return a deep copy
     return JSON.parse(JSON.stringify(emailSettings));
 }
@@ -115,5 +120,5 @@ export function updateEmailSettings(settingsData: EmailSettings): EmailSettings 
 export function clearEmailSettings(): void {
     console.log("[Mock DB - clearEmailSettings] Clearing in-memory email settings.");
     emailSettings = {};
-    console.log("[Mock DB - clearEmailSettings] emailSettings object is now:", JSON.stringify(emailSettings));
+    console.log("[Mock DB - clearEmailSettings] Module-level 'emailSettings' variable is now:", JSON.stringify(emailSettings));
 }

@@ -7,7 +7,7 @@ import type { EmailSettings } from '@/modules/communication/types';
 
 // Helper function to create transporter
 function createTransporter(settings: EmailSettings): nodemailer.Transporter {
-    console.log(`[Send Email - createTransporter] Creating transporter with settings: host=${settings.smtpHost}, port=${settings.smtpPort}, user=${settings.smtpUser}, secure=${settings.smtpSecure}`);
+    console.log(`[Send Email - createTransporter] Creating transporter with settings: host=${settings.smtpHost}, port=${settings.smtpPort}, user=${settings.smtpUser ? '***' : 'null'}, pass=${settings.smtpPassword ? '***' : 'null'}, secure=${settings.smtpSecure}`);
     let transportOptions: nodemailer.TransportOptions = {
         host: settings.smtpHost,
         port: settings.smtpPort,
@@ -47,13 +47,26 @@ export async function POST(request: NextRequest) {
     // 1. Get Email Settings
     console.log('[Send Email API] Attempting to retrieve email settings from mock DB...');
     settings = getEmailSettings(); // This function already logs internally
-    console.log('[Send Email API] Retrieved settings from getEmailSettings:', settings ? JSON.stringify(settings) : 'null'); // Log what was actually returned
+    console.log('[Send Email API] Raw settings retrieved from getEmailSettings:', settings ? JSON.stringify(settings) : 'null'); // Log what was actually returned
 
     // 2. Validate Settings Retrieved by THIS Request
-    if (!settings || !settings.smtpHost || !settings.fromEmail || !settings.smtpUser || !settings.smtpPassword || !(settings.smtpPort > 0) ) {
-      console.error('[Send Email API] Email settings check failed within this request. Settings are considered unconfigured.');
-      console.error(`[Send Email API] Validation Failure Details: settings=${!!settings}, host=${!!settings?.smtpHost}, from=${!!settings?.fromEmail}, user=${!!settings?.smtpUser}, pass=${!!settings?.smtpPassword}, port=${settings?.smtpPort}`);
-      return NextResponse.json({ error: 'Configuration Error', message: 'Email sending is not configured. Please set up SMTP details in Communication Settings.' }, { status: 503 }); // 503 Service Unavailable
+     const isSettingsValid =
+         settings &&
+         typeof settings === 'object' && // Ensure it's an object
+         settings.smtpHost &&
+         settings.fromEmail &&
+         settings.smtpUser &&
+         settings.smtpPassword &&
+         settings.smtpPort &&
+         settings.smtpPort > 0;
+
+     console.log(`[Send Email API] Checking retrieved settings validity: ${isSettingsValid}`);
+     console.log(`[Send Email API] Validation Details: settings=${!!settings}, isObject=${typeof settings === 'object'}, host=${!!settings?.smtpHost}, from=${!!settings?.fromEmail}, user=${!!settings?.smtpUser}, pass=${!!settings?.smtpPassword}, port=${settings?.smtpPort}`);
+
+
+    if (!isSettingsValid) {
+      console.error('[Send Email API] Settings validation failed. Settings are considered unconfigured or incomplete for this request.');
+      return NextResponse.json({ error: 'Configuration Error', message: 'Email sending is not configured or settings are incomplete. Please check and save SMTP details in Communication Settings.' }, { status: 503 }); // 503 Service Unavailable
     }
     console.log('[Send Email API] Settings validation passed within this request. Proceeding...');
 
@@ -73,22 +86,23 @@ export async function POST(request: NextRequest) {
     const { to, subject, body: emailBody } = validation.data;
 
     // 4. Create Nodemailer Transporter
-     console.log(`[Send Email API] Creating transporter for ${settings.smtpHost}:${settings.smtpPort}`);
-    const transporter = createTransporter(settings);
+    // We already validated settings exist, so the non-null assertion is safer here
+     console.log(`[Send Email API] Creating transporter for ${settings!.smtpHost}:${settings!.smtpPort}`);
+    const transporter = createTransporter(settings!);
 
     // 5. Define Mail Options
     const mailOptions = {
-      from: `"${settings.fromName}" <${settings.fromEmail}>`,
+      from: `"${settings!.fromName}" <${settings!.fromEmail}>`,
       to: to,
       subject: subject,
       // Use 'text' for plain text, 'html' for HTML content
       // Basic detection: If body looks like HTML, send as HTML
       [emailBody.trim().startsWith('<') && emailBody.trim().endsWith('>') ? 'html' : 'text']: emailBody,
     };
-     console.log('[Send Email API] Mail options prepared:', JSON.stringify(mailOptions, null, 2)); // Log mail options (excluding body for brevity if needed)
+     console.log('[Send Email API] Mail options prepared:', JSON.stringify(mailOptions, null, 2)); // Log mail options
 
     // 6. Send Mail
-    console.log(`[Send Email API] Attempting to send email to ${to} via ${settings.smtpHost}`);
+    console.log(`[Send Email API] Attempting to send email to ${to} via ${settings!.smtpHost}`);
     const info = await transporter.sendMail(mailOptions);
     console.log('[Send Email API] Email sent successfully:', info.messageId);
 
