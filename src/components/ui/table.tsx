@@ -61,10 +61,10 @@ const TableRow = React.forwardRef<
       "border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted",
       className
     )}
-    {...props}
-  >{children}</tr>
+    {...props}>{children}</tr> // Ensure no extra whitespace around children
 ));
 TableRow.displayName = "TableRow"
+
 
 const TableHead = React.forwardRef<
   HTMLTableCellElement,
