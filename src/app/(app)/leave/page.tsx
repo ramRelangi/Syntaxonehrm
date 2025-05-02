@@ -4,8 +4,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar, PlusCircle, ListChecks, Settings } from "lucide-react";
 import { LeaveRequestForm } from "@/components/features/leave/leave-request-form";
 import { LeaveRequestList } from "@/components/features/leave/leave-request-list";
-import { getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances } from "@/actions/leave-actions";
+import { getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances, addLeaveRequest } from "@/actions/leave-actions";
 import { Badge } from "@/components/ui/badge";
+import { LeaveTypeManagement } from "@/components/features/leave/leave-type-management";
 
 // Mock current user ID and admin status - replace with actual auth context
 const MOCK_USER_ID = "emp-001"; // Example: Alice Wonderland
@@ -48,9 +49,9 @@ export default async function LeavePage() {
        </Card>
 
 
-       {/* Tabs for Request Form and Lists */}
+       {/* Tabs for Request Form, Lists, and Type Management */}
        <Tabs defaultValue="request" className="w-full">
-         <TabsList className="grid w-full grid-cols-2 md:grid-cols-3">
+         <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
            <TabsTrigger value="request" className="flex items-center gap-1">
                 <PlusCircle className="h-4 w-4"/> Request Leave
             </TabsTrigger>
@@ -61,6 +62,11 @@ export default async function LeavePage() {
                 <TabsTrigger value="all-requests" className="flex items-center gap-1">
                    <Settings className="h-4 w-4"/> Manage Requests
                 </TabsTrigger>
+           )}
+           {MOCK_IS_ADMIN && (
+               <TabsTrigger value="manage-types" className="flex items-center gap-1">
+                  <Settings className="h-4 w-4"/> Manage Types
+               </TabsTrigger>
            )}
          </TabsList>
 
@@ -75,13 +81,7 @@ export default async function LeavePage() {
                     <LeaveRequestForm
                         employeeId={MOCK_USER_ID}
                         leaveTypes={leaveTypes}
-                        onSubmitAction={async (data) => {
-                            "use server"; // Ensure action runs on server
-                             // We need to import the actual action here or pass it correctly
-                             // For now, assuming `addLeaveRequest` is the intended action
-                            const { addLeaveRequest } = await import('@/actions/leave-actions');
-                            return addLeaveRequest(data);
-                        }}
+                        onSubmitAction={addLeaveRequest} // Pass the server action directly
                     />
                 </CardContent>
             </Card>
@@ -96,6 +96,13 @@ export default async function LeavePage() {
          {MOCK_IS_ADMIN && (
             <TabsContent value="all-requests">
                 <LeaveRequestList requests={allRequests} isAdminView={true} />
+            </TabsContent>
+         )}
+
+         {/* Manage Leave Types Tab (Admin Only) */}
+         {MOCK_IS_ADMIN && (
+            <TabsContent value="manage-types">
+                <LeaveTypeManagement leaveTypes={leaveTypes} />
             </TabsContent>
          )}
        </Tabs>
@@ -117,4 +124,3 @@ export default async function LeavePage() {
     </div>
   );
 }
-```
