@@ -66,7 +66,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         <SidebarMenuItem key={item.href}>
                             <SidebarMenuButton
                                 asChild
-                                isActive={pathname === item.href} // Check against current pathname
+                                isActive={pathname.startsWith(item.href) && (item.href !== '/dashboard' || pathname === '/dashboard')} // Check startsWith for active state, special case dashboard
                                 tooltip={item.label} // Tooltip shown when collapsed
                             >
                                 <Link href={item.href}>

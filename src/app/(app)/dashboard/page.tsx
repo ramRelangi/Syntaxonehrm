@@ -1,3 +1,4 @@
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Users, Briefcase, FileText, Calendar, BarChart2, UploadCloud } from "lucide-react";
@@ -90,9 +91,13 @@ async function getUpcomingLeavesCount() {
     return count;
 }
 
-// Mock functions for other metrics (can be replaced with API calls later)
-async function getOpenPositionsCount() { await new Promise(res => setTimeout(res, 80)); return 8; }
-async function getPendingTasksCount() { await new Promise(res => setTimeout(res, 50)); return 3; }
+async function getOpenPositionsCount() {
+     // Fetch job postings with status 'Open'
+     const openPositions = await fetchData<any[]>('/api/recruitment/postings?status=Open');
+     return openPositions.length;
+ }
+
+async function getPendingTasksCount() { await new Promise(res => setTimeout(res, 50)); return 3; } // Mock - Replace later
 // --- End Data Fetching Functions ---
 
 
@@ -100,7 +105,9 @@ export default function DashboardPage() {
   // Define quick links
   const quickLinks = [
     { href: '/employees/add', label: 'Add New Employee', icon: Users },
-    { href: '/recruitment/create', label: 'Create Job Posting', icon: Briefcase },
+    // Updated the recruitment link to point to the main recruitment page
+    // The button to create a new posting is on the recruitment page itself
+    { href: '/recruitment', label: 'Manage Job Postings', icon: Briefcase },
     { href: '/leave#request', label: 'Request Leave', icon: Calendar }, // Updated href to target tab
     { href: '/smart-resume-parser', label: 'Parse Resume', icon: UploadCloud },
   ];
@@ -169,6 +176,7 @@ export default function DashboardPage() {
                       <li>- New hire Jane Smith onboarded.</li>
                       <li>- Payroll processed for July.</li>
                       <li>- Alice W. requested leave. (Pending)</li>
+                       <li>- Job Posting "Senior Frontend Engineer" published.</li>
                   </ul>
               </CardContent>
            </Card>
