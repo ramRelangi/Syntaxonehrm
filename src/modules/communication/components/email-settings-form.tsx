@@ -48,19 +48,45 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
             body: JSON.stringify(data),
         });
 
-        const result = await response.json();
-
+        // Check response status and content type before parsing JSON
         if (!response.ok) {
-            throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
+            let errorPayload = { message: `Failed to save settings. Status: ${response.status}` };
+            try {
+                const errorText = await response.text();
+                console.error("Save Settings - Server Error Response Text:", errorText);
+                // Try to parse, fallback to raw text or status code
+                errorPayload = JSON.parse(errorText);
+                if (!errorPayload.message && errorText) {
+                  errorPayload.message = errorText; // Use raw text if JSON has no message
+                }
+            } catch (parseError) {
+                console.error("Save Settings - Failed to parse error response:", parseError);
+            }
+            throw new Error(errorPayload.message || `Failed to save settings. Status: ${response.status}`);
         }
 
-        toast({
-            title: "Settings Saved",
-            description: "Email configuration has been successfully updated.",
-            className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
-        });
+         const contentType = response.headers.get("content-type");
+         if (contentType && contentType.indexOf("application/json") !== -1) {
+              const result = await response.json(); // Assuming success response is JSON
 
-        onSuccess(); // Trigger callback (e.g., refetch settings)
+             toast({
+                title: "Settings Saved",
+                description: "Email configuration has been successfully updated.",
+                className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+             });
+
+              onSuccess(); // Trigger callback (e.g., refetch settings)
+         } else {
+             // Handle unexpected success response format
+             const responseText = await response.text();
+             console.warn("Save Settings - Received non-JSON success response:", responseText);
+             toast({
+                 title: "Settings Saved (Unexpected Response)",
+                 description: "Settings were likely saved, but the server sent an unexpected response.",
+             });
+             onSuccess();
+         }
+
 
     } catch (error: any) {
         console.error("Form submission error:", error);
@@ -97,18 +123,45 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
         body: JSON.stringify(settingsData),
       });
 
-      const result = await response.json();
-
+      // Check response status and content type before parsing
       if (!response.ok) {
-        // Use the detailed message from the API response
-        throw new Error(result.message || result.error || `Test failed. Status: ${response.status}`);
+          let errorPayload = { message: `Test failed. Status: ${response.status}` };
+          try {
+              // Try to parse error JSON, but handle non-JSON responses
+              const errorText = await response.text();
+              console.error("Test Connection - Server Error Response Text:", errorText);
+               // Try to parse, fallback to raw text or status code
+              errorPayload = JSON.parse(errorText);
+               if (!errorPayload.message && errorText) {
+                   errorPayload.message = errorText; // Use raw text if JSON has no message
+               }
+          } catch (parseError) {
+              // If JSON parsing fails, use the status code
+              console.error("Test Connection - Failed to parse error response:", parseError);
+          }
+          throw new Error(errorPayload.message || `Test failed. Status: ${response.status}`);
       }
 
-      toast({
-        title: "Connection Successful",
-        description: "Successfully connected to the SMTP server.",
-        className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
-      });
+      // If response is OK, check content type
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.indexOf("application/json") !== -1) {
+          const result = await response.json(); // Now parse JSON safely
+          // Success toast
+          toast({
+            title: "Connection Successful",
+            description: result.message || "Successfully connected to the SMTP server.", // Use message from response
+            className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+          });
+      } else {
+          // Handle non-JSON success response? Unlikely for this API, but good practice
+          const responseText = await response.text();
+          console.warn("Test Connection - Received non-JSON success response:", responseText);
+          // Assume success if status is ok, even if format is wrong
+           toast({
+            title: "Connection Test Completed (Unexpected Response)",
+            description: "The connection likely succeeded, but the server sent an unexpected response.",
+          });
+      }
 
     } catch (error: any) {
       console.error("Test connection error:", error);
@@ -273,3 +326,4 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
     </Form>
   );
 }
+
