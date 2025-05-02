@@ -1,17 +1,14 @@
 'use server';
 
-// Removed: export const runtime = 'nodejs';
-
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
-import nodemailer from 'nodemailer'; // Using nodemailer for internal registration email
+import nodemailer from 'nodemailer';
 import { registrationSchema, type RegistrationFormData, type Tenant, type User } from '@/modules/auth/types';
 import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db';
-import pool, { testDbConnection } from '@/lib/db'; // Import pool and test function
-// Removed communication module imports for email settings
-import { redirect } from 'next/navigation'; // Import redirect
-import { headers } from 'next/headers'; // Import headers to potentially get domain in logout
-import { initializeDatabase } from '@/lib/init-db'; // Import initializeDatabase
+import pool, { testDbConnection } from '@/lib/db';
+import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
+import { initializeDatabase } from '@/lib/init-db';
 
 
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
@@ -61,6 +58,22 @@ function createInternalTransporter(): nodemailer.Transporter | null {
     return nodemailer.createTransport(transportOptions);
 }
 
+// Helper to construct login URL
+function constructLoginUrl(tenantDomain: string): string {
+    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
+    // Use NEXT_PUBLIC_BASE_URL to get protocol, hostname, and port accurately
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002';
+    const url = new URL(baseUrl);
+    const protocol = url.protocol;
+    const port = url.port || (protocol === 'https:' ? '443' : '80');
+    const displayPort = (port === '80' || port === '443') ? '' : `:${port}`;
+
+    const loginUrl = `${protocol}//${tenantDomain}.${rootDomain}${displayPort}/login`;
+    console.log(`[constructLoginUrl] Constructed: ${loginUrl}`);
+    return loginUrl;
+}
+
+
 async function sendWelcomeEmail(
     tenantName: string,
     adminName: string,
@@ -72,18 +85,10 @@ async function sendWelcomeEmail(
 
     if (!transporter) {
         console.error('[sendWelcomeEmail] Failed to create internal email transporter. Check internal SMTP env vars.');
-        // Optionally notify system admin here if internal mailing fails
         return false;
     }
 
-    // --- Construct Login URL ---
-    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-    const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : '';
-    const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-    // Append /login to the subdomain URL
-    const loginUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/login`;
-    console.log(`[sendWelcomeEmail] Constructed login URL: ${loginUrl}`);
-    // --- End Construct Login URL ---
+    const loginUrl = constructLoginUrl(tenantDomain); // Use helper
 
     const mailOptions = {
         from: `"${INTERNAL_FROM_NAME}" <${INTERNAL_FROM_EMAIL}>`,
@@ -106,13 +111,12 @@ async function sendWelcomeEmail(
         return true;
     } catch (error: any) {
         console.error('[sendWelcomeEmail] Error sending welcome email:', error);
-         // Optionally notify system admin here
         return false;
     }
 }
 
 
-export async function registerTenantAction(formData: RegistrationFormData): Promise<{ success: boolean; tenant?: Tenant; user?: User; errors?: z.ZodIssue[] | { code?: string; path: (string | number)[]; message: string }[] }> {
+export async function registerTenantAction(formData: RegistrationFormData): Promise<{ success: boolean; tenant?: Tenant; user?: User; loginUrl?: string; errors?: z.ZodIssue[] | { code?: string; path: (string | number)[]; message: string }[] }> {
     console.log("[registerTenantAction] Starting registration process...");
 
     // 0. Check Database Connection First
@@ -223,12 +227,14 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
          });
 
 
-        // 8. Return Success (don't return password hash)
+        // 8. Construct Login URL for return
+        const loginUrl = constructLoginUrl(newTenant.domain);
+
+        // 9. Return Success (don't return password hash)
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash: _, ...safeUser } = newUser;
         console.log("[registerTenantAction] Registration completed successfully.");
-        // Return the tenant domain so the UI can display the login link hint
-        return { success: true, tenant: newTenant, user: safeUser };
+        return { success: true, tenant: newTenant, user: safeUser, loginUrl: loginUrl }; // Return the login URL
 
     } catch (error: any) {
         console.error("[registerTenantAction] Error during tenant registration:", error);
@@ -271,17 +277,9 @@ export async function logoutAction() {
   // --- Attempt to get tenant domain for redirect ---
   let tenantDomain: string | null = null;
   try {
-      // Option 1: From session data (if stored there) - Ideal
-      // const session = await getSession(); // Replace with your session retrieval logic
-      // if (session?.user?.tenantDomain) {
-      //   tenantDomain = session.user.tenantDomain;
-      // }
-
-      // Option 2: Infer from request headers (more reliable if middleware sets it)
       const headersList = headers();
       const host = headersList.get('host') || '';
       const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-      // Match subdomains like 'demo.localhost' or 'demo.syntaxhivehrm.app'
       const match = host.match(`^(.*)\\.${rootDomain}(:\\d+)?$`);
       const subdomain = match ? match[1] : null;
        if (subdomain && subdomain !== 'www' && subdomain !== 'api') {
@@ -296,17 +294,10 @@ export async function logoutAction() {
   // --- Redirect Logic ---
   let redirectUrl = '/login'; // Default redirect to root login page
   if (tenantDomain) {
-      // Construct the tenant-specific login URL (subdomain root)
-      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-      const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : ''; // Add port for non-production
-      const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-      // Redirect specifically to the tenant's login page
-      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/login`;
+      redirectUrl = constructLoginUrl(tenantDomain); // Use helper to construct URL
       console.log(`[logoutAction] Redirecting to tenant login: ${redirectUrl}`);
   } else {
-       // If logging out from the root domain, redirect to root login
        console.log(`[logoutAction] Tenant domain not found, redirecting to root login: ${redirectUrl}`);
-       // Keep redirectUrl as '/login'
   }
 
   // Redirect to the appropriate login page after clearing session
@@ -323,12 +314,10 @@ export async function forgotPasswordAction(email: string, domain?: string): Prom
         const tenant = await getTenantByDomain(domain);
         if (!tenant) {
             console.warn(`[forgotPasswordAction] Tenant not found for domain: ${domain}`);
-            // Still return success to avoid revealing tenant existence
             return { success: true, message: `If an account exists for ${email} at ${domain}, you will receive reset instructions.` };
         }
         tenantId = tenant.id;
     } else {
-        // If no domain, this implies a root-level password reset, which might not be supported
         console.warn('[forgotPasswordAction] Root domain password reset requested (not typically supported for tenants).');
          return { success: false, message: 'Password reset from the root domain is not supported. Please use your company\'s login page.' };
     }
@@ -337,16 +326,15 @@ export async function forgotPasswordAction(email: string, domain?: string): Prom
     const user = await getUserByEmail(email, tenantId);
     if (!user) {
         console.warn(`[forgotPasswordAction] User not found for email: ${email} in tenant: ${tenantId}`);
-        // Still return success
          return { success: true, message: `If an account exists for ${email} at ${domain}, you will receive reset instructions.` };
     }
 
-    // 3. Generate Reset Token (implement secure token generation)
-    const resetToken = `fake-reset-token-${Date.now()}`; // Replace with secure random token
+    // 3. Generate Reset Token
+    const resetToken = `fake-reset-token-${Date.now()}`;
     console.log(`[forgotPasswordAction] Generated reset token for user ${user.id}`);
 
-    // 4. Store Token Hash associated with user ID (e.g., in a separate table or user table column with expiry)
-    // await storeResetToken(user.id, resetToken); // Implement this
+    // 4. Store Token Hash associated with user ID
+    // await storeResetToken(user.id, resetToken);
 
     // 5. Send Reset Email using internal sender
     const transporter = createInternalTransporter();
@@ -355,11 +343,7 @@ export async function forgotPasswordAction(email: string, domain?: string): Prom
         return { success: false, message: 'Failed to send reset email due to server configuration.' };
     }
 
-    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-    const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : '';
-    const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-    // Construct tenant-specific reset link
-    const resetUrl = `${protocol}://${domain}.${rootDomain}${port}/reset-password?token=${resetToken}`; // Example path
+    const resetUrl = `${constructLoginUrl(domain).replace('/login', '/reset-password')}?token=${resetToken}`; // Example path
 
     const mailOptions = {
         from: `"${INTERNAL_FROM_NAME}" <${INTERNAL_FROM_EMAIL}>`,
@@ -378,5 +362,3 @@ export async function forgotPasswordAction(email: string, domain?: string): Prom
         return { success: false, message: 'Failed to send password reset email.' };
     }
 }
-
-// Add more actions as needed (e.g., resetPasswordAction, verifyEmailAction)
