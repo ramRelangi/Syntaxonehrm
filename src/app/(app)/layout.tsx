@@ -36,7 +36,7 @@ const navItems = [
   { href: '/payroll', label: 'Payroll', icon: FileText }, // Using FileText for Payroll
   { href: '/leave', label: 'Leave', icon: Calendar }, // Added Leave
   { href: '/documents', label: 'Documents', icon: FileText }, // Using FileText for Documents
-  { href: '/reports', label: 'Reports', icon: BarChart2 },
+  { href: '/reports', label: 'Reports', icon: BarChart2 }, // Added Reports
   { href: '/smart-resume-parser', label: 'Resume Parser', icon: UploadCloud },
 ];
 
@@ -128,3 +128,5 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
+    
