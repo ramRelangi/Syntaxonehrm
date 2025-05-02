@@ -15,7 +15,8 @@ export default function AuthLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="antialiased bg-background text-foreground">
+      {/* Removed bg-background text-foreground as they are applied globally */}
+      <body className="antialiased">
           {children}
           <Toaster />
       </body>
