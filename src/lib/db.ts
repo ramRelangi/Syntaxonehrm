@@ -1,16 +1,23 @@
 import { Pool } from 'pg';
 
+// Log found environment variables (masking password) for debugging
+console.log(`[DB Init] Checking environment variables...`);
+console.log(`[DB Init] DB_HOST: ${process.env.DB_HOST ? 'found' : 'MISSING'}`);
+console.log(`[DB Init] DB_PORT: ${process.env.DB_PORT ? `found (${process.env.DB_PORT})` : 'MISSING (using default 5432)'}`);
+console.log(`[DB Init] DB_USER: ${process.env.DB_USER ? 'found' : 'MISSING'}`);
+console.log(`[DB Init] DB_PASS: ${process.env.DB_PASS ? 'found (masked)' : 'MISSING'}`);
+console.log(`[DB Init] DB_NAME: ${process.env.DB_NAME ? 'found' : 'MISSING'}`);
+
+
 // Ensure environment variables are loaded
 // DB_PORT is made optional as it has a default fallback
 const requiredEnvVars = ['DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME'];
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
 if (missingEnvVars.length > 0) {
-    const errorMessage = `Missing required database environment variables: ${missingEnvVars.join(', ')}. Please ensure they are set in your .env file and the server has been restarted.`;
+    // Remind user about .env file naming and restart requirement
+    const errorMessage = `Missing required database environment variables: ${missingEnvVars.join(', ')}. Please ensure they are set in your .env (or preferably .env.local) file and the server has been restarted.`;
     console.error(`FATAL ERROR: ${errorMessage}`);
-    // In a real app, you might want to throw an error or exit,
-    // but for Next.js build process, console error might be better initially.
-    // process.exit(1); // Exit if critical env vars are missing
     // Throwing the error is correct to prevent proceeding without config.
     throw new Error(errorMessage);
 }
