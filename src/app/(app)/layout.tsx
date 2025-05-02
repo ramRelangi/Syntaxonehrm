@@ -52,8 +52,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     try {
       await logoutAction();
        toast({ title: "Logged Out", description: "You have been successfully logged out." });
-       // Redirect happens inside the action, but good practice to handle client-side too
-       router.push('/login');
+       // Redirect happens inside the action (to /register), but good practice to handle client-side too
+       router.push('/register'); // Redirect to registration page after logout
        router.refresh(); // Ensure page refresh after logout
     } catch (error) {
        console.error("Logout failed:", error);

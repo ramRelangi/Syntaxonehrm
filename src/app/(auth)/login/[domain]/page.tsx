@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { z } from 'zod';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -13,36 +13,29 @@ import { Label } from "@/components/ui/label";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
+import { tenantLoginSchema, type TenantLoginFormInputs } from '@/modules/auth/types'; // Import tenant-specific schema
 
-const loginSchema = z.object({
-  companyDomain: z.string().min(1, "Company domain is required"), // Simple validation for domain
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-});
-
-type LoginFormInputs = z.infer<typeof loginSchema>;
-
-export default function LoginPage() {
+export default function TenantLoginPage() {
   const router = useRouter();
+  const params = useParams();
+  const domain = params.domain as string; // Get domain from URL
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
 
-  const form = useForm<LoginFormInputs>({
-    resolver: zodResolver(loginSchema),
+  const form = useForm<TenantLoginFormInputs>({
+    resolver: zodResolver(tenantLoginSchema),
     defaultValues: {
-      companyDomain: "",
       email: "",
       password: "",
     },
   });
 
-  const onSubmit: SubmitHandler<LoginFormInputs> = async (data) => {
+  const onSubmit: SubmitHandler<TenantLoginFormInputs> = async (data) => {
     setIsLoading(true);
-    console.log("Login data:", data);
+    console.log("Login data for domain:", domain, data);
     // --- Mock Authentication Logic ---
-    // In a real app, you'd call your backend API here
-    // e.g., const response = await fetch('/api/auth/login', { method: 'POST', body: JSON.stringify(data) });
-    // For now, simulate a successful login after a short delay
+    // In a real app, you'd call your backend API here, passing the domain
+    // e.g., const response = await fetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ ...data, domain }) });
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     // Simulate success or failure based on some condition (e.g., email)
@@ -57,7 +50,7 @@ export default function LoginPage() {
       toast({
         title: "Login Successful",
         description: "Welcome back!",
-        variant: "default", // Use default (can add specific success variant if needed)
+        variant: "default",
       });
       // Redirect to dashboard on successful login
       router.push('/dashboard');
@@ -66,34 +59,33 @@ export default function LoginPage() {
     // --- End Mock Logic ---
   };
 
+  // Ensure domain is loaded before rendering form
+  if (!domain) {
+      return (
+         <div className="flex min-h-screen items-center justify-center bg-background px-4">
+             <Card className="w-full max-w-md shadow-lg">
+                 <CardHeader>
+                    <CardTitle>Loading...</CardTitle>
+                 </CardHeader>
+                 <CardContent>
+                    <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+                 </CardContent>
+             </Card>
+         </div>
+      );
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
-          <CardTitle className="text-2xl font-bold">StreamlineHR Login</CardTitle>
-          <CardDescription>Enter your company domain, email and password to login</CardDescription>
+          <CardTitle className="text-2xl font-bold">Login to {domain}</CardTitle>
+          <CardDescription>Enter your email and password to login</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="companyDomain"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Company Domain</FormLabel>
-                    <FormControl>
-                      <div className="flex items-center">
-                         <Input placeholder="your-company" {...field} className="rounded-r-none" />
-                         <span className="inline-flex items-center rounded-r-md border border-l-0 border-input bg-secondary px-3 text-sm text-muted-foreground">
-                            .streamlinehr.app
-                         </span>
-                      </div>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+               {/* Domain is now taken from URL, no input field needed */}
               <FormField
                 control={form.control}
                 name="email"
@@ -114,8 +106,9 @@ export default function LoginPage() {
                   <FormItem>
                     <div className="flex items-center justify-between">
                       <FormLabel>Password</FormLabel>
+                       {/* Update forgot password link to include domain */}
                        <Link
-                        href="/forgot-password"
+                        href={`/forgot-password/${domain}`}
                         className="text-sm font-medium text-primary hover:underline"
                       >
                         Forgot password?
@@ -141,8 +134,9 @@ export default function LoginPage() {
           </Form>
            <div className="mt-4 text-center text-sm">
             Don&apos;t have an account?{' '}
+            {/* Link to the main registration page */}
             <Link href="/register" className="font-medium text-primary hover:underline">
-              Register
+              Register Company
             </Link>
           </div>
         </CardContent>

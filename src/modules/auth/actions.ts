@@ -72,21 +72,22 @@ async function sendWelcomeEmail(adminName: string, adminEmail: string, companyDo
         console.log('[sendWelcomeEmail] Creating Nodemailer transporter...');
         const transporter = createTransporter(settings); // Pass validated settings
 
-        // Construct login URL using environment variable
-        const loginUrl = process.env.NEXT_PUBLIC_BASE_URL ? `${process.env.NEXT_PUBLIC_BASE_URL}/login` : 'http://localhost:9002/login'; // Fallback
+        // Construct tenant-specific login URL using NEXT_PUBLIC_BASE_URL
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; // Fallback for local dev
+        const loginUrl = `${baseUrl.replace(/\/$/, '')}/login/${companyDomain}`; // Append /login/[domain]
         console.log(`[sendWelcomeEmail] Constructed Login URL: ${loginUrl}`);
 
         const mailOptions = {
             from: `"${settings.fromName}" <${settings.fromEmail}>`,
             to: adminEmail,
             subject: 'Welcome to StreamlineHR!',
-            text: `Hi ${adminName},\n\nWelcome to StreamlineHR!\n\nYour account for company domain "${companyDomain}" has been created.\n\nYou can log in using your email (${adminEmail}) and the password you set during registration.\n\nLogin URL: ${loginUrl}\n\nPlease remember to enter your company domain "${companyDomain}" on the login page.\n\nThanks,\nThe StreamlineHR Team`,
+            text: `Hi ${adminName},\n\nWelcome to StreamlineHR!\n\nYour company account "${companyDomain}" has been created.\n\nYou can log in using your email (${adminEmail}) and the password you set during registration.\n\nYour unique login URL is: ${loginUrl}\n\nPlease bookmark this link for future access.\n\nThanks,\nThe StreamlineHR Team`,
             html: `<p>Hi ${adminName},</p>
                    <p>Welcome to StreamlineHR!</p>
-                   <p>Your account for company domain "<strong>${companyDomain}</strong>" has been created.</p>
+                   <p>Your company account "<strong>${companyDomain}</strong>" has been created.</p>
                    <p>You can log in using your email (<strong>${adminEmail}</strong>) and the password you set during registration.</p>
-                   <p><strong>Login URL:</strong> <a href="${loginUrl}">${loginUrl}</a></p>
-                   <p>Please remember to enter your company domain "<strong>${companyDomain}</strong>" on the login page.</p>
+                   <p>Your unique login URL is: <a href="${loginUrl}">${loginUrl}</a></p>
+                   <p>Please bookmark this link for future access.</p>
                    <p>Thanks,<br/>The StreamlineHR Team</p>`,
         };
 
@@ -119,7 +120,6 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     const dbCheck = await testDbConnection();
     if (!dbCheck.success) {
         console.error("[registerTenantAction] Database connection check failed:", dbCheck.message);
-        // Ensure the error message clearly states it's a DB connection issue
         const dbErrorMessage = `Registration failed due to a database connection issue: ${dbCheck.message}. Please ensure the database server is running, accessible, and the database exists. Check your .env file.`;
         return { success: false, errors: [{ code: 'custom', path: ['root'], message: dbErrorMessage }] };
     }
@@ -188,7 +188,6 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
              }
          }).catch(err => {
               console.error("[registerTenantAction] Unexpected error during async welcome email sending:", err);
-              // Optionally, add a background job/queue for retrying failed emails.
          });
 
 
@@ -224,19 +223,10 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
 
 // Simple Logout Action
 export async function logoutAction() {
-  // 'use server'; // Indicate this is a server action
   console.log("[logoutAction] Logging out user...");
   // In a real app, you would clear the session/cookie here.
-  // For example, if using next-auth: await signOut();
-  // If using custom session management: destroy session cookie
 
-  // Redirect to login page after clearing session
-  redirect('/login');
+  // Redirect to the main registration page after clearing session
+  redirect('/register');
 }
 
-
-// Placeholder for Login action (to be implemented)
-// export async function loginAction(...) { ... }
-
-// Placeholder for Forgot Password action (to be implemented)
-// export async function forgotPasswordAction(...) { ... }

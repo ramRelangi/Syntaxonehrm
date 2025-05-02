@@ -40,3 +40,18 @@ export const registrationSchema = z.object({
 
 export type RegistrationFormData = z.infer<typeof registrationSchema>;
 
+// --- Tenant-Specific Login Form ---
+export const tenantLoginSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+});
+
+export type TenantLoginFormInputs = z.infer<typeof tenantLoginSchema>;
+
+// --- Tenant-Specific Forgot Password Form ---
+export const tenantForgotPasswordSchema = z.object({
+  email: z.string().email("Invalid email address"),
+});
+
+export type TenantForgotPasswordFormInputs = z.infer<typeof tenantForgotPasswordSchema>;
+

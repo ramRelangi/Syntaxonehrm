@@ -1,9 +1,10 @@
+
 "use client";
 
+import * as React from 'react'; // Import React
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-// import { z } from 'zod'; // Zod schema is now in auth/types
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Button } from "@/components/ui/button";
@@ -12,22 +13,23 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
-import { registrationSchema, type RegistrationFormData } from '@/modules/auth/types'; // Correct import
-import { registerTenantAction } from '@/modules/auth/actions'; // Correct import
+import { registrationSchema, type RegistrationFormData } from '@/modules/auth/types';
+import { registerTenantAction } from '@/modules/auth/actions';
 
 export default function RegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const [companyDomainForLogin, setCompanyDomainForLogin] = useState(''); // State to hold domain for login link
 
-  console.log("Rendering RegisterPage component"); // Debug log
+  console.log("Rendering RegisterPage component");
 
   const form = useForm<RegistrationFormData>({
     resolver: zodResolver(registrationSchema),
     defaultValues: {
       companyName: "",
       companyDomain: "",
-      adminName: "", // Added admin name
+      adminName: "",
       adminEmail: "",
       adminPassword: "",
     },
@@ -35,24 +37,25 @@ export default function RegisterPage() {
 
   const onSubmit: SubmitHandler<RegistrationFormData> = async (data) => {
     setIsLoading(true);
-    console.log("Registration form submitted with data:", data); // Debug log
+    console.log("[registerTenantAction] Registration form submitted with data:", data);
 
     try {
-        // Call the server action
         const result = await registerTenantAction(data);
-        console.log("Server action result:", result); // Debug log
+        console.log("[registerTenantAction] Server action result:", result);
 
         if (result.success && result.tenant) {
              toast({
                 title: "Registration Successful",
-                description: `Company "${result.tenant.name}" created. Please login.`,
+                description: `Company "${result.tenant.name}" created. You will receive a welcome email shortly with login instructions.`,
                 className: "bg-green-100 text-green-800 border-green-300 dark:bg-green-900 dark:text-green-100 dark:border-green-700",
+                duration: 10000, // Show longer
              });
-             router.push('/login'); // Redirect to login page
-             // No need to setIsLoading(false) as we navigate away
+             // Don't redirect automatically, user should use email link
+             form.reset(); // Clear form after success
+             setIsLoading(false); // Stop loading indicator
         } else {
             const errorMessage = result.errors?.[0]?.message || 'Registration failed. Please try again.';
-            console.error("Registration failed:", errorMessage, result.errors); // Debug log
+            console.error("[registerTenantAction] Registration failed:", errorMessage, result.errors);
             toast({
                 title: "Registration Failed",
                 description: errorMessage,
@@ -60,16 +63,18 @@ export default function RegisterPage() {
             });
             setIsLoading(false);
             // Set specific field errors if available from action
-            if (result.errors?.some(e => e.path?.includes('companyDomain'))) {
+             if (result.errors?.some(e => e.path?.includes('companyDomain'))) {
                 form.setError("companyDomain", { type: 'server', message: errorMessage });
             } else if (result.errors?.some(e => e.path?.includes('adminEmail'))) {
                 form.setError("adminEmail", { type: 'server', message: errorMessage });
+            } else if (result.errors?.some(e => e.message?.includes('Database schema not initialized'))) {
+                 form.setError("root.serverError", { type: 'server', message: errorMessage });
             } else {
                  form.setError("root.serverError", { type: 'server', message: errorMessage });
             }
         }
-    } catch (error) {
-        console.error("Unexpected error during registration submission:", error); // Debug log
+    } catch (error: any) {
+        console.error("[registerTenantAction] Unexpected error during registration submission:", error);
         const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred. Please try again later.";
         toast({
             title: "Registration Error",
@@ -80,6 +85,13 @@ export default function RegisterPage() {
          form.setError("root.serverError", { type: 'unexpected', message: errorMessage });
     }
   };
+
+  // Watch the companyDomain field to update the login link
+  const watchedDomain = form.watch("companyDomain");
+  React.useEffect(() => {
+      setCompanyDomainForLogin(watchedDomain || '');
+  }, [watchedDomain]);
+
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
@@ -179,9 +191,11 @@ export default function RegisterPage() {
           </Form>
            <div className="mt-4 text-center text-sm">
             Already have an account?{' '}
-            <Link href="/login" className="font-medium text-primary hover:underline">
-              Login
+            {/* Dynamic link based on entered domain, or generic if empty */}
+            <Link href={companyDomainForLogin ? `/login/${companyDomainForLogin}` : '#'} className={`font-medium text-primary hover:underline ${!companyDomainForLogin ? 'opacity-50 pointer-events-none' : ''}`}>
+               Login to your company
             </Link>
+            {!companyDomainForLogin && <span className="text-xs text-muted-foreground block">(Enter domain above)</span>}
           </div>
         </CardContent>
       </Card>
