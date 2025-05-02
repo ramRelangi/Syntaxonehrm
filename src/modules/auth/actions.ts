@@ -78,10 +78,11 @@ async function sendWelcomeEmail(tenantId: string, adminName: string, adminEmail:
         const transporter = createTransporter(settings); // Pass validated settings
 
         // Construct tenant-specific login URL using tenant domain and root domain
-        const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'syntaxhivehrm.app'; // Use configured root domain
+        const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost'; // Use configured root domain
         // Construct the subdomain URL
+        const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : ''; // Add port for non-production
         const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-        const loginUrl = `${protocol}://${companyDomain}.${rootDomain}`; // Construct subdomain login URL (point to root, middleware handles redirect)
+        const loginUrl = `${protocol}://${companyDomain}.${rootDomain}${port}/login`; // Construct subdomain login URL
         console.log(`[sendWelcomeEmail] Constructed Tenant Login URL: ${loginUrl}`);
 
         const mailOptions = {
@@ -144,7 +145,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     const { companyName, companyDomain, adminName, adminEmail, adminPassword } = validation.data;
     const lowerCaseDomain = companyDomain.toLowerCase();
 
-    // Ensure database schema is initialized before proceeding
+    // 2. Ensure database schema is initialized before proceeding
     try {
         console.log("[registerTenantAction] Verifying schema by checking 'tenants' table...");
         await pool.query('SELECT 1 FROM tenants LIMIT 1');
@@ -173,7 +174,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     }
 
     try {
-        // 2. Check if domain already exists
+        // 3. Check if domain already exists
         console.log(`[registerTenantAction] Checking if domain '${lowerCaseDomain}' exists...`);
         const existingTenant = await getTenantByDomain(lowerCaseDomain);
         if (existingTenant) {
@@ -182,13 +183,13 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         }
         console.log(`[registerTenantAction] Domain '${lowerCaseDomain}' is available.`);
 
-        // 3. Create the Tenant
+        // 4. Create the Tenant
         console.log(`[registerTenantAction] Creating tenant '${companyName}' with domain '${lowerCaseDomain}'...`);
         const newTenant = await addTenant({ name: companyName, domain: lowerCaseDomain });
         console.log(`[registerTenantAction] Tenant created successfully with ID: ${newTenant.id}`);
 
 
-        // 4. Check if admin email already exists WITHIN THIS TENANT
+        // 5. Check if admin email already exists WITHIN THIS TENANT
         // This check is technically redundant now due to the UNIQUE constraint (tenant_id, email)
         // but kept for logical flow clarity. The DB constraint is the ultimate guard.
         // console.log(`[registerTenantAction] Checking if email '${adminEmail}' exists for tenant ${newTenant.id}...`);
@@ -201,12 +202,12 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         // console.log(`[registerTenantAction] Email '${adminEmail}' is available for tenant ${newTenant.id}.`);
 
 
-        // 5. Hash the Admin Password
+        // 6. Hash the Admin Password
         console.log("[registerTenantAction] Hashing admin password...");
         const passwordHash = await bcrypt.hash(adminPassword, SALT_ROUNDS);
         console.log("[registerTenantAction] Password hashed.");
 
-        // 6. Create the Initial Admin User
+        // 7. Create the Initial Admin User
         console.log(`[registerTenantAction] Creating admin user '${adminName}' (${adminEmail}) for tenant ${newTenant.id}...`);
         const newUser = await addUser({
             tenantId: newTenant.id,
@@ -218,7 +219,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         });
         console.log(`[registerTenantAction] Admin user created successfully with ID: ${newUser.id}`);
 
-        // 7. Send Welcome Email (Fire-and-forget, don't block registration on email failure)
+        // 8. Send Welcome Email (Fire-and-forget, don't block registration on email failure)
          console.log("[registerTenantAction] Triggering welcome email sending...");
          // Pass newTenant.id to sendWelcomeEmail
          sendWelcomeEmail(newTenant.id, adminName, adminEmail, lowerCaseDomain).then(sent => {
@@ -232,7 +233,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
          });
 
 
-        // 8. Return Success (don't return password hash)
+        // 9. Return Success (don't return password hash)
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash: _, ...safeUser } = newUser;
         console.log("[registerTenantAction] Registration completed successfully.");
@@ -286,7 +287,7 @@ export async function logoutAction() {
       // Fallback to host header if X-Tenant-Id is not present
       if (!tenantDomain) {
          const host = headersList.get('host') || '';
-         const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'syntaxhivehrm.app';
+         const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
          const match = host.match(`^(.*)\\.${rootDomain}$`);
          tenantDomain = match ? match[1] : null;
          console.log(`[logoutAction] Inferred tenant domain from host "${host}": ${tenantDomain}`);
@@ -300,10 +301,11 @@ export async function logoutAction() {
   let redirectUrl = '/login'; // Default redirect to root login page
   if (tenantDomain) {
       // Construct the tenant-specific login URL (subdomain root)
-      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'syntaxhivehrm.app';
+      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
+      const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : ''; // Add port for non-production
       const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}`; // Redirect to subdomain root
-      console.log(`[logoutAction] Redirecting to tenant root: ${redirectUrl}`);
+      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/login`; // Redirect to subdomain login page
+      console.log(`[logoutAction] Redirecting to tenant login page: ${redirectUrl}`);
   } else {
        console.log(`[logoutAction] Tenant domain not found, redirecting to root login: ${redirectUrl}`);
   }
@@ -311,3 +313,5 @@ export async function logoutAction() {
   // Redirect to the appropriate login page after clearing session
   redirect(redirectUrl);
 }
+
+```

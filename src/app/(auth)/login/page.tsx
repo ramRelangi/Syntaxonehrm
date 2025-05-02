@@ -30,22 +30,29 @@ export default function LoginPage() {
   // State to hold the inferred domain (if needed for forgot password link)
   const [tenantDomain, setTenantDomain] = useState<string | null>(null);
   const [rootDomain, setRootDomain] = useState<string>('localhost');
+  const [port, setPort] = useState<string>('9002'); // State for port
 
   // Attempt to infer domain from hostname on client-side
   useEffect(() => {
     // This effect runs only on the client side
     const currentRootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
+    const currentPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
     setRootDomain(currentRootDomain);
+    setPort(currentPort); // Store the port
 
     const hostname = window.location.hostname;
+    console.log(`[LoginPage Effect] Hostname: ${hostname}, Root Domain: ${currentRootDomain}, Port: ${currentPort}`); // Log details
     const match = hostname.match(`^(.*)\\.${currentRootDomain}$`);
     const subdomain = match ? match[1] : null;
+    console.log(`[LoginPage Effect] Extracted subdomain: ${subdomain}`);
 
     if (subdomain && !['www', 'api'].includes(subdomain)) {
         setTenantDomain(subdomain);
+         console.log(`[LoginPage Effect] Tenant domain set to: ${subdomain}`);
     } else {
         // If on root domain or ignored subdomain, clear tenantDomain state
         setTenantDomain(null);
+         console.log(`[LoginPage Effect] No tenant domain detected or on root domain.`);
     }
 }, []); // Empty dependency array ensures this runs once on mount
 
@@ -66,7 +73,7 @@ export default function LoginPage() {
     console.log(`Login attempt with email: ${email} (Tenant context handled by backend)`);
 
     // --- TODO: Real Authentication Logic ---
-    // 1. Send email, password to backend API (e.g., /api/auth/login)
+    // 1. Send email, password to backend API (e.g., /api/auth/login) - API needs tenant context from header
     // 2. Backend gets tenantId from header/middleware context.
     // 3. Find user by email WITHIN that tenantId.
     // 4. Verify password hash.
@@ -90,14 +97,19 @@ export default function LoginPage() {
         variant: "default",
       });
       // Redirect to the tenant-specific dashboard (middleware handles rewrite)
-      router.push('/dashboard'); // The middleware will handle the rewrite
+      // Use relative path, middleware adds tenant context if needed
+      router.push('/dashboard');
       // No need to setIsLoading(false) here as we are navigating away
     }
     // --- End Mock Logic ---
   };
 
-  // Construct forgot password link dynamically
-  const forgotPasswordHref = tenantDomain ? `/forgot-password/${tenantDomain}` : '/forgot-password';
+  // Construct forgot password link dynamically, including port for local dev
+  const forgotPasswordHref = tenantDomain
+    ? `/forgot-password/${tenantDomain}` // Relative path, middleware handles rewrite
+    : '/forgot-password'; // Root forgot password page
+
+  const displayDomain = tenantDomain ? `${tenantDomain}.${rootDomain}${port !== '80' && port !== '443' ? `:${port}` : ''}` : `the main login`;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -105,9 +117,7 @@ export default function LoginPage() {
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold">Login to SyntaxHive Hrm</CardTitle>
           <CardDescription>
-            {tenantDomain
-             ? `Enter your credentials for ${tenantDomain}.${rootDomain}`
-             : "Enter your email and password"}
+            {`Enter your credentials for ${displayDomain}`}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -161,14 +171,10 @@ export default function LoginPage() {
             </form>
           </Form>
           {/* Removed "Register Company" link */}
-          {/* <div className="mt-4 text-center text-sm">
-            Don&apos;t have an account?{' '}
-            <Link href="/register" className="font-medium text-primary hover:underline">
-              Register Company
-            </Link>
-          </div> */}
         </CardContent>
       </Card>
     </div>
   );
 }
+
+```
