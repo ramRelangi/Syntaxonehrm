@@ -8,8 +8,10 @@ const IGNORED_SUBDOMAINS = ['www', 'api'];
 const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
 
 // Paths that are public on the root domain
-// '/' is now handled separately to redirect to '/register'
 const PUBLIC_ROOT_PATHS = ['/login', '/register', '/forgot-password', '/jobs'];
+// Paths within the tenant application context (used for rewriting)
+const TENANT_APP_PATHS = ['/dashboard', '/employees', '/recruitment', '/payroll', '/leave', '/documents', '/reports', '/communication', '/smart-resume-parser', '/settings'];
+
 
 export async function middleware(request: NextRequest) {
   const url = request.nextUrl.clone();
@@ -20,8 +22,7 @@ export async function middleware(request: NextRequest) {
   console.log(`[Middleware] Request URL: ${request.url}, Hostname: ${normalizedHostname}, Path: ${url.pathname}`);
 
   // --- Static Assets and Next.js Internals ---
-  // Allow all requests for Next.js internal files, static assets, and API routes
-   if (
+  if (
      url.pathname.startsWith('/_next') ||
      url.pathname.startsWith('/api/') || // Allow all API routes
      url.pathname.match(/\.(js|css|map|ico|png|jpg|jpeg|gif|svg|woff2)$/) // Allow common static file extensions
@@ -30,18 +31,20 @@ export async function middleware(request: NextRequest) {
      return NextResponse.next();
    }
 
-   // Determine if the request is for the root domain (or equivalent like localhost/IP in dev)
+   // --- Determine if the request is for the root domain (or equivalent like localhost/IP in dev) ---
+   // Stricter check: Only ROOT_DOMAIN or common local dev hostnames are root
    const isRootDomainRequest =
        normalizedHostname === ROOT_DOMAIN ||
        normalizedHostname === 'localhost' ||
        normalizedHostname === '127.0.0.1' ||
        normalizedHostname.match(/^192\.168\.\d+\.\d+$/) ||
        normalizedHostname.match(/^10\.\d+\.\d+\.\d+$/) ||
-       normalizedHostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/);
+       normalizedHostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/) ||
+       IGNORED_SUBDOMAINS.some(sub => normalizedHostname.startsWith(`${sub}.${ROOT_DOMAIN}`));
 
 
   // --- Root Domain Handling (including localhost/IPs for dev) ---
-  if (isRootDomainRequest || IGNORED_SUBDOMAINS.some(sub => normalizedHostname.startsWith(`${sub}.${ROOT_DOMAIN}`))) {
+  if (isRootDomainRequest) {
      console.log(`[Middleware] Handling root domain equivalent request for: ${url.pathname}`);
 
      // Special case: If root '/' is requested, redirect to '/register'
@@ -61,7 +64,7 @@ export async function middleware(request: NextRequest) {
         return NextResponse.next(); // Allow access to /register, /login, /jobs/* etc.
      }
 
-     // For any other path on the root domain/IP, redirect to register (as per new default)
+     // For any other path on the root domain/IP, redirect to register
      console.log(`[Middleware] Path "${url.pathname}" on root equivalent domain is not public. Redirecting to /register.`);
      url.pathname = '/register';
      return NextResponse.redirect(url);
@@ -74,23 +77,32 @@ export async function middleware(request: NextRequest) {
   console.log(`[Middleware] Extracted subdomain: ${subdomain}`);
 
   if (subdomain && !IGNORED_SUBDOMAINS.includes(subdomain)) {
-    // Subdomain detected
-    // Add X-Tenant-Domain header
+    // Valid subdomain detected
     const requestHeaders = new Headers(request.headers);
-    requestHeaders.set('X-Tenant-Domain', subdomain);
+    requestHeaders.set('X-Tenant-Domain', subdomain); // Set header for API routes and page props
 
-    // Rewrite URL to include subdomain context for application routes
-    // Example: Rewrite `subdomain.domain.com/dashboard` to `domain.com/<subdomain>/dashboard`
-    const originalPath = url.pathname;
-    // If the subdomain is requested directly (e.g., demo.localhost:9002/), originalPath will be '/'
-    // The /[domain]/page.tsx handles redirecting this to /[domain]/dashboard
-    url.pathname = `/${subdomain}${originalPath === '/' ? '' : originalPath}`;
-    console.log(`[Middleware] Rewriting ${hostname}${originalPath} to internal path ${url.pathname}`);
-    return NextResponse.rewrite(url, {
-       request: {
-          headers: requestHeaders,
-        },
-     });
+    // Check if the path is an application path that needs rewriting
+    // Root path '/' on subdomain should also be rewritten (usually to dashboard)
+    const isAppPath = url.pathname === '/' || TENANT_APP_PATHS.some(p => url.pathname.startsWith(p));
+
+    if (isAppPath) {
+         // Rewrite to include subdomain context: demo.domain.com/dashboard -> domain.com/demo/dashboard
+         const originalPath = url.pathname;
+         // The root '/' for the subdomain is handled by '/[domain]/page.tsx' which redirects to dashboard
+         url.pathname = `/${subdomain}${originalPath === '/' ? '' : originalPath}`;
+         console.log(`[Middleware] Rewriting app path ${hostname}${originalPath} to internal path ${url.pathname}`);
+         return NextResponse.rewrite(url, {
+             request: { headers: requestHeaders },
+         });
+    } else {
+        // It's a subdomain request, but NOT for an app path (e.g., /login, /forgot-password)
+        // Pass the request through WITHOUT rewriting the path, but WITH the header.
+        // The page itself (e.g., /login) can use the hostname or header if needed.
+        console.log(`[Middleware] Passing through subdomain request for non-app path ${url.pathname} with header`);
+        return NextResponse.next({
+            request: { headers: requestHeaders },
+        });
+    }
   }
 
   // --- Fallback for Unknown Hostnames ---

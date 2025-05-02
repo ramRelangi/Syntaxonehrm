@@ -17,7 +17,8 @@ import { Loader2 } from 'lucide-react';
 // Use tenant-specific login schema (no domain field needed)
 import { tenantLoginSchema, type TenantLoginFormInputs } from '@/modules/auth/types';
 // Import login action (assuming it exists and handles tenant context)
-// import { loginAction } from '@/modules/auth/actions';
+import { loginAction } from '@/modules/auth/actions'; // Assuming you have a login action
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Import Alert components
 
 export default function LoginPage() {
   const router = useRouter();
@@ -26,7 +27,8 @@ export default function LoginPage() {
   const [tenantDomain, setTenantDomain] = useState<string | null>(null);
   const [rootDomain, setRootDomain] = useState<string>('localhost');
   const [port, setPort] = useState<string>('9002');
-  const [fullTenantUrl, setFullTenantUrl] = useState<string | null>(null);
+  const [displayUrl, setDisplayUrl] = useState<string | null>(null);
+  const [isRootLogin, setIsRootLogin] = useState(false);
 
   // Attempt to infer domain from hostname on client-side
   useEffect(() => {
@@ -39,7 +41,10 @@ export default function LoginPage() {
     setRootDomain(currentRootDomain);
     setPort(currentPort);
 
-    const isRootDomainRequest =
+    const displayPortString = (currentPort !== '80' && currentPort !== '443') ? `:${currentPort}` : '';
+
+    // Check if it's the root domain (or common dev equivalents)
+    const isRoot =
        hostname === currentRootDomain ||
        hostname === 'localhost' ||
        hostname === '127.0.0.1' ||
@@ -47,11 +52,11 @@ export default function LoginPage() {
        hostname.match(/^10\.\d+\.\d+\.\d+$/) ||
        hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/);
 
-    if (isRootDomainRequest) {
+    if (isRoot) {
+        setIsRootLogin(true);
         setTenantDomain(null);
-        const rootUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}/login`;
-        setFullTenantUrl(rootUrl);
-        console.log(`[LoginPage Effect] On root domain. Full Login URL: ${rootUrl}`);
+        setDisplayUrl(`${currentRootDomain}${displayPortString}`);
+        console.log(`[LoginPage Effect] On root domain. Display URL: ${displayUrl}`);
         return;
     }
 
@@ -61,17 +66,18 @@ export default function LoginPage() {
     console.log(`[LoginPage Effect] Extracted subdomain: ${subdomain}`);
 
     if (subdomain && !['www', 'api'].includes(subdomain)) {
+        setIsRootLogin(false);
         setTenantDomain(subdomain);
-        const tenantUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}/login`;
-        setFullTenantUrl(tenantUrl);
-        console.log(`[LoginPage Effect] Tenant domain set to: ${subdomain}. Full Login URL: ${tenantUrl}`);
+        setDisplayUrl(`${subdomain}.${currentRootDomain}${displayPortString}`);
+        console.log(`[LoginPage Effect] Tenant domain set to: ${subdomain}. Display URL: ${displayUrl}`);
     } else {
+        // Unknown structure or ignored subdomain - treat as root (should ideally be handled by middleware redirect)
+        setIsRootLogin(true);
         setTenantDomain(null);
-         const rootUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}/login`;
-         setFullTenantUrl(rootUrl);
-         console.log(`[LoginPage Effect] No tenant domain detected or on root domain. Full Login URL: ${rootUrl}`);
+        setDisplayUrl(`${hostname}${displayPortString}`); // Display the actual hostname if unknown
+        console.log(`[LoginPage Effect] No valid tenant subdomain detected. Display URL: ${displayUrl}`);
     }
-}, []);
+  }, [displayUrl]); // Rerun effect if displayUrl changes (though it shouldn't typically)
 
 
   const form = useForm<TenantLoginFormInputs>({
@@ -85,49 +91,32 @@ export default function LoginPage() {
   const onSubmit: SubmitHandler<TenantLoginFormInputs> = async (data) => {
     setIsLoading(true);
     const { email, password } = data;
-    // The domain is inferred by the middleware/backend.
-    console.log(`Login attempt with email: ${email} (Tenant context from domain: ${tenantDomain})`);
+    // The domain is inferred by the middleware/backend via the 'X-Tenant-Domain' header
+    console.log(`Login attempt with email: ${email} (Tenant context should be derived from domain: ${tenantDomain})`);
 
-    // --- TODO: Real Authentication Logic ---
-    // Replace mock logic with call to your actual login server action or API endpoint
-    // const result = await loginAction({ email, password }); // Example action call
-    //
-    // if (!result.success) {
-    //   toast({ title: "Login Failed", description: result.error || "Invalid credentials.", variant: "destructive" });
-    //   setIsLoading(false);
-    // } else {
-    //   toast({ title: "Login Successful", description: "Welcome back!" });
-    //   router.push('/dashboard'); // Redirect to tenant dashboard (relative path)
-    // }
-    // --- End Real Logic Placeholder ---
+    try {
+      // Pass tenantDomain explicitly if loginAction requires it, otherwise it should use the header
+      const result = await loginAction({ email, password, tenantDomain: tenantDomain }); // Pass tenantDomain
 
-    // --- Mock Authentication Logic ---
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    if (email.includes('fail')) {
-      toast({
-        title: "Login Failed",
-        description: "Invalid credentials. Please try again.",
-        variant: "destructive",
-      });
-      setIsLoading(false);
-    } else {
-      toast({
-        title: "Login Successful",
-        description: "Welcome back!",
-        variant: "default",
-      });
-      // Redirect to the tenant-specific dashboard (middleware handles rewrite)
-      router.push('/dashboard'); // Relative path, middleware ensures context
+      if (!result.success) {
+        toast({ title: "Login Failed", description: result.error || "Invalid credentials.", variant: "destructive" });
+        setIsLoading(false);
+      } else {
+        toast({ title: "Login Successful", description: "Welcome back!" });
+        // Redirect to tenant dashboard (relative path, middleware handles context)
+        router.push('/dashboard');
+      }
+    } catch (error: any) {
+        console.error("Login action error:", error);
+        toast({ title: "Login Error", description: error.message || "An unexpected error occurred.", variant: "destructive" });
+        setIsLoading(false);
     }
-    // --- End Mock Logic ---
   };
 
-  // Construct forgot password link dynamically
-  // If on tenant domain, link to /forgot-password/[domain], else to root /forgot-password
+  // Construct forgot password link dynamically based on client-side detection
   const forgotPasswordHref = tenantDomain
-    ? `/forgot-password/${tenantDomain}` // Tenant-specific forgot password
-    : '/forgot-password'; // Root forgot password
+    ? `/forgot-password/${tenantDomain}` // Tenant-specific forgot password path (will be handled by middleware/page)
+    : '/forgot-password'; // Root forgot password page
 
   const displayLocation = tenantDomain
       ? `company: ${tenantDomain}`
@@ -138,14 +127,23 @@ export default function LoginPage() {
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold">Login to SyntaxHive Hrm</CardTitle>
-           {fullTenantUrl && (
+           {displayUrl && (
                 <CardDescription>
                     {`Enter your credentials for ${displayLocation}`}
-                    <span className="block text-xs text-muted-foreground mt-1">({tenantDomain ? `${tenantDomain}.${rootDomain}${port !== '80' && port !== '443' ? `:${port}` : ''}` : `${rootDomain}${port !== '80' && port !== '443' ? `:${port}` : ''}`})</span>
+                    <span className="block text-xs text-muted-foreground mt-1">({displayUrl})</span>
                 </CardDescription>
            )}
         </CardHeader>
         <CardContent>
+            {isRootLogin && (
+                <Alert variant="default" className="mb-4 bg-blue-50 border-blue-300 text-blue-800 [&>svg]:text-blue-600 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-300 dark:[&>svg]:text-blue-500">
+                    {/* <Info className="h-4 w-4" /> */}
+                    <AlertTitle>Root Login</AlertTitle>
+                    <AlertDescription>
+                        You are on the main login page. Please use your company's unique login URL (e.g., your-company.{rootDomain}) to access your account. If you don't have one, <Link href="/register" className='font-medium underline'>register here</Link>.
+                    </AlertDescription>
+                </Alert>
+            )}
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField
@@ -168,7 +166,7 @@ export default function LoginPage() {
                   <FormItem>
                     <div className="flex items-center justify-between">
                       <FormLabel>Password</FormLabel>
-                      {/* Link to relevant forgot password page */}
+                      {/* Use the dynamically determined forgot password link */}
                       <Link
                         href={forgotPasswordHref}
                         className={`text-sm font-medium text-primary hover:underline`}
@@ -183,7 +181,7 @@ export default function LoginPage() {
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full" disabled={isLoading}>
+              <Button type="submit" className="w-full" disabled={isLoading || isRootLogin}>
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Please wait
@@ -194,13 +192,15 @@ export default function LoginPage() {
               </Button>
             </form>
           </Form>
-           {/* Link to root registration page */}
-           <div className="mt-4 text-center text-sm">
-            Don't have an account?{' '}
-            <Link href="/register" className="font-medium text-primary hover:underline">
-              Register your company
-            </Link>
-          </div>
+           {/* Link to root registration page - only show if NOT on root login already? */}
+           {!isRootLogin && (
+             <div className="mt-4 text-center text-sm">
+                Need an account?{' '}
+                <Link href="/register" className="font-medium text-primary hover:underline">
+                    Register your company
+                </Link>
+             </div>
+           )}
         </CardContent>
       </Card>
     </div>
