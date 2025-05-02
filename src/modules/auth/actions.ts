@@ -1,3 +1,4 @@
+
 'use server';
 
 import { z } from 'zod';
@@ -11,10 +12,6 @@ import type { EmailSettings } from '@/modules/communication/types'; // Import Em
 import { redirect } from 'next/navigation'; // Import redirect
 import { headers } from 'next/headers'; // Import headers to potentially get domain in logout
 import { initializeDatabase } from '@/lib/init-db'; // Import initializeDatabase
-
-// Force this module to use the Node.js runtime because bcrypt needs it - REMOVED this line
-// export const runtime = 'nodejs';
-
 
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
 
@@ -198,18 +195,10 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.log(`[registerTenantAction] Tenant created successfully with ID: ${newTenant.id}`);
 
 
-        // 5. Check if admin email already exists WITHIN THIS TENANT
-        // This check is technically redundant now due to the UNIQUE constraint (tenant_id, email)
-        // but kept for logical flow clarity. The DB constraint is the ultimate guard.
+        // 5. Check if admin email already exists WITHIN THIS TENANT (Redundant due to DB constraint)
         // console.log(`[registerTenantAction] Checking if email '${adminEmail}' exists for tenant ${newTenant.id}...`);
         // const existingUser = await getUserByEmail(adminEmail, newTenant.id); // Pass tenant ID
-        // if (existingUser) {
-        //     console.warn(`[registerTenantAction] Email '${adminEmail}' already exists for tenant ${newTenant.id}.`);
-        //     // Rollback tenant creation? For now, just error. DB constraint will likely catch this first in addUser.
-        //     return { success: false, errors: [{ code: 'custom', path: ['adminEmail'], message: 'This email address is already in use for this company.' }] };
-        // }
-        // console.log(`[registerTenantAction] Email '${adminEmail}' is available for tenant ${newTenant.id}.`);
-
+        // if (existingUser) { ... }
 
         // 6. Hash the Admin Password
         console.log("[registerTenantAction] Hashing admin password...");
@@ -230,7 +219,6 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
 
 
         // 8. Initialize default Email Settings for the new tenant
-        // Use placeholder values or fetch defaults if applicable
          console.log(`[registerTenantAction] Initializing default email settings for tenant ${newTenant.id}...`);
          const defaultSettings: EmailSettings = {
              tenantId: newTenant.id,
@@ -329,13 +317,13 @@ export async function logoutAction() {
       redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/login`;
       console.log(`[logoutAction] Redirecting to tenant login page: ${redirectUrl}`);
   } else {
+       // If logging out from the root domain, redirect to root login
        console.log(`[logoutAction] Tenant domain not found, redirecting to root login: ${redirectUrl}`);
-       // Construct the root login URL properly
        const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
        const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : '';
        const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
        redirectUrl = `${protocol}://${rootDomain}${port}/login`;
-       console.log(`[logoutAction] Redirecting to root login page: ${redirectUrl}`);
+       console.log(`[logoutAction] Constructing root login URL: ${redirectUrl}`);
   }
 
   // Redirect to the appropriate login page after clearing session
