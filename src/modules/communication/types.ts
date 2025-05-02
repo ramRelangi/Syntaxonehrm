@@ -28,6 +28,17 @@ export const emailSettingsSchema = z.object({
 
 export type EmailSettings = z.infer<typeof emailSettingsSchema>;
 
+// --- Send Email ---
+export const sendEmailSchema = z.object({
+  to: z.string().email("Invalid 'To' email address"),
+  subject: z.string().min(1, "Subject is required"),
+  body: z.string().min(1, "Email body cannot be empty"),
+  // templateId: z.string().optional(), // Track if a template was used (optional)
+});
+
+export type SendEmailFormData = z.infer<typeof sendEmailSchema>;
+
 // No separate FormData needed if all fields are editable
 // export type EmailSettingsFormData = EmailSettings;
+
 
