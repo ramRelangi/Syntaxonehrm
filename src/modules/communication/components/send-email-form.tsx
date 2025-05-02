@@ -13,6 +13,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Send, Mail, BookOpen, X } from 'lucide-react';
 
+const NONE_VALUE = "__none__"; // Define a constant for the non-empty placeholder value
+
 interface SendEmailFormProps {
   templates: EmailTemplate[];
 }
@@ -33,18 +35,18 @@ export function SendEmailForm({ templates }: SendEmailFormProps) {
 
   // Handle template selection change
   const handleTemplateChange = (templateId: string) => {
-    setSelectedTemplateId(templateId);
-    const selectedTemplate = templates.find(t => t.id === templateId);
-    if (selectedTemplate) {
-      form.setValue('subject', selectedTemplate.subject);
-      form.setValue('body', selectedTemplate.body);
-      // Optionally trigger validation if needed
-      // form.trigger('subject');
-      // form.trigger('body');
+    if (templateId === NONE_VALUE) {
+      setSelectedTemplateId(null);
+      // Optionally clear fields if "None" is selected
+      form.setValue('subject', '');
+      form.setValue('body', '');
     } else {
-      // Optionally clear fields if "None" is selected or template not found
-      // form.setValue('subject', '');
-      // form.setValue('body', '');
+      setSelectedTemplateId(templateId);
+      const selectedTemplate = templates.find(t => t.id === templateId);
+      if (selectedTemplate) {
+        form.setValue('subject', selectedTemplate.subject);
+        form.setValue('body', selectedTemplate.body);
+      }
     }
   };
 
@@ -98,14 +100,16 @@ export function SendEmailForm({ templates }: SendEmailFormProps) {
          {/* Template Selector (Optional) */}
         <FormItem>
             <FormLabel>Load Template (Optional)</FormLabel>
-            <Select onValueChange={handleTemplateChange} value={selectedTemplateId ?? ""}>
+            {/* Use selectedTemplateId or NONE_VALUE if null */}
+            <Select onValueChange={handleTemplateChange} value={selectedTemplateId ?? NONE_VALUE}>
                 <FormControl>
                     <SelectTrigger>
                         <SelectValue placeholder="Select a template to load..." />
                     </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                    <SelectItem value="">-- None --</SelectItem>
+                    {/* Use the NONE_VALUE constant for the 'None' option */}
+                    <SelectItem value={NONE_VALUE}>-- None --</SelectItem>
                     {templates.map(template => (
                         <SelectItem key={template.id} value={template.id!}>
                             {template.name} {template.usageContext ? `(${template.usageContext})` : ''}
@@ -188,3 +192,4 @@ export function SendEmailForm({ templates }: SendEmailFormProps) {
     </Form>
   );
 }
+
