@@ -14,7 +14,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning> {/* suppressHydrationWarning is often helpful with ShadCN/themes */}
+    <html lang="en" suppressHydrationWarning>
       <body className="antialiased">
         <SidebarProvider>
             {children}
