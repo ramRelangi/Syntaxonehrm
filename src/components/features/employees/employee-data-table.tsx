@@ -31,6 +31,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuItem, // Added import
 } from "@/components/ui/dropdown-menu";
 import { ChevronDown, Search, Filter } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
