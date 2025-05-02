@@ -71,7 +71,7 @@ export async function testDbConnection() {
         } else if (err.code === '28P01') { // invalid_password (PostgreSQL specific)
              friendlyMessage = 'Database authentication failed. Check DB_USER and DB_PASS.'; // Updated message
         } else if (err.code === '3D000') { // invalid_catalog_name (database doesn't exist)
-             friendlyMessage = `Database "${process.env.DB_NAME}" does not exist. Check DB_NAME.`;
+             friendlyMessage = `Database "${process.env.DB_NAME}" does not exist. Please create it before running the application.`;
         }
         // Consider adding more specific PG error codes
         console.error(`[DB Test Error Details] Code: ${err.code}, Message: ${err.message}`);
