@@ -2,11 +2,89 @@
 
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
+import nodemailer from 'nodemailer';
 import { registrationSchema, type RegistrationFormData, type Tenant, type User } from '@/modules/auth/types';
-import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db'; // Assuming DB functions exist
-import { testDbConnection } from '@/lib/db'; // Import the DB connection test function
+import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db';
+import { testDbConnection } from '@/lib/db';
+import { getEmailSettings } from '@/modules/communication/lib/db'; // Import function to get settings
+import type { EmailSettings } from '@/modules/communication/types'; // Import EmailSettings type
 
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
+
+// Helper function to create transporter (similar to the one in communication module)
+function createTransporter(settings: EmailSettings): nodemailer.Transporter {
+    console.log(`[Auth Action - createTransporter] Creating transporter with settings: host=${settings.smtpHost}, port=${settings.smtpPort}, user=${settings.smtpUser ? '***' : 'null'}, secure=${settings.smtpSecure}`);
+    let transportOptions: nodemailer.TransportOptions = {
+        host: settings.smtpHost,
+        port: settings.smtpPort,
+        auth: {
+            user: settings.smtpUser,
+            pass: settings.smtpPassword,
+        },
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 15000,
+        logger: process.env.NODE_ENV === 'development',
+        debug: process.env.NODE_ENV === 'development',
+    };
+
+    if (settings.smtpPort === 465) {
+        transportOptions.secure = true;
+    } else if (settings.smtpPort === 587) {
+        transportOptions.secure = false;
+        transportOptions.requireTLS = true;
+    } else {
+        transportOptions.secure = settings.smtpSecure;
+    }
+
+    return nodemailer.createTransport(transportOptions);
+}
+
+// Function to send the welcome email
+async function sendWelcomeEmail(adminName: string, adminEmail: string, companyDomain: string): Promise<boolean> {
+    console.log(`[sendWelcomeEmail] Attempting to send welcome email to ${adminEmail}`);
+    let settings: EmailSettings | null = null;
+    try {
+        settings = await getEmailSettings();
+        if (!settings || !settings.smtpHost || !settings.smtpUser || !settings.smtpPassword || !settings.fromEmail || !settings.fromName) {
+            console.error('[sendWelcomeEmail] Email settings are incomplete or not configured. Cannot send welcome email.');
+            return false; // Indicate failure to send
+        }
+
+        const transporter = createTransporter(settings);
+
+        // Construct login URL (adjust if subdomain logic is implemented later)
+        const loginUrl = process.env.NEXT_PUBLIC_BASE_URL ? `${process.env.NEXT_PUBLIC_BASE_URL}/login` : 'http://localhost:9002/login';
+
+        const mailOptions = {
+            from: `"${settings.fromName}" <${settings.fromEmail}>`,
+            to: adminEmail,
+            subject: 'Welcome to StreamlineHR!',
+            text: `Hi ${adminName},\n\nWelcome to StreamlineHR!\n\nYour account for company domain "${companyDomain}" has been created.\n\nYou can log in using your email (${adminEmail}) and the password you set during registration.\n\nLogin URL: ${loginUrl}\n\nPlease remember to enter your company domain "${companyDomain}" on the login page.\n\nThanks,\nThe StreamlineHR Team`,
+            html: `<p>Hi ${adminName},</p>
+                   <p>Welcome to StreamlineHR!</p>
+                   <p>Your account for company domain "<strong>${companyDomain}</strong>" has been created.</p>
+                   <p>You can log in using your email (<strong>${adminEmail}</strong>) and the password you set during registration.</p>
+                   <p><strong>Login URL:</strong> <a href="${loginUrl}">${loginUrl}</a></p>
+                   <p>Please remember to enter your company domain "<strong>${companyDomain}</strong>" on the login page.</p>
+                   <p>Thanks,<br/>The StreamlineHR Team</p>`,
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[sendWelcomeEmail] Welcome email sent successfully to ${adminEmail}: ${info.messageId}`);
+        return true; // Indicate success
+
+    } catch (error: any) {
+        console.error(`[sendWelcomeEmail] Failed to send welcome email to ${adminEmail}:`, error);
+        // Log specific SMTP errors if available
+        if (error.code) {
+            console.error(`[sendWelcomeEmail] SMTP Error Code: ${error.code}, Message: ${error.message}`);
+        }
+        // Don't fail the whole registration if email sending fails, but log it.
+        return false; // Indicate failure to send
+    }
+}
+
 
 export async function registerTenantAction(formData: RegistrationFormData): Promise<{ success: boolean; tenant?: Tenant; user?: User; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
     console.log("[registerTenantAction] Starting registration process...");
@@ -16,9 +94,12 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     const dbCheck = await testDbConnection();
     if (!dbCheck.success) {
         console.error("[registerTenantAction] Database connection check failed:", dbCheck.message);
-        return { success: false, errors: [{ code: 'custom', path: ['root'], message: dbCheck.message }] }; // Return DB connection error
+        // Ensure the error message clearly states it's a DB connection issue
+        const dbErrorMessage = `Registration failed due to a database connection issue: ${dbCheck.message}`;
+        return { success: false, errors: [{ code: 'custom', path: ['root'], message: dbErrorMessage }] };
     }
     console.log("[registerTenantAction] Database connection successful.");
+
 
     // 1. Validate Input Data
     const validation = registrationSchema.safeParse(formData);
@@ -72,7 +153,14 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         });
         console.log(`[registerTenantAction] Admin user created successfully with ID: ${newUser.id}`);
 
-        // 7. Return Success (don't return password hash)
+        // 7. Send Welcome Email (Fire-and-forget, don't block registration on email failure)
+         sendWelcomeEmail(adminName, adminEmail, lowerCaseDomain).catch(err => {
+              console.error("[registerTenantAction] Non-critical: Failed to send welcome email after registration.", err);
+              // Optionally, add a background job/queue for retrying failed emails.
+         });
+
+
+        // 8. Return Success (don't return password hash)
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash: _, ...safeUser } = newUser;
         console.log("[registerTenantAction] Registration completed successfully.");
@@ -80,8 +168,19 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
 
     } catch (error: any) {
         console.error("[registerTenantAction] Error during tenant registration:", error);
-         // Handle potential database errors more specifically if needed
-        return { success: false, errors: [{ code: 'custom', path: ['root'], message: error.message || 'Failed to register tenant due to a server error.' }] };
+         let errorMessage = error.message || 'Failed to register tenant due to a server error.';
+         // Add specific error mapping for DB issues if needed
+         if (error.message?.includes('relation "tenants" does not exist') || error.message?.includes('relation "users" does not exist')) {
+             errorMessage = 'Database schema is not initialized. Please run `npm run db:init`.';
+         } else if (error.code === 'ECONNREFUSED') {
+              errorMessage = `Database connection refused. Ensure the database server is running and accessible at ${process.env.DB_HOST}:${process.env.DB_PORT || 5432}.`;
+         } else if (error.code === '28P01') {
+             errorMessage = 'Database authentication failed. Check DB_USER and DB_PASS.';
+         } else if (error.code === '3D000') {
+            errorMessage = `Database "${process.env.DB_NAME}" does not exist. Please create it or run db:init if applicable.`;
+         }
+
+        return { success: false, errors: [{ code: 'custom', path: ['root'], message: errorMessage }] };
     }
 }
 
