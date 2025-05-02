@@ -1,4 +1,6 @@
 
+'use client'; // Add 'use client' directive
+
 import * as React from 'react';
 import { usePathname } from 'next/navigation'; // Import usePathname
 import {
