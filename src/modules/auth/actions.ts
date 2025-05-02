@@ -12,8 +12,8 @@ import { redirect } from 'next/navigation'; // Import redirect
 import { headers } from 'next/headers'; // Import headers to potentially get domain in logout
 import { initializeDatabase } from '@/lib/init-db'; // Import initializeDatabase
 
-// Force this module to use the Node.js runtime because bcrypt needs it
-export const runtime = 'nodejs';
+// Force this module to use the Node.js runtime because bcrypt needs it - REMOVED this line
+// export const runtime = 'nodejs';
 
 
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
@@ -238,7 +238,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
              smtpPort: 587,
              smtpUser: 'user@example.com',
              smtpPassword: '', // Should be encrypted if set, leave empty for user to set
-             smtpSecure: true, // Default to true, common for 587 (STARTTLS) and 465 (SSL)
+             smtpSecure: false, // Default to false (use TLS for port 587)
              fromEmail: `noreply@${lowerCaseDomain}.${process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost'}`, // More specific default
              fromName: `${companyName} (SyntaxHive Hrm)`,
          };
