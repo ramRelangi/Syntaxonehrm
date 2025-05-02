@@ -5,7 +5,7 @@ import bcrypt from 'bcrypt';
 import nodemailer from 'nodemailer';
 import { registrationSchema, type RegistrationFormData, type Tenant, type User } from '@/modules/auth/types';
 import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db';
-import { testDbConnection } from '@/lib/db';
+import { testDbConnection } from '@/lib/db'; // Import only the test function
 import { getEmailSettings } from '@/modules/communication/lib/db'; // Import function to get settings
 import type { EmailSettings } from '@/modules/communication/types'; // Import EmailSettings type
 
@@ -19,7 +19,7 @@ function createTransporter(settings: EmailSettings): nodemailer.Transporter {
         port: settings.smtpPort,
         auth: {
             user: settings.smtpUser,
-            pass: settings.smtpPassword,
+            pass: settings.smtpPassword, // Assuming password from DB is decrypted/usable
         },
         connectionTimeout: 15000,
         greetingTimeout: 15000,
@@ -53,8 +53,8 @@ async function sendWelcomeEmail(adminName: string, adminEmail: string, companyDo
 
         const transporter = createTransporter(settings);
 
-        // Construct login URL (adjust if subdomain logic is implemented later)
-        const loginUrl = process.env.NEXT_PUBLIC_BASE_URL ? `${process.env.NEXT_PUBLIC_BASE_URL}/login` : 'http://localhost:9002/login';
+        // Construct login URL using environment variable
+        const loginUrl = process.env.NEXT_PUBLIC_BASE_URL ? `${process.env.NEXT_PUBLIC_BASE_URL}/login` : 'http://localhost:9002/login'; // Fallback
 
         const mailOptions = {
             from: `"${settings.fromName}" <${settings.fromEmail}>`,
@@ -95,7 +95,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     if (!dbCheck.success) {
         console.error("[registerTenantAction] Database connection check failed:", dbCheck.message);
         // Ensure the error message clearly states it's a DB connection issue
-        const dbErrorMessage = `Registration failed due to a database connection issue: ${dbCheck.message}`;
+        const dbErrorMessage = `Registration failed due to a database connection issue: ${dbCheck.message}. Please ensure the database server is running, accessible, and the database exists. Check your .env file.`;
         return { success: false, errors: [{ code: 'custom', path: ['root'], message: dbErrorMessage }] };
     }
     console.log("[registerTenantAction] Database connection successful.");
@@ -169,18 +169,18 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     } catch (error: any) {
         console.error("[registerTenantAction] Error during tenant registration:", error);
          let errorMessage = error.message || 'Failed to register tenant due to a server error.';
-         // Add specific error mapping for DB issues if needed
-         if (error.code === '42P01') { // Handle undefined_table error (PostgreSQL code for missing relation)
-             errorMessage = `Database schema is not initialized (table "${error.message?.match(/relation "([^"]+)"/)?.[1] || 'unknown'}" does not exist). Please run 'npm run db:init' and restart the server.`;
-         } else if (error.message?.includes('relation "tenants" does not exist') || error.message?.includes('relation "users" does not exist')) {
-             // This is a fallback check in case the code is not '42P01'
-             errorMessage = 'Database schema is not initialized. Please run `npm run db:init` and restart the server.';
+
+         // Refine error message for missing tables
+         if (error.code === '42P01' || error.message?.includes('relation') && error.message?.includes('does not exist')) {
+             const relationMatch = error.message?.match(/relation "([^"]+)" does not exist/);
+             const missingTable = relationMatch ? relationMatch[1] : 'required tables';
+             errorMessage = `Database schema is not initialized (relation "${missingTable}" does not exist). Please run 'npm run db:init' and restart the server.`;
          } else if (error.code === 'ECONNREFUSED') {
               errorMessage = `Database connection refused. Ensure the database server is running and accessible at ${process.env.DB_HOST}:${process.env.DB_PORT || 5432}.`;
          } else if (error.code === '28P01') {
              errorMessage = 'Database authentication failed. Check DB_USER and DB_PASS.';
          } else if (error.code === '3D000') {
-            errorMessage = `Database "${process.env.DB_NAME}" does not exist. Please create it or run db:init if applicable.`;
+            errorMessage = `Database "${process.env.DB_NAME}" does not exist. Please create it manually before running the application or db:init.`;
          }
 
         return { success: false, errors: [{ code: 'custom', path: ['root'], message: errorMessage }] };

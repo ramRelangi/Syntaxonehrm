@@ -1,9 +1,11 @@
 // src/lib/init-db.ts
 import pool from './db';
 
+// Combine all schemas into one script for simplicity
 const schemaSQL = `
 -- Ensure uuid-ossp extension is enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+SELECT 'uuid-ossp extension ensured.';
 
 -- Tenants Table
 CREATE TABLE IF NOT EXISTS tenants (
@@ -12,8 +14,9 @@ CREATE TABLE IF NOT EXISTS tenants (
     domain VARCHAR(100) UNIQUE NOT NULL, -- Unique, lowercase domain name
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+SELECT 'tenants table ensured.';
 
--- Create index only if it doesn't exist
+-- Index for tenants.domain
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -24,48 +27,202 @@ BEGIN
         AND    n.nspname = 'public' -- assuming public schema
     ) THEN
         CREATE INDEX idx_tenants_domain ON tenants(domain);
+        RAISE NOTICE 'Index idx_tenants_domain created.';
+    ELSE
+        RAISE NOTICE 'Index idx_tenants_domain already exists.';
     END IF;
 END$$;
 
-
--- User Roles Enum (Example)
+-- User Roles Enum
 DO $$ BEGIN
     CREATE TYPE user_role AS ENUM ('Admin', 'Manager', 'Employee');
+    RAISE NOTICE 'user_role type created or already exists.';
 EXCEPTION
-    WHEN duplicate_object THEN null;
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'user_role type already exists, skipping creation.';
 END $$;
-
 
 -- Users Table
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Link to tenant, cascade delete users if tenant is deleted
-    email VARCHAR(255) UNIQUE NOT NULL, -- Ensure email is globally unique
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    email VARCHAR(255) UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     name VARCHAR(255) NOT NULL,
     role user_role NOT NULL DEFAULT 'Employee',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP -- Add trigger for this
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+SELECT 'users table ensured.';
 
--- Create indexes only if they don't exist
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_users_tenant_id' AND n.nspname = 'public'
-    ) THEN
-        CREATE INDEX idx_users_tenant_id ON users(tenant_id);
-    END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_users_email' AND n.nspname = 'public'
-    ) THEN
-        CREATE INDEX idx_users_email ON users(email);
-    END IF;
+-- Indexes for users table
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_users_tenant_id' AND n.nspname = 'public') THEN CREATE INDEX idx_users_tenant_id ON users(tenant_id); RAISE NOTICE 'Index idx_users_tenant_id created.'; ELSE RAISE NOTICE 'Index idx_users_tenant_id already exists.'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_users_email' AND n.nspname = 'public') THEN CREATE INDEX idx_users_email ON users(email); RAISE NOTICE 'Index idx_users_email created.'; ELSE RAISE NOTICE 'Index idx_users_email already exists.'; END IF;
 END$$;
 
+-- Employee Status Enum
+DO $$ BEGIN
+    CREATE TYPE employee_status AS ENUM ('Active', 'Inactive', 'On Leave');
+    RAISE NOTICE 'employee_status type created or already exists.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'employee_status type already exists, skipping creation.';
+END $$;
 
--- Trigger function to update updated_at timestamp (create or replace)
+-- Employees Table
+CREATE TABLE IF NOT EXISTS employees (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id if employees are tenant-specific
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    phone VARCHAR(50),
+    position VARCHAR(255) NOT NULL,
+    department VARCHAR(255) NOT NULL,
+    hire_date DATE NOT NULL,
+    status employee_status NOT NULL DEFAULT 'Active',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+SELECT 'employees table ensured.';
+
+-- Leave Types Table
+CREATE TABLE IF NOT EXISTS leave_types (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id if leave types are tenant-specific
+    name VARCHAR(100) UNIQUE NOT NULL,
+    description TEXT,
+    requires_approval BOOLEAN NOT NULL DEFAULT TRUE,
+    default_balance NUMERIC(5, 2) DEFAULT 0,
+    accrual_rate NUMERIC(5, 2) DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+SELECT 'leave_types table ensured.';
+
+-- Leave Request Status Enum
+DO $$ BEGIN
+    CREATE TYPE leave_request_status AS ENUM ('Pending', 'Approved', 'Rejected', 'Cancelled');
+    RAISE NOTICE 'leave_request_status type created or already exists.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'leave_request_status type already exists, skipping creation.';
+END $$;
+
+-- Leave Requests Table
+CREATE TABLE IF NOT EXISTS leave_requests (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE RESTRICT,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    reason TEXT,
+    status leave_request_status NOT NULL DEFAULT 'Pending',
+    request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    approver_id UUID REFERENCES users(id), -- Link to users table for approver
+    approval_date TIMESTAMP WITH TIME ZONE,
+    comments TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT check_leave_dates CHECK (end_date >= start_date)
+);
+SELECT 'leave_requests table ensured.';
+
+-- Leave Balances Table
+CREATE TABLE IF NOT EXISTS leave_balances (
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE,
+    balance NUMERIC(5, 2) NOT NULL DEFAULT 0,
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (employee_id, leave_type_id)
+);
+SELECT 'leave_balances table ensured.';
+
+-- Job Posting Status Enum
+DO $$ BEGIN
+    CREATE TYPE job_posting_status AS ENUM ('Open', 'Closed', 'Draft', 'Archived');
+    RAISE NOTICE 'job_posting_status type created or already exists.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'job_posting_status type already exists, skipping creation.';
+END $$;
+
+-- Job Postings Table
+CREATE TABLE IF NOT EXISTS job_postings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id if postings are tenant-specific
+    title VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    department VARCHAR(255) NOT NULL,
+    location VARCHAR(255) NOT NULL,
+    salary_range VARCHAR(100),
+    status job_posting_status NOT NULL DEFAULT 'Draft',
+    date_posted TIMESTAMP WITH TIME ZONE,
+    closing_date DATE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+SELECT 'job_postings table ensured.';
+
+-- Candidate Status Enum
+DO $$ BEGIN
+    CREATE TYPE candidate_status AS ENUM ('Applied', 'Screening', 'Interviewing', 'Offer Extended', 'Hired', 'Rejected', 'Withdrawn');
+    RAISE NOTICE 'candidate_status type created or already exists.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'candidate_status type already exists, skipping creation.';
+END $$;
+
+-- Candidates Table
+CREATE TABLE IF NOT EXISTS candidates (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    phone VARCHAR(50),
+    job_posting_id UUID NOT NULL REFERENCES job_postings(id) ON DELETE CASCADE,
+    application_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    status candidate_status NOT NULL DEFAULT 'Applied',
+    resume_url TEXT,
+    cover_letter TEXT,
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (email, job_posting_id) -- Prevent duplicate applications
+);
+SELECT 'candidates table ensured.';
+
+-- Email Templates Table
+CREATE TABLE IF NOT EXISTS email_templates (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id if templates are tenant-specific
+    name VARCHAR(255) NOT NULL UNIQUE,
+    subject VARCHAR(255) NOT NULL,
+    body TEXT NOT NULL,
+    usage_context VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+SELECT 'email_templates table ensured.';
+
+-- Email Configuration Table (Single Row)
+CREATE TABLE IF NOT EXISTS email_configuration (
+    id INT PRIMARY KEY DEFAULT 1,
+    -- tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id if settings are tenant-specific (change PK logic)
+    smtp_host VARCHAR(255) NOT NULL,
+    smtp_port INT NOT NULL,
+    smtp_user VARCHAR(255) NOT NULL,
+    smtp_password TEXT NOT NULL, -- STORE ENCRYPTED!
+    smtp_secure BOOLEAN NOT NULL DEFAULT TRUE,
+    from_email VARCHAR(255) NOT NULL,
+    from_name VARCHAR(255) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT only_one_email_config_row CHECK (id = 1) -- Enforce single row if not tenant-specific
+);
+SELECT 'email_configuration table ensured.';
+
+
+-- Trigger function to update updated_at timestamp (universal)
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -73,17 +230,44 @@ BEGIN
    RETURN NEW;
 END;
 $$ language 'plpgsql';
+SELECT 'update_updated_at_column function ensured.';
 
--- Drop existing trigger first (if it exists) to avoid errors, then create
-DO $$ BEGIN
-    DROP TRIGGER IF EXISTS update_users_updated_at ON users;
-    CREATE TRIGGER update_users_updated_at
-    BEFORE UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-EXCEPTION
-    WHEN undefined_table THEN null; -- Ignore if table doesn't exist yet
-END $$;
+-- Function to apply trigger if it doesn't exist
+CREATE OR REPLACE FUNCTION apply_update_trigger_if_not_exists(table_name_param TEXT)
+RETURNS void AS $$
+DECLARE
+    trigger_name TEXT := 'update_' || table_name_param || '_updated_at';
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = trigger_name
+    ) THEN
+        EXECUTE format('
+            CREATE TRIGGER %I
+            BEFORE UPDATE ON %I
+            FOR EACH ROW
+            EXECUTE FUNCTION update_updated_at_column();', trigger_name, table_name_param);
+        RAISE NOTICE 'Trigger % created for table %.', trigger_name, table_name_param;
+    ELSE
+        RAISE NOTICE 'Trigger % already exists for table %.', trigger_name, table_name_param;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+SELECT 'apply_update_trigger_if_not_exists function created.';
+
+-- Apply trigger to all relevant tables
+SELECT apply_update_trigger_if_not_exists('users');
+SELECT apply_update_trigger_if_not_exists('employees');
+SELECT apply_update_trigger_if_not_exists('leave_types');
+SELECT apply_update_trigger_if_not_exists('leave_requests');
+SELECT apply_update_trigger_if_not_exists('leave_balances');
+SELECT apply_update_trigger_if_not_exists('job_postings');
+SELECT apply_update_trigger_if_not_exists('candidates');
+SELECT apply_update_trigger_if_not_exists('email_templates');
+SELECT apply_update_trigger_if_not_exists('email_configuration');
+
+SELECT 'All triggers checked/applied.';
+
+-- Add more schema definitions for other modules as needed...
 
 `;
 
@@ -94,19 +278,22 @@ async function initializeDatabase() {
     client = await pool.connect();
     console.log('Connected to database. Executing schema creation script...');
     await client.query(schemaSQL);
-    console.log('Database schema initialized (or already exists) successfully.');
+    console.log('Database schema initialization script executed successfully.');
   } catch (err: any) {
-    console.error('Error during database schema initialization:', err);
+    console.error('-----------------------------------------');
+    console.error('Error during database schema initialization:', err.message);
+    console.error('Stack:', err.stack);
+    console.error('-----------------------------------------');
     // Exit process with error if initialization fails
     process.exit(1);
   } finally {
     if (client) {
       await client.release();
-      console.log('Database client released.');
+      console.log('Database client released after schema initialization.');
     }
     // Ensure the pool is closed after initialization to allow the script to exit
     await pool.end();
-    console.log('Database pool closed.');
+    console.log('Database pool closed after schema initialization.');
   }
 }
 

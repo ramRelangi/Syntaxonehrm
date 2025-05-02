@@ -33,7 +33,7 @@ export async function addTenant(tenantData: Pick<Tenant, 'name' | 'domain'>): Pr
         }
          // Handle case where table doesn't exist
         if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized. Relation "tenants" does not exist.');
+            throw new Error('Database schema not initialized (relation "tenants" does not exist). Please run `npm run db:init`.');
         }
         throw err; // Re-throw other errors
     } finally {
@@ -53,7 +53,7 @@ export async function getTenantById(id: string): Promise<Tenant | undefined> {
     } catch (err: any) {
         console.error(`[DB getTenantById] Error fetching tenant ${id}:`, err);
          if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized. Relation "tenants" does not exist.');
+            throw new Error('Database schema not initialized (relation "tenants" does not exist). Please run `npm run db:init`.');
         }
         throw err;
     } finally {
@@ -74,7 +74,7 @@ export async function getTenantByDomain(domain: string): Promise<Tenant | undefi
     } catch (err: any) {
         console.error(`[DB getTenantByDomain] Error fetching tenant by domain ${lowerCaseDomain}:`, err);
          if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized. Relation "tenants" does not exist.');
+            throw new Error('Database schema not initialized (relation "tenants" does not exist). Please run `npm run db:init`.');
         }
         throw err;
     } finally {
@@ -127,13 +127,9 @@ export async function addUser(userData: Omit<User, 'id' | 'createdAt' | 'updated
             if (err.constraint === 'users_email_key') { // Global email uniqueness
                  throw new Error('User email already exists.');
             }
-            // Add check for tenant-specific email uniqueness if applicable
-            // if (err.constraint === 'users_tenant_id_email_key') {
-            //     throw new Error('Email already exists for this tenant.');
-            // }
         }
         if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized. Relation "users" does not exist.');
+            throw new Error('Database schema not initialized (relation "users" does not exist). Please run `npm run db:init`.');
         }
         throw err;
     } finally {
@@ -153,7 +149,7 @@ export async function getUserById(id: string): Promise<User | undefined> {
     } catch (err: any) {
         console.error(`[DB getUserById] Error fetching user ${id}:`, err);
         if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized. Relation "users" does not exist.');
+            throw new Error('Database schema not initialized (relation "users" does not exist). Please run `npm run db:init`.');
         }
         throw err;
     } finally {
@@ -183,7 +179,7 @@ export async function getUserByEmail(email: string, tenantId?: string): Promise<
     } catch (err: any) {
         console.error(`[DB getUserByEmail] Error fetching user by email ${lowerCaseEmail}:`, err);
          if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized. Relation "users" does not exist.');
+            throw new Error('Database schema not initialized (relation "users" does not exist). Please run `npm run db:init`.');
         }
         throw err;
     } finally {
@@ -192,4 +188,4 @@ export async function getUserByEmail(email: string, tenantId?: string): Promise<
     }
 }
 
-// Note: The database schema has been moved to src/lib/init-db.ts
+// Note: The database schema initialization has been moved to src/lib/init-db.ts
