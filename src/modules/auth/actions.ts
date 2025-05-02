@@ -50,18 +50,13 @@ function createTransporter(settings: EmailSettings): nodemailer.Transporter {
 }
 
 // Function to send the welcome email
-async function sendWelcomeEmail(adminName: string, adminEmail: string, companyDomain: string): Promise<boolean> {
-    console.log(`[sendWelcomeEmail] Attempting to send welcome email to ${adminEmail} for domain ${companyDomain}.`);
+async function sendWelcomeEmail(tenantId: string, adminName: string, adminEmail: string, companyDomain: string): Promise<boolean> {
+    console.log(`[sendWelcomeEmail] Attempting to send welcome email to ${adminEmail} for domain ${companyDomain} (Tenant ID: ${tenantId}).`);
     let settings: EmailSettings | null = null;
     try {
-        // Fetch settings specific to the newly created tenant
-        const tenant = await getTenantByDomain(companyDomain);
-        if (!tenant) {
-             console.error(`[sendWelcomeEmail] Tenant with domain ${companyDomain} not found after creation. Cannot fetch settings.`);
-             return false;
-        }
-        console.log(`[sendWelcomeEmail] Fetching email settings from DB for tenant ${tenant.id}...`);
-        settings = await getEmailSettings(tenant.id); // Pass tenant ID
+        // Fetch settings specific to the newly created tenant using tenantId
+        console.log(`[sendWelcomeEmail] Fetching email settings from DB for tenant ${tenantId}...`);
+        settings = await getEmailSettings(tenantId); // Pass tenant ID
 
         // Log retrieved settings (mask password)
         console.log('[sendWelcomeEmail] Retrieved settings:', settings ? JSON.stringify({ ...settings, smtpPassword: '***' }) : 'null');
@@ -71,7 +66,7 @@ async function sendWelcomeEmail(adminName: string, adminEmail: string, companyDo
 
         if (!isSettingsValid) {
             console.error('[sendWelcomeEmail] Email settings are incomplete or not configured in DB for this tenant. Cannot send welcome email.');
-            // You might want to send a fallback email from a central address here
+            // TODO: Optionally, send a fallback email from a central address here
             return false; // Indicate failure to send
         }
         console.log('[sendWelcomeEmail] Email settings validated.');
@@ -147,6 +142,20 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     const { companyName, companyDomain, adminName, adminEmail, adminPassword } = validation.data;
     const lowerCaseDomain = companyDomain.toLowerCase();
 
+    // Ensure database schema is initialized before proceeding
+    try {
+        await pool.query('SELECT 1 FROM tenants LIMIT 1');
+        console.log("[registerTenantAction] Database schema seems initialized (tenants table exists).");
+    } catch (schemaError: any) {
+        if (schemaError.code === '42P01') { // undefined_table
+            console.error("[registerTenantAction] Database schema is not initialized. Relation 'tenants' does not exist.");
+            return { success: false, errors: [{ code: 'custom', path: ['root'], message: "Database schema is not initialized. Please run 'npm run db:init' and restart the server." }] };
+        }
+        // Handle other potential errors during check
+        console.error("[registerTenantAction] Error checking schema:", schemaError);
+        return { success: false, errors: [{ code: 'custom', path: ['root'], message: "Failed to verify database schema." }] };
+    }
+
     try {
         // 2. Check if domain already exists
         console.log(`[registerTenantAction] Checking if domain '${lowerCaseDomain}' exists...`);
@@ -195,15 +204,13 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.log(`[registerTenantAction] Admin user created successfully with ID: ${newUser.id}`);
 
         // 7. Send Welcome Email (Fire-and-forget, don't block registration on email failure)
-         // NOTE: Welcome email relies on DEFAULT email settings, as tenant-specific ones aren't set yet.
-         // Consider setting up default settings or handling this differently.
          console.log("[registerTenantAction] Triggering welcome email sending...");
-         // Pass newTenant.id to sendWelcomeEmail if it needs to fetch tenant-specific settings
-         sendWelcomeEmail(adminName, adminEmail, lowerCaseDomain).then(sent => {
+         // Pass newTenant.id to sendWelcomeEmail
+         sendWelcomeEmail(newTenant.id, adminName, adminEmail, lowerCaseDomain).then(sent => {
              if (sent) {
                  console.log("[registerTenantAction] Welcome email sending initiated successfully (async).");
              } else {
-                  console.error("[registerTenantAction] Welcome email sending failed or was skipped due to configuration (async).");
+                  console.error("[registerTenantAction] Welcome email sending failed or was skipped due to configuration (async). Check SMTP settings in the database for the new tenant.");
              }
          }).catch(err => {
               console.error("[registerTenantAction] Unexpected error during async welcome email sending:", err);
