@@ -63,35 +63,38 @@ export function deleteTemplate(id: string): boolean {
 
 
 // --- Email Settings ---
-// Initialize with an empty object to avoid null state after restarts during development.
-// The getEmailSettings function will determine if it's actually configured.
+// In-memory store (will be reset on server restart in dev)
 let emailSettings: EmailSettings | {} = {};
 
-// Initialize with some default mock data if needed for testing
-// emailSettings = {
-//     smtpHost: 'smtp.example.com',
-//     smtpPort: 587,
-//     smtpUser: 'user@example.com',
-//     smtpPassword: 'password123',
-//     smtpSecure: true,
-//     fromEmail: 'noreply@example.com',
-//     fromName: 'StreamlineHR System'
-// }
+// Default settings to return if in-memory is empty (simulates persistence for dev)
+const defaultMockSettings: EmailSettings = {
+    smtpHost: 'smtp.example.com', // Use a placeholder
+    smtpPort: 587,
+    smtpUser: 'testuser',
+    smtpPassword: 'testpassword',
+    smtpSecure: true,
+    fromEmail: 'noreply@example.com',
+    fromName: 'StreamlineHR Mock'
+};
+
 
 export function getEmailSettings(): EmailSettings | null {
-    // Check if essential fields exist to determine if configured, before returning
-    // Cast to EmailSettings temporarily to check properties safely
+    // Check if essential fields exist in the in-memory object
     const potentialSettings = emailSettings as EmailSettings;
-    if (potentialSettings && potentialSettings.smtpHost && potentialSettings.fromEmail) {
-       // Return a deep copy if settings seem configured
+    if (potentialSettings && potentialSettings.smtpHost && potentialSettings.fromEmail && potentialSettings.smtpUser && potentialSettings.smtpPassword) {
+       // Return a deep copy if in-memory settings seem configured
+       console.log("[Mock DB] Returning in-memory email settings.");
        return JSON.parse(JSON.stringify(emailSettings)) as EmailSettings;
     }
-    // Return null if the object is empty or missing essential fields
-    return null;
+    // Return default mock settings if in-memory is empty or incomplete
+    // This helps avoid the "not configured" error after server restarts in dev
+    console.warn("[Mock DB] In-memory email settings not found or incomplete. Returning default mock settings.");
+    return JSON.parse(JSON.stringify(defaultMockSettings));
 }
 
 export function updateEmailSettings(settingsData: EmailSettings): EmailSettings {
-    // Overwrite existing settings or create if initially empty
+    // Overwrite existing in-memory settings or create if initially empty
+    console.log("[Mock DB] Updating in-memory email settings.");
     emailSettings = { ...settingsData };
     // Return a deep copy
     return JSON.parse(JSON.stringify(emailSettings));
