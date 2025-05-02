@@ -16,10 +16,8 @@ CREATE TABLE IF NOT EXISTS tenants (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 SELECT 'tenants table ensured.';
-
 -- Index for tenants.domain (using IF NOT EXISTS)
 CREATE INDEX IF NOT EXISTS idx_tenants_domain ON tenants(domain);
-SELECT 'Index idx_tenants_domain checked/created.';
 
 -- User Roles Enum
 DO $$ BEGIN
@@ -44,10 +42,8 @@ CREATE TABLE IF NOT EXISTS users (
     UNIQUE (tenant_id, email) -- Ensure email is unique within a tenant
 );
 SELECT 'users table ensured.';
-
 -- Index for users table (using IF NOT EXISTS)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_tenant_id_email ON users(tenant_id, email);
-SELECT 'Index idx_users_tenant_id_email checked/created.';
 
 -- Employee Status Enum
 DO $$ BEGIN
@@ -61,7 +57,7 @@ END $$;
 -- Employees Table
 CREATE TABLE IF NOT EXISTS employees (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL, -- Email uniqueness enforced per tenant
     phone VARCHAR(50),
@@ -74,15 +70,14 @@ CREATE TABLE IF NOT EXISTS employees (
     UNIQUE (tenant_id, email) -- Ensure email is unique within a tenant
 );
 SELECT 'employees table ensured.';
-
--- Index for employees table (using IF NOT EXISTS)
+-- Index for employees table (using IF NOT EXISTS) - Moved immediately after table creation
 CREATE INDEX IF NOT EXISTS idx_employees_tenant_id ON employees(tenant_id);
-SELECT 'Index idx_employees_tenant_id checked/created.';
+
 
 -- Leave Types Table
 CREATE TABLE IF NOT EXISTS leave_types (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL, -- Name uniqueness enforced per tenant
     description TEXT,
     requires_approval BOOLEAN NOT NULL DEFAULT TRUE,
@@ -93,10 +88,8 @@ CREATE TABLE IF NOT EXISTS leave_types (
     UNIQUE (tenant_id, name) -- Ensure name is unique within a tenant
 );
 SELECT 'leave_types table ensured.';
-
 -- Index for leave_types table (using IF NOT EXISTS)
 CREATE INDEX IF NOT EXISTS idx_leave_types_tenant_id ON leave_types(tenant_id);
-SELECT 'Index idx_leave_types_tenant_id checked/created.';
 
 
 -- Leave Request Status Enum
@@ -111,7 +104,7 @@ END $$;
 -- Leave Requests Table
 CREATE TABLE IF NOT EXISTS leave_requests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
     leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE RESTRICT,
     start_date DATE NOT NULL,
@@ -127,17 +120,14 @@ CREATE TABLE IF NOT EXISTS leave_requests (
     CONSTRAINT check_leave_dates CHECK (end_date >= start_date)
 );
 SELECT 'leave_requests table ensured.';
-
 -- Index for leave_requests table (using IF NOT EXISTS)
 CREATE INDEX IF NOT EXISTS idx_leave_requests_tenant_id ON leave_requests(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(employee_id);
-SELECT 'Indexes for leave_requests checked/created.';
 
 
 -- Leave Balances Table
 CREATE TABLE IF NOT EXISTS leave_balances (
-    -- id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Optional primary key if needed
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
     leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE,
     balance NUMERIC(5, 2) NOT NULL DEFAULT 0,
@@ -145,10 +135,8 @@ CREATE TABLE IF NOT EXISTS leave_balances (
     PRIMARY KEY (tenant_id, employee_id, leave_type_id) -- Composite key including tenant
 );
 SELECT 'leave_balances table ensured.';
-
 -- Index for leave_balances table (using IF NOT EXISTS)
 CREATE INDEX IF NOT EXISTS idx_leave_balances_tenant_id_employee_id ON leave_balances(tenant_id, employee_id);
-SELECT 'Index idx_leave_balances_tenant_id_employee_id checked/created.';
 
 
 -- Job Posting Status Enum
@@ -163,7 +151,7 @@ END $$;
 -- Job Postings Table
 CREATE TABLE IF NOT EXISTS job_postings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
     description TEXT NOT NULL,
     department VARCHAR(255) NOT NULL,
@@ -176,10 +164,8 @@ CREATE TABLE IF NOT EXISTS job_postings (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 SELECT 'job_postings table ensured.';
-
 -- Index for job_postings table (using IF NOT EXISTS)
 CREATE INDEX IF NOT EXISTS idx_job_postings_tenant_id_status ON job_postings(tenant_id, status);
-SELECT 'Index idx_job_postings_tenant_id_status checked/created.';
 
 
 -- Candidate Status Enum
@@ -194,7 +180,7 @@ END $$;
 -- Candidates Table
 CREATE TABLE IF NOT EXISTS candidates (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL, -- Unique per posting within a tenant
     phone VARCHAR(50),
@@ -209,16 +195,14 @@ CREATE TABLE IF NOT EXISTS candidates (
     UNIQUE (tenant_id, email, job_posting_id) -- Prevent duplicate applications within a tenant
 );
 SELECT 'candidates table ensured.';
-
 -- Index for candidates table (using IF NOT EXISTS)
 CREATE INDEX IF NOT EXISTS idx_candidates_tenant_id_job_posting_id ON candidates(tenant_id, job_posting_id);
-SELECT 'Index idx_candidates_tenant_id_job_posting_id checked/created.';
 
 
 -- Email Templates Table
 CREATE TABLE IF NOT EXISTS email_templates (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL, -- Unique per tenant
     subject VARCHAR(255) NOT NULL,
     body TEXT NOT NULL,
@@ -228,16 +212,13 @@ CREATE TABLE IF NOT EXISTS email_templates (
     UNIQUE (tenant_id, name) -- Ensure name is unique within a tenant
 );
 SELECT 'email_templates table ensured.';
-
 -- Index for email_templates table (using IF NOT EXISTS)
 CREATE INDEX IF NOT EXISTS idx_email_templates_tenant_id ON email_templates(tenant_id);
-SELECT 'Index idx_email_templates_tenant_id checked/created.';
 
 
 -- Email Configuration Table (Single Row Per Tenant)
 CREATE TABLE IF NOT EXISTS email_configuration (
-    -- id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Use tenant_id as PK if 1-to-1
-    tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE, -- Use tenant_id as PK
+    tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
     smtp_host VARCHAR(255) NOT NULL,
     smtp_port INT NOT NULL,
     smtp_user VARCHAR(255) NOT NULL,
@@ -267,7 +248,7 @@ DECLARE
     trigger_name TEXT := 'update_' || table_name_param || '_updated_at';
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_trigger WHERE tgname = trigger_name
+        SELECT 1 FROM pg_trigger WHERE tgname = trigger_name AND tgrelid = table_name_param::regclass
     ) THEN
         EXECUTE format('
             CREATE TRIGGER %I
@@ -294,9 +275,6 @@ SELECT apply_update_trigger_if_not_exists('email_templates');
 SELECT apply_update_trigger_if_not_exists('email_configuration');
 
 SELECT 'All triggers checked/applied.';
-
--- Add more schema definitions for other modules as needed...
-
 `;
 
 export async function initializeDatabase() {
@@ -321,9 +299,6 @@ export async function initializeDatabase() {
       await client.release();
       console.log('Database client released after schema initialization.');
     }
-    // Do NOT close the pool here if it's meant to be reused by the application
-    // await pool.end();
-    // console.log('Database pool closed after schema initialization.');
   }
 }
 
