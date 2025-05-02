@@ -1,7 +1,9 @@
+
 import { z } from 'zod';
 
 export interface Employee {
   id: string;
+  tenantId: string; // Add tenant ID
   name: string;
   email: string;
   phone?: string;
@@ -13,6 +15,7 @@ export interface Employee {
 
 // Define Zod schema for validation (aligned with Employee type)
 export const employeeSchema = z.object({
+  tenantId: z.string().uuid(), // Add tenant ID validation
   name: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Invalid email address"),
   phone: z.string().optional().or(z.literal("")), // Allow empty string for optional phone
@@ -22,4 +25,5 @@ export const employeeSchema = z.object({
   status: z.enum(['Active', 'Inactive', 'On Leave']),
 });
 
+// FormData might not include ID, but needs tenantId
 export type EmployeeFormData = z.infer<typeof employeeSchema>;

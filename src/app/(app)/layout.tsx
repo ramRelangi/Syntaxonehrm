@@ -22,12 +22,14 @@ import Image from 'next/image';
 import { logoutAction } from '@/modules/auth/actions'; // Import the logout action
 import { useToast } from '@/hooks/use-toast'; // Import useToast for feedback
 
-// Mock user data - replace with actual session/auth data
+// TODO: Replace Mock user data with actual session/auth data from a context or hook
+// This data should include the tenant's domain or ID.
 const user = {
-  name: 'Admin User',
-  email: 'admin@company.com',
-  initials: 'AU',
-  avatarUrl: '', // Optional: 'https://github.com/shadcn.png'
+  name: 'Admin User', // Fetch from session
+  email: 'admin@company.com', // Fetch from session
+  initials: 'AU', // Generate from name
+  avatarUrl: '', // Optional: Fetch from session or profile
+  tenantDomain: 'demo', // IMPORTANT: Fetch this from session
 };
 
 // Define navigation items
@@ -44,17 +46,17 @@ const navItems = [
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname(); // Get current path
+  const pathname = usePathname(); // Get current path relative to the tenant rewrite (e.g., /dashboard)
   const router = useRouter();
   const { toast } = useToast();
 
   const handleLogout = async () => {
     try {
-      await logoutAction();
+      await logoutAction(); // The action now handles the redirect to the correct domain login
        toast({ title: "Logged Out", description: "You have been successfully logged out." });
-       // Redirect happens inside the action (to /register), but good practice to handle client-side too
-       router.push('/register'); // Redirect to registration page after logout
-       router.refresh(); // Ensure page refresh after logout
+       // Redirect might happen server-side in action, but client-side refresh can help.
+       // router.push('/login'); // Not needed if action redirects correctly
+       // router.refresh(); // Potentially refresh to ensure state is cleared
     } catch (error) {
        console.error("Logout failed:", error);
        toast({ title: "Logout Failed", description: "Could not log out. Please try again.", variant: "destructive" });
@@ -71,30 +73,36 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
            side="left"
         >
             <SidebarHeader className="items-center justify-between p-4">
-                <Link href="/dashboard" className="flex items-center gap-2 font-semibold text-lg text-primary">
+                 {/* Link to tenant dashboard */}
+                 <Link href="/dashboard" className="flex items-center gap-2 font-semibold text-lg text-primary">
                  {/* Placeholder Logo - Replace with actual logo */}
                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6"><path d="M12 3v18M3 12h18"/></svg> {/* Simple cross as placeholder */}
                  <span className="hidden group-data-[state=expanded]:inline">StreamlineHR</span>
-                </Link>
+                 </Link>
                 <SidebarTrigger className="hidden md:flex" />
             </SidebarHeader>
 
             <SidebarContent className="flex-1 overflow-y-auto p-4">
                 <SidebarMenu>
-                    {navItems.map((item) => (
-                        <SidebarMenuItem key={item.href}>
-                            <SidebarMenuButton
-                                asChild
-                                isActive={pathname.startsWith(item.href) && (item.href !== '/dashboard' || pathname === '/dashboard')} // Check startsWith for active state, special case dashboard
-                                tooltip={item.label} // Tooltip shown when collapsed
-                            >
-                                <Link href={item.href}>
-                                    <item.icon className="h-5 w-5" />
-                                    <span className="truncate">{item.label}</span>
-                                </Link>
-                            </SidebarMenuButton>
-                        </SidebarMenuItem>
-                    ))}
+                    {navItems.map((item) => {
+                        // Check if the current tenant-relative path starts with the item's href
+                        const isActive = pathname === item.href || (pathname.startsWith(item.href) && item.href !== '/dashboard');
+                        return (
+                            <SidebarMenuItem key={item.href}>
+                                <SidebarMenuButton
+                                    asChild
+                                    isActive={isActive}
+                                    tooltip={item.label} // Tooltip shown when collapsed
+                                >
+                                    {/* Links are tenant-relative, middleware handles rewrite */}
+                                    <Link href={item.href}>
+                                        <item.icon className="h-5 w-5" />
+                                        <span className="truncate">{item.label}</span>
+                                    </Link>
+                                </SidebarMenuButton>
+                            </SidebarMenuItem>
+                        );
+                     })}
                 </SidebarMenu>
             </SidebarContent>
 
@@ -114,10 +122,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                  {/* <SidebarSeparator /> */}
                  <SidebarMenu className="mt-4">
                       <SidebarMenuItem>
-                         {/* Ideally link to a settings page */}
-                         <SidebarMenuButton tooltip="Settings">
-                            <Settings className="h-5 w-5"/>
-                            <span>Settings</span>
+                         {/* Link to tenant settings page */}
+                         <SidebarMenuButton tooltip="Settings" asChild>
+                             <Link href="/settings"> {/* Tenant-relative settings path */}
+                                <Settings className="h-5 w-5"/>
+                                <span>Settings</span>
+                            </Link>
                          </SidebarMenuButton>
                       </SidebarMenuItem>
                       <SidebarMenuItem>
@@ -139,7 +149,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {/* Mobile Header (optional, can be part of page content) */}
              <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4 md:hidden">
                 <SidebarTrigger />
-                 <h1 className="flex-1 text-lg font-semibold">StreamlineHR</h1>
+                 {/* Potentially show tenant name here */}
+                 <h1 className="flex-1 text-lg font-semibold">{user.tenantDomain || 'StreamlineHR'}</h1>
                 {/* Add mobile-specific header items if needed */}
              </header>
 

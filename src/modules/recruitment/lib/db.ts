@@ -1,3 +1,4 @@
+
 import pool from '@/lib/db';
 import type { JobPosting, Candidate, JobPostingStatus, CandidateStatus, JobPostingFormData, CandidateFormData } from '@/modules/recruitment/types';
 import { formatISO } from 'date-fns';
@@ -7,6 +8,7 @@ import { formatISO } from 'date-fns';
 function mapRowToJobPosting(row: any): JobPosting {
     return {
         id: row.id,
+        tenantId: row.tenant_id, // Include tenantId
         title: row.title,
         description: row.description,
         department: row.department,
@@ -18,58 +20,63 @@ function mapRowToJobPosting(row: any): JobPosting {
     };
 }
 
-export async function getAllJobPostings(filters?: { status?: JobPostingStatus }): Promise<JobPosting[]> {
+// Get job postings for a specific tenant
+export async function getAllJobPostings(tenantId: string, filters?: { status?: JobPostingStatus }): Promise<JobPosting[]> {
     const client = await pool.connect();
     let query = 'SELECT * FROM job_postings';
-    const conditions: string[] = [];
-    const values: any[] = [];
-    let valueIndex = 1;
+    const conditions: string[] = ['tenant_id = $1']; // Always filter by tenant
+    const values: any[] = [tenantId];
+    let valueIndex = 2; // Start indexing from 2
 
     if (filters?.status) {
         conditions.push(`status = $${valueIndex++}`);
         values.push(filters.status);
     }
 
-    if (conditions.length > 0) {
-        query += ` WHERE ${conditions.join(' AND ')}`;
-    }
+    query += ` WHERE ${conditions.join(' AND ')}`;
     query += ' ORDER BY date_posted DESC, created_at DESC'; // Order by post date, then creation
 
     try {
         const res = await client.query(query, values);
         return res.rows.map(mapRowToJobPosting);
     } catch (err) {
-        console.error('Error fetching all job postings:', err);
+        console.error(`Error fetching all job postings for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
-export async function getJobPostingById(id: string): Promise<JobPosting | undefined> {
+// Get job posting by ID (ensure it belongs to the tenant)
+export async function getJobPostingById(id: string, tenantId: string): Promise<JobPosting | undefined> {
     const client = await pool.connect();
     try {
-        const res = await client.query('SELECT * FROM job_postings WHERE id = $1', [id]);
+        const res = await client.query('SELECT * FROM job_postings WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
         return res.rows.length > 0 ? mapRowToJobPosting(res.rows[0]) : undefined;
     } catch (err) {
-        console.error(`Error fetching job posting ${id}:`, err);
+        console.error(`Error fetching job posting ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
+// Add job posting for a specific tenant
 export async function addJobPosting(jobData: JobPostingFormData): Promise<JobPosting> {
     const client = await pool.connect();
+    if (!jobData.tenantId) {
+        throw new Error("Tenant ID is required to add a job posting.");
+    }
     const isDraft = (jobData.status || 'Draft') === 'Draft';
     const datePosted = isDraft ? null : new Date(); // Set post date only if not draft
 
     const query = `
-        INSERT INTO job_postings (title, description, department, location, salary_range, status, date_posted, closing_date)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO job_postings (tenant_id, title, description, department, location, salary_range, status, date_posted, closing_date)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *;
     `;
     const values = [
+        jobData.tenantId,
         jobData.title,
         jobData.description,
         jobData.department,
@@ -90,9 +97,10 @@ export async function addJobPosting(jobData: JobPostingFormData): Promise<JobPos
     }
 }
 
-export async function updateJobPosting(id: string, updates: Partial<JobPostingFormData>): Promise<JobPosting | undefined> {
+// Update job posting (ensure it belongs to the tenant)
+export async function updateJobPosting(id: string, tenantId: string, updates: Partial<JobPostingFormData>): Promise<JobPosting | undefined> {
     const client = await pool.connect();
-    const currentPosting = await getJobPostingById(id); // Get current state for logic
+    const currentPosting = await getJobPostingById(id, tenantId); // Get current state for logic (with tenant check)
     if (!currentPosting) return undefined;
 
     const setClauses: string[] = [];
@@ -119,6 +127,9 @@ export async function updateJobPosting(id: string, updates: Partial<JobPostingFo
 
 
     for (const key in updates) {
+        // Don't allow updating tenantId
+        if (key === 'tenantId') continue;
+
          if (Object.prototype.hasOwnProperty.call(updates, key)) {
             const dbKey = columnMap[key as keyof JobPostingFormData];
             if (dbKey) {
@@ -137,11 +148,12 @@ export async function updateJobPosting(id: string, updates: Partial<JobPostingFo
 
     if (setClauses.length === 0) return currentPosting;
 
-    values.push(id);
+    values.push(id); // Add the ID for the WHERE clause
+    values.push(tenantId); // Add tenantId for WHERE clause
     const query = `
         UPDATE job_postings
         SET ${setClauses.join(', ')}
-        WHERE id = $${valueIndex}
+        WHERE id = $${valueIndex} AND tenant_id = $${valueIndex + 1}
         RETURNING *;
     `;
 
@@ -149,28 +161,29 @@ export async function updateJobPosting(id: string, updates: Partial<JobPostingFo
         const res = await client.query(query, values);
         return res.rows.length > 0 ? mapRowToJobPosting(res.rows[0]) : undefined;
     } catch (err) {
-        console.error(`Error updating job posting ${id}:`, err);
+        console.error(`Error updating job posting ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
-export async function deleteJobPosting(id: string): Promise<boolean> {
+// Delete job posting (ensure it belongs to the tenant and has no candidates)
+export async function deleteJobPosting(id: string, tenantId: string): Promise<boolean> {
     const client = await pool.connect();
     try {
-        // Check for associated candidates
-        const checkCandidatesQuery = 'SELECT 1 FROM candidates WHERE job_posting_id = $1 LIMIT 1';
-        const candidateRes = await client.query(checkCandidatesQuery, [id]);
+        // Check for associated candidates within the tenant
+        const checkCandidatesQuery = 'SELECT 1 FROM candidates WHERE job_posting_id = $1 AND tenant_id = $2 LIMIT 1';
+        const candidateRes = await client.query(checkCandidatesQuery, [id, tenantId]);
         if (candidateRes.rowCount > 0) {
             throw new Error('Cannot delete job posting with associated candidates.');
         }
 
-        const deleteQuery = 'DELETE FROM job_postings WHERE id = $1';
-        const res = await client.query(deleteQuery, [id]);
+        const deleteQuery = 'DELETE FROM job_postings WHERE id = $1 AND tenant_id = $2';
+        const res = await client.query(deleteQuery, [id, tenantId]);
         return res.rowCount > 0;
     } catch (err) {
-        console.error(`Error deleting job posting ${id}:`, err);
+        console.error(`Error deleting job posting ${id} for tenant ${tenantId}:`, err);
         throw err; // Re-throw custom or DB errors
     } finally {
         client.release();
@@ -183,6 +196,7 @@ export async function deleteJobPosting(id: string): Promise<boolean> {
 function mapRowToCandidate(row: any): Candidate {
     return {
         id: row.id,
+        tenantId: row.tenant_id, // Include tenantId
         name: row.name,
         email: row.email,
         phone: row.phone ?? undefined,
@@ -195,12 +209,13 @@ function mapRowToCandidate(row: any): Candidate {
     };
 }
 
-export async function getAllCandidates(filters?: { jobPostingId?: string, status?: CandidateStatus }): Promise<Candidate[]> {
+// Get candidates for a specific tenant, optionally filtered
+export async function getAllCandidates(tenantId: string, filters?: { jobPostingId?: string, status?: CandidateStatus }): Promise<Candidate[]> {
     const client = await pool.connect();
     let query = 'SELECT * FROM candidates';
-    const conditions: string[] = [];
-    const values: any[] = [];
-    let valueIndex = 1;
+    const conditions: string[] = ['tenant_id = $1']; // Always filter by tenant
+    const values: any[] = [tenantId];
+    let valueIndex = 2; // Start indexing from 2
 
     if (filters?.jobPostingId) {
         conditions.push(`job_posting_id = $${valueIndex++}`);
@@ -211,43 +226,47 @@ export async function getAllCandidates(filters?: { jobPostingId?: string, status
         values.push(filters.status);
     }
 
-    if (conditions.length > 0) {
-        query += ` WHERE ${conditions.join(' AND ')}`;
-    }
+    query += ` WHERE ${conditions.join(' AND ')}`;
     query += ' ORDER BY application_date DESC';
 
     try {
         const res = await client.query(query, values);
         return res.rows.map(mapRowToCandidate);
     } catch (err) {
-        console.error('Error fetching candidates:', err);
+        console.error(`Error fetching candidates for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
-export async function getCandidateById(id: string): Promise<Candidate | undefined> {
+// Get candidate by ID (ensure it belongs to the tenant)
+export async function getCandidateById(id: string, tenantId: string): Promise<Candidate | undefined> {
     const client = await pool.connect();
     try {
-        const res = await client.query('SELECT * FROM candidates WHERE id = $1', [id]);
+        const res = await client.query('SELECT * FROM candidates WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
         return res.rows.length > 0 ? mapRowToCandidate(res.rows[0]) : undefined;
     } catch (err) {
-        console.error(`Error fetching candidate ${id}:`, err);
+        console.error(`Error fetching candidate ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
+// Add candidate for a specific tenant and job posting
 export async function addCandidate(candidateData: CandidateFormData): Promise<Candidate> {
     const client = await pool.connect();
+    if (!candidateData.tenantId || !candidateData.jobPostingId) {
+        throw new Error("Tenant ID and Job Posting ID are required to add a candidate.");
+    }
     const query = `
-        INSERT INTO candidates (name, email, phone, job_posting_id, application_date, status, resume_url, cover_letter, notes)
-        VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8)
+        INSERT INTO candidates (tenant_id, name, email, phone, job_posting_id, application_date, status, resume_url, cover_letter, notes)
+        VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9)
         RETURNING *;
     `;
     const values = [
+        candidateData.tenantId,
         candidateData.name,
         candidateData.email,
         candidateData.phone || null,
@@ -258,13 +277,13 @@ export async function addCandidate(candidateData: CandidateFormData): Promise<Ca
         candidateData.notes || null,
     ];
     try {
-        // TODO: Verify jobPostingId exists?
+        // TODO: Verify jobPostingId exists for the tenant?
         const res = await client.query(query, values);
         return mapRowToCandidate(res.rows[0]);
     } catch (err: any) {
         console.error('Error adding candidate:', err);
          if (err.code === '23505') { // Check for unique constraint errors
-             if (err.constraint === 'candidates_email_job_posting_id_key') { // Example constraint name
+             if (err.constraint === 'candidates_tenant_id_email_job_posting_id_key') { // Use tenant-specific constraint
                   throw new Error('This email address has already applied for this job.');
              }
          }
@@ -274,7 +293,8 @@ export async function addCandidate(candidateData: CandidateFormData): Promise<Ca
     }
 }
 
-export async function updateCandidate(id: string, updates: Partial<Omit<Candidate, 'id' | 'applicationDate' | 'jobPostingId'>>): Promise<Candidate | undefined> {
+// Update candidate (ensure it belongs to the tenant)
+export async function updateCandidate(id: string, tenantId: string, updates: Partial<Omit<Candidate, 'id' | 'applicationDate' | 'jobPostingId' | 'tenantId'>>): Promise<Candidate | undefined> {
     const client = await pool.connect();
     const setClauses: string[] = [];
     const values: any[] = [];
@@ -302,13 +322,14 @@ export async function updateCandidate(id: string, updates: Partial<Omit<Candidat
         }
     }
 
-    if (setClauses.length === 0) return getCandidateById(id);
+    if (setClauses.length === 0) return getCandidateById(id, tenantId);
 
-    values.push(id);
+    values.push(id); // ID for WHERE clause
+    values.push(tenantId); // tenantId for WHERE clause
     const query = `
         UPDATE candidates
         SET ${setClauses.join(', ')}
-        WHERE id = $${valueIndex}
+        WHERE id = $${valueIndex} AND tenant_id = $${valueIndex + 1}
         RETURNING *;
     `;
 
@@ -316,9 +337,9 @@ export async function updateCandidate(id: string, updates: Partial<Omit<Candidat
         const res = await client.query(query, values);
         return res.rows.length > 0 ? mapRowToCandidate(res.rows[0]) : undefined;
     } catch (err: any) {
-        console.error(`Error updating candidate ${id}:`, err);
+        console.error(`Error updating candidate ${id} for tenant ${tenantId}:`, err);
         if (err.code === '23505') {
-             if (err.constraint === 'candidates_email_job_posting_id_key') {
+             if (err.constraint === 'candidates_tenant_id_email_job_posting_id_key') {
                   throw new Error('This email address has already applied for this job.');
              }
          }
@@ -328,89 +349,19 @@ export async function updateCandidate(id: string, updates: Partial<Omit<Candidat
     }
 }
 
-export async function deleteCandidate(id: string): Promise<boolean> {
+// Delete candidate (ensure it belongs to the tenant)
+export async function deleteCandidate(id: string, tenantId: string): Promise<boolean> {
     const client = await pool.connect();
-    const query = 'DELETE FROM candidates WHERE id = $1';
+    const query = 'DELETE FROM candidates WHERE id = $1 AND tenant_id = $2';
     try {
-        const res = await client.query(query, [id]);
+        const res = await client.query(query, [id, tenantId]);
         return res.rowCount > 0;
     } catch (err) {
-        console.error(`Error deleting candidate ${id}:`, err);
+        console.error(`Error deleting candidate ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
-// --- Database Schema (for reference) ---
-/*
--- Requires employees table (if linking approvers etc.)
-
-CREATE TYPE job_posting_status AS ENUM ('Open', 'Closed', 'Draft', 'Archived');
-
-CREATE TABLE job_postings (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    title VARCHAR(255) NOT NULL,
-    description TEXT NOT NULL,
-    department VARCHAR(255) NOT NULL,
-    location VARCHAR(255) NOT NULL,
-    salary_range VARCHAR(100),
-    status job_posting_status NOT NULL DEFAULT 'Draft',
-    date_posted TIMESTAMP WITH TIME ZONE, -- Set when status becomes 'Open'
-    closing_date DATE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TYPE candidate_status AS ENUM (
-    'Applied',
-    'Screening',
-    'Interviewing',
-    'Offer Extended',
-    'Hired',
-    'Rejected',
-    'Withdrawn'
-);
-
-CREATE TABLE candidates (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL,
-    phone VARCHAR(50),
-    job_posting_id UUID NOT NULL REFERENCES job_postings(id) ON DELETE CASCADE, -- Cascade delete candidate if job posting is deleted
-    application_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    status candidate_status NOT NULL DEFAULT 'Applied',
-    resume_url TEXT, -- URL to stored resume file
-    cover_letter TEXT,
-    notes TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    -- Optional: Prevent duplicate applications for the same job
-    UNIQUE (email, job_posting_id)
-);
-
--- Indexes
-CREATE INDEX idx_job_postings_status ON job_postings(status);
-CREATE INDEX idx_candidates_job_posting_id ON candidates(job_posting_id);
-CREATE INDEX idx_candidates_status ON candidates(status);
-CREATE INDEX idx_candidates_email ON candidates(email);
-
-
--- Triggers for updated_at (if not already created)
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-   NEW.updated_at = NOW();
-   RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER update_job_postings_updated_at
-BEFORE UPDATE ON job_postings
-FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_candidates_updated_at
-BEFORE UPDATE ON candidates
-FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-*/
+// Note: Schema updated in init-db.ts

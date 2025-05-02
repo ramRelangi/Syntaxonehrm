@@ -10,6 +10,7 @@ import { testDbConnection } from '@/lib/db'; // Import only the test function
 import { getEmailSettings } from '@/modules/communication/lib/db'; // Import function to get settings
 import type { EmailSettings } from '@/modules/communication/types'; // Import EmailSettings type
 import { redirect } from 'next/navigation'; // Import redirect
+import { headers } from 'next/headers'; // Import headers to potentially get domain in logout
 
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
 
@@ -53,8 +54,14 @@ async function sendWelcomeEmail(adminName: string, adminEmail: string, companyDo
     console.log(`[sendWelcomeEmail] Attempting to send welcome email to ${adminEmail} for domain ${companyDomain}.`);
     let settings: EmailSettings | null = null;
     try {
-        console.log('[sendWelcomeEmail] Fetching email settings from DB...');
-        settings = await getEmailSettings();
+        // Fetch settings specific to the newly created tenant
+        const tenant = await getTenantByDomain(companyDomain);
+        if (!tenant) {
+             console.error(`[sendWelcomeEmail] Tenant with domain ${companyDomain} not found after creation. Cannot fetch settings.`);
+             return false;
+        }
+        console.log(`[sendWelcomeEmail] Fetching email settings from DB for tenant ${tenant.id}...`);
+        settings = await getEmailSettings(tenant.id); // Pass tenant ID
 
         // Log retrieved settings (mask password)
         console.log('[sendWelcomeEmail] Retrieved settings:', settings ? JSON.stringify({ ...settings, smtpPassword: '***' }) : 'null');
@@ -63,7 +70,8 @@ async function sendWelcomeEmail(adminName: string, adminEmail: string, companyDo
         const isSettingsValid = settings && settings.smtpHost && settings.smtpPort && settings.smtpUser && settings.smtpPassword && settings.fromEmail && settings.fromName;
 
         if (!isSettingsValid) {
-            console.error('[sendWelcomeEmail] Email settings are incomplete or not configured in DB. Cannot send welcome email.');
+            console.error('[sendWelcomeEmail] Email settings are incomplete or not configured in DB for this tenant. Cannot send welcome email.');
+            // You might want to send a fallback email from a central address here
             return false; // Indicate failure to send
         }
         console.log('[sendWelcomeEmail] Email settings validated.');
@@ -72,10 +80,12 @@ async function sendWelcomeEmail(adminName: string, adminEmail: string, companyDo
         console.log('[sendWelcomeEmail] Creating Nodemailer transporter...');
         const transporter = createTransporter(settings); // Pass validated settings
 
-        // Construct tenant-specific login URL using NEXT_PUBLIC_BASE_URL
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; // Fallback for local dev
-        const loginUrl = `${baseUrl.replace(/\/$/, '')}/login/${companyDomain}`; // Append /login/[domain]
-        console.log(`[sendWelcomeEmail] Constructed Login URL: ${loginUrl}`);
+        // Construct tenant-specific login URL using tenant domain and root domain
+        const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app'; // Use configured root domain
+        // Construct the subdomain URL
+        const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+        const loginUrl = `${protocol}://${companyDomain}.${rootDomain}/login`; // Construct subdomain login URL
+        console.log(`[sendWelcomeEmail] Constructed Tenant Login URL: ${loginUrl}`);
 
         const mailOptions = {
             from: `"${settings.fromName}" <${settings.fromEmail}>`,
@@ -147,19 +157,25 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         }
         console.log(`[registerTenantAction] Domain '${lowerCaseDomain}' is available.`);
 
-        // 3. Check if admin email already exists (globally)
-        console.log(`[registerTenantAction] Checking if email '${adminEmail}' exists...`);
-        const existingUser = await getUserByEmail(adminEmail);
-        if (existingUser) {
-            console.warn(`[registerTenantAction] Email '${adminEmail}' already exists.`);
-            return { success: false, errors: [{ code: 'custom', path: ['adminEmail'], message: 'This email address is already in use.' }] };
-        }
-        console.log(`[registerTenantAction] Email '${adminEmail}' is available.`);
-
-        // 4. Create the Tenant
+        // 3. Create the Tenant
         console.log(`[registerTenantAction] Creating tenant '${companyName}' with domain '${lowerCaseDomain}'...`);
         const newTenant = await addTenant({ name: companyName, domain: lowerCaseDomain });
         console.log(`[registerTenantAction] Tenant created successfully with ID: ${newTenant.id}`);
+
+
+        // 4. Check if admin email already exists WITHIN THIS TENANT
+        console.log(`[registerTenantAction] Checking if email '${adminEmail}' exists for tenant ${newTenant.id}...`);
+        const existingUser = await getUserByEmail(adminEmail, newTenant.id); // Pass tenant ID
+        if (existingUser) {
+            // This shouldn't happen if tenant creation was successful, but check defensively
+            console.warn(`[registerTenantAction] Email '${adminEmail}' already exists for tenant ${newTenant.id}.`);
+            // Handle potential cleanup or just error out
+             // Rollback tenant creation? For now, just error.
+             // await deleteTenant(newTenant.id); // Need a deleteTenant function
+            return { success: false, errors: [{ code: 'custom', path: ['adminEmail'], message: 'This email address is already in use for this company.' }] };
+        }
+        console.log(`[registerTenantAction] Email '${adminEmail}' is available for tenant ${newTenant.id}.`);
+
 
         // 5. Hash the Admin Password
         console.log("[registerTenantAction] Hashing admin password...");
@@ -179,7 +195,10 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.log(`[registerTenantAction] Admin user created successfully with ID: ${newUser.id}`);
 
         // 7. Send Welcome Email (Fire-and-forget, don't block registration on email failure)
+         // NOTE: Welcome email relies on DEFAULT email settings, as tenant-specific ones aren't set yet.
+         // Consider setting up default settings or handling this differently.
          console.log("[registerTenantAction] Triggering welcome email sending...");
+         // Pass newTenant.id to sendWelcomeEmail if it needs to fetch tenant-specific settings
          sendWelcomeEmail(adminName, adminEmail, lowerCaseDomain).then(sent => {
              if (sent) {
                  console.log("[registerTenantAction] Welcome email sending initiated successfully (async).");
@@ -224,9 +243,48 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
 // Simple Logout Action
 export async function logoutAction() {
   console.log("[logoutAction] Logging out user...");
-  // In a real app, you would clear the session/cookie here.
+  // TODO: Implement actual session clearing (e.g., deleting session cookie)
+  // This depends heavily on your authentication library (e.g., next-auth, lucia-auth)
 
-  // Redirect to the main registration page after clearing session
-  redirect('/register');
+  // --- Attempt to get tenant domain for redirect ---
+  let tenantDomain: string | null = null;
+  try {
+      // **Placeholder:** You need a way to get the current user's tenant domain
+      // Option 1: From session data (if stored there)
+      // const session = await getSession(); // Replace with your session retrieval logic
+      // if (session?.user?.tenantDomain) {
+      //   tenantDomain = session.user.tenantDomain;
+      // }
+
+      // Option 2: Infer from request headers (less reliable, depends on proxy setup)
+      // This won't work correctly inside a server action without passing headers explicitly.
+      // const headersList = headers();
+      // const host = headersList.get('host') || '';
+      // const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app';
+      // const match = host.match(`^(.*)\\.${rootDomain}$`);
+      // tenantDomain = match ? match[1] : null;
+
+      // **For now, assume we can get the domain (replace this mock)**
+      // This is a temporary mock, replace with real logic
+      console.warn("[logoutAction] Using mock tenant domain for redirect. Implement session/user retrieval.");
+      tenantDomain = 'demo'; // MOCK - Replace with actual domain retrieval
+
+  } catch (error) {
+      console.error("[logoutAction] Error retrieving tenant domain for redirect:", error);
+  }
+
+  // --- Redirect Logic ---
+  let redirectUrl = '/login'; // Default redirect to root login page
+  if (tenantDomain) {
+      // Construct the tenant-specific login URL
+      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app';
+      const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}/login`;
+      console.log(`[logoutAction] Redirecting to tenant login: ${redirectUrl}`);
+  } else {
+       console.log(`[logoutAction] Tenant domain not found, redirecting to root login: ${redirectUrl}`);
+  }
+
+  // Redirect to the appropriate login page after clearing session
+  redirect(redirectUrl);
 }
-

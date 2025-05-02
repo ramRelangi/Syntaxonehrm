@@ -1,4 +1,5 @@
-// This component is designated as a Client Component
+
+// src/app/(app)/[domain]/employees/[id]/page.tsx
 "use client";
 
 import * as React from 'react';
@@ -13,29 +14,34 @@ import type { Employee } from '@/modules/employees/types';
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 
-// Helper to fetch data from API routes - CLIENT SIDE VERSION
+interface EmployeeDetailPageProps {
+  params: { domain: string; id: string };
+}
+
+// Helper to fetch data from API routes - CLIENT SIDE VERSION (API handles tenant context)
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
-    // Use relative paths for client-side fetching
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
-    console.log(`Fetching data from: ${fullUrl}`); // Log the URL being fetched
+    console.log(`[Employee Detail Page - fetchData] Fetching data from: ${fullUrl}`);
 
     try {
-        // Fetch relative to the current origin
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
-        console.log(`Fetch response status for ${fullUrl}: ${response.status}`); // Log response status
+        console.log(`[Employee Detail Page - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
 
         if (response.status === 404) return undefined as T; // Handle not found specifically
+         if (response.status === 400 && (await response.text()).includes('Tenant context')) {
+              throw new Error('Tenant information is missing. Unable to load data.');
+         }
+
 
         if (!response.ok) {
             const errorText = await response.text(); // Get raw error text
-            console.error(`Fetch error response body for ${fullUrl}:`, errorText);
+            console.error(`[Employee Detail Page - fetchData] Fetch error response body for ${fullUrl}:`, errorText);
             const errorData = JSON.parse(errorText || '{}'); // Try parsing JSON, default to empty object
             throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
         return await response.json() as T;
     } catch (error) {
-        console.error(`Error in fetchData for ${fullUrl}:`, error);
-        // Rethrow a more specific error if possible, or the original one
+        console.error(`[Employee Detail Page - fetchData] Error in fetchData for ${fullUrl}:`, error);
         if (error instanceof Error) {
            throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
         } else {
@@ -61,9 +67,8 @@ const getStatusVariant = (status?: Employee['status']): "default" | "secondary" 
 };
 
 
-export default function EmployeeDetailPage() {
-  const params = useParams();
-  const employeeId = params.id as string;
+export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageProps) {
+  const { domain: tenantDomain, id: employeeId } = params;
   const { toast } = useToast();
 
   const [employee, setEmployee] = React.useState<Employee | null>(null);
@@ -71,21 +76,21 @@ export default function EmployeeDetailPage() {
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!employeeId) return;
+    if (!employeeId || !tenantDomain) return;
 
     const fetchEmployee = async () => {
       setIsLoading(true);
       setError(null);
       try {
-        // Use relative path
+        // API route implicitly uses tenantId from header
         const data = await fetchData<Employee | undefined>(`/api/employees/${employeeId}`);
         if (!data) {
-          notFound(); // Trigger 404 if API returns undefined/404
+          notFound(); // Trigger 404 if API returns undefined/404 (or tenant mismatch)
           return;
         }
         setEmployee(data);
       } catch (err: any) {
-        setError("Failed to load employee data.");
+        setError(err.message || "Failed to load employee data.");
         toast({
           title: "Error",
           description: err.message || "Could not fetch employee details.",
@@ -97,7 +102,7 @@ export default function EmployeeDetailPage() {
     };
 
     fetchEmployee();
-  }, [employeeId, toast]);
+  }, [employeeId, tenantDomain, toast]);
 
    // Function to safely format date
    const formatDate = (dateString?: string) => {
@@ -143,11 +148,12 @@ export default function EmployeeDetailPage() {
    }
 
   if (error) {
-     return <p className="text-center text-destructive">{error}</p>;
+     return <p className="text-center text-destructive py-10">{error}</p>;
   }
 
    if (!employee) {
-      return <p className="text-center">Employee not found.</p>;
+      // Should be caught by notFound(), but as a fallback
+      return <p className="text-center py-10">Employee not found.</p>;
   }
 
 
@@ -156,7 +162,8 @@ export default function EmployeeDetailPage() {
        <div className="flex items-center justify-between flex-wrap gap-4">
          <div className="flex items-center gap-2">
            <Button variant="outline" size="icon" asChild>
-             <Link href="/employees">
+             {/* Link back to tenant-specific employee list */}
+             <Link href={`/${tenantDomain}/employees`}>
                <ArrowLeft className="h-4 w-4" />
                <span className="sr-only">Back to Employees</span>
              </Link>
@@ -166,7 +173,8 @@ export default function EmployeeDetailPage() {
            </h1>
          </div>
           <Button asChild variant="outline">
-             <Link href={`/employees/${employee.id}/edit`}>
+             {/* Link to tenant-specific edit page */}
+             <Link href={`/${tenantDomain}/employees/${employee.id}/edit`}>
                  <Pencil className="mr-2 h-4 w-4"/> Edit Employee
              </Link>
          </Button>
@@ -174,7 +182,7 @@ export default function EmployeeDetailPage() {
       <Card className="shadow-sm">
         <CardHeader>
           <CardTitle>Employee Information</CardTitle>
-          <CardDescription>Detailed view of the employee's record.</CardDescription>
+          <CardDescription>Detailed view of the employee's record for {tenantDomain}.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
            {/* Column 1 */}
@@ -246,10 +254,11 @@ export default function EmployeeDetailPage() {
              <Card className="shadow-sm">
                 <CardHeader>
                     <CardTitle>Leave History</CardTitle>
-                    <CardDescription>Placeholder for leave records.</CardDescription>
+                     {/* TODO: Link to tenant-specific leave page */}
+                     <CardDescription><Link href={`/${tenantDomain}/leave?employeeId=${employeeId}`} className='text-primary hover:underline'>View leave history</Link></CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <p className="text-muted-foreground">Leave records will be displayed here.</p>
+                    <p className="text-muted-foreground">Recent leave records will be displayed here.</p>
                 </CardContent>
             </Card>
        </div>

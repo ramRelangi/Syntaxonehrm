@@ -7,6 +7,7 @@ export type JobPostingStatus = z.infer<typeof jobPostingStatusSchema>;
 
 export const jobPostingSchema = z.object({
   id: z.string().optional(), // Optional for creation, present for existing
+  tenantId: z.string().uuid(), // Add tenant ID
   title: z.string().min(3, "Job title must be at least 3 characters"),
   description: z.string().min(10, "Description must be at least 10 characters"),
   department: z.string().min(1, "Department is required"),
@@ -19,7 +20,9 @@ export const jobPostingSchema = z.object({
 });
 
 export type JobPosting = z.infer<typeof jobPostingSchema>;
-export type JobPostingFormData = Omit<JobPosting, 'id' | 'datePosted'>; // Data expected from the form
+// FormData might not need tenantId explicitly if it's derived from context/session
+export type JobPostingFormData = Omit<JobPosting, 'id' | 'datePosted'> & { tenantId?: string }; // Allow optional tenantId
+
 
 // --- Candidate ---
 export const candidateStatusSchema = z.enum([
@@ -35,6 +38,7 @@ export type CandidateStatus = z.infer<typeof candidateStatusSchema>;
 
 export const candidateSchema = z.object({
   id: z.string().optional(),
+  tenantId: z.string().uuid(), // Add tenant ID
   name: z.string().min(2, "Candidate name is required"),
   email: z.string().email("Invalid email address"),
   phone: z.string().optional(),
@@ -47,5 +51,5 @@ export const candidateSchema = z.object({
 });
 
 export type Candidate = z.infer<typeof candidateSchema>;
-export type CandidateFormData = Omit<Candidate, 'id' | 'applicationDate'>;
-
+// FormData might not need tenantId or applicationDate explicitly
+export type CandidateFormData = Omit<Candidate, 'id' | 'applicationDate'> & { tenantId?: string }; // Allow optional tenantId

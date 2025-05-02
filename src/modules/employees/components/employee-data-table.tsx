@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -36,37 +37,39 @@ import {
 import { ChevronDown, Search, Filter } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Employee } from "@/modules/employees/types";
-// ActionsCell is defined in columns file
+// ActionsCell component is defined in employee-table-columns.tsx
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
   onEmployeeDeleted: () => void; // Callback for when an employee is deleted
+  tenantDomain: string; // Add tenant domain prop
 }
 
 export function EmployeeDataTable<TData extends Employee, TValue>({
   columns,
   data,
   onEmployeeDeleted, // Receive callback
+  tenantDomain, // Receive tenant domain
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = React.useState({});
 
-  // Inject the onEmployeeDeleted callback into the actions cell component's props
+  // Inject the onEmployeeDeleted and tenantDomain callbacks into the actions cell component's props
   const tableColumns = React.useMemo(() => columns.map(col => {
       // Find the 'actions' column and modify its cell renderer
       if (col.id === 'actions' && col.cell) {
           const OriginalCell = col.cell as React.FC<any>; // Cast to access component props
           return {
               ...col,
-              // Replace the cell renderer with a new one that passes the callback
-              cell: (props: any) => <OriginalCell {...props} onEmployeeDeleted={onEmployeeDeleted} />
+              // Replace the cell renderer with a new one that passes the callback and domain
+              cell: (props: any) => <OriginalCell {...props} onEmployeeDeleted={onEmployeeDeleted} tenantDomain={tenantDomain} />
           };
       }
       return col;
-  }), [columns, onEmployeeDeleted]);
+  }), [columns, onEmployeeDeleted, tenantDomain]); // Add tenantDomain dependency
 
 
   const table = useReactTable({
@@ -149,7 +152,7 @@ export function EmployeeDataTable<TData extends Employee, TValue>({
          {/* Column Visibility Dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="ml-auto">
+            <Button variant="outline" className=""> {/* Removed ml-auto */}
               Columns <ChevronDown className="ml-2 h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>

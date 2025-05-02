@@ -1,4 +1,5 @@
-// This component is designated as a Client Component
+
+// src/app/(app)/[domain]/employees/[id]/edit/page.tsx
 "use client";
 
 import * as React from "react";
@@ -10,29 +11,34 @@ import type { Employee } from '@/modules/employees/types';
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 
-// Helper to fetch data from API routes - CLIENT SIDE VERSION
+interface EditEmployeePageProps {
+  params: { domain: string; id: string };
+}
+
+// Helper to fetch data from API routes - CLIENT SIDE VERSION (API handles tenant context)
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
-    // Use relative paths for client-side fetching
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
-    console.log(`Fetching data from: ${fullUrl}`); // Log the URL being fetched
+    console.log(`[Edit Employee Page - fetchData] Fetching data from: ${fullUrl}`);
 
     try {
-        // Fetch relative to the current origin
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
-        console.log(`Fetch response status for ${fullUrl}: ${response.status}`); // Log response status
+        console.log(`[Edit Employee Page - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
 
         if (response.status === 404) return undefined as T; // Handle not found specifically
+         if (response.status === 400 && (await response.text()).includes('Tenant context')) {
+             throw new Error('Tenant information is missing. Unable to load data.');
+         }
+
 
         if (!response.ok) {
             const errorText = await response.text(); // Get raw error text
-            console.error(`Fetch error response body for ${fullUrl}:`, errorText);
+            console.error(`[Edit Employee Page - fetchData] Fetch error response body for ${fullUrl}:`, errorText);
             const errorData = JSON.parse(errorText || '{}'); // Try parsing JSON, default to empty object
             throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
         return await response.json() as T;
     } catch (error) {
-        console.error(`Error in fetchData for ${fullUrl}:`, error);
-        // Rethrow a more specific error if possible, or the original one
+        console.error(`[Edit Employee Page - fetchData] Error in fetchData for ${fullUrl}:`, error);
         if (error instanceof Error) {
            throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
         } else {
@@ -42,9 +48,8 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 
-export default function EditEmployeePage() {
-  const params = useParams();
-  const employeeId = params.id as string; // Get ID from URL params
+export default function TenantEditEmployeePage({ params }: EditEmployeePageProps) {
+  const { domain: tenantDomain, id: employeeId } = params;
   const { toast } = useToast();
 
   const [employee, setEmployee] = React.useState<Employee | null>(null);
@@ -52,21 +57,21 @@ export default function EditEmployeePage() {
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!employeeId) return;
+    if (!employeeId || !tenantDomain) return;
 
     const fetchEmployee = async () => {
       setIsLoading(true);
       setError(null);
       try {
-        // Use relative path
+        // API route implicitly uses tenantId from header
         const data = await fetchData<Employee | undefined>(`/api/employees/${employeeId}`);
         if (!data) {
-          notFound(); // Trigger 404 if API returns undefined/404
+          notFound(); // Trigger 404 if API returns undefined/404 (or tenant mismatch)
           return;
         }
         setEmployee(data);
       } catch (err: any) {
-        setError("Failed to load employee data.");
+        setError(err.message || "Failed to load employee data.");
         toast({
           title: "Error",
           description: err.message || "Could not fetch employee details.",
@@ -78,7 +83,7 @@ export default function EditEmployeePage() {
     };
 
     fetchEmployee();
-  }, [employeeId, toast]);
+  }, [employeeId, tenantDomain, toast]);
 
   if (isLoading) {
     return (
@@ -109,12 +114,12 @@ export default function EditEmployeePage() {
   }
 
   if (error) {
-     return <p className="text-center text-destructive">{error}</p>;
+     return <p className="text-center text-destructive py-10">{error}</p>;
   }
 
   if (!employee) {
       // This state should ideally be caught by notFound() earlier, but added as a fallback
-      return <p className="text-center">Employee not found.</p>;
+       return <p className="text-center py-10">Employee not found.</p>;
   }
 
   return (
@@ -127,12 +132,12 @@ export default function EditEmployeePage() {
       <Card className="shadow-sm">
         <CardHeader>
           <CardTitle>Update Employee Details</CardTitle>
-          <CardDescription>Modify the employee's information below.</CardDescription>
+          <CardDescription>Modify the employee's information for {tenantDomain}.</CardDescription>
         </CardHeader>
         <CardContent>
           {/* Pass the fetched employee data to the form */}
           <EmployeeForm
-             employee={employee}
+             employee={employee} // Includes tenantId
              formTitle="Edit Employee"
              formDescription="Update the employee's information."
              submitButtonText="Save Changes"

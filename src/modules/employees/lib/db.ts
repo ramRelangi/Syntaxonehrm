@@ -1,3 +1,4 @@
+
 import pool from '@/lib/db';
 import type { Employee, EmployeeFormData } from '@/modules/employees/types';
 
@@ -5,6 +6,7 @@ import type { Employee, EmployeeFormData } from '@/modules/employees/types';
 function mapRowToEmployee(row: any): Employee {
     return {
         id: row.id,
+        tenantId: row.tenant_id, // Include tenantId
         name: row.name,
         email: row.email,
         phone: row.phone ?? undefined, // Handle null phone numbers
@@ -15,46 +17,53 @@ function mapRowToEmployee(row: any): Employee {
     };
 }
 
-export async function getAllEmployees(): Promise<Employee[]> {
+// Get employees for a specific tenant
+export async function getAllEmployees(tenantId: string): Promise<Employee[]> {
     const client = await pool.connect();
     try {
-        const res = await client.query('SELECT * FROM employees ORDER BY name ASC');
+        const res = await client.query('SELECT * FROM employees WHERE tenant_id = $1 ORDER BY name ASC', [tenantId]);
         return res.rows.map(mapRowToEmployee);
     } catch (err) {
-        console.error('Error fetching all employees:', err);
+        console.error(`Error fetching all employees for tenant ${tenantId}:`, err);
         throw err; // Re-throw the error for the caller to handle
     } finally {
         client.release();
     }
 }
 
-export async function getEmployeeById(id: string): Promise<Employee | undefined> {
+// Get employee by ID (ensure it belongs to the tenant)
+export async function getEmployeeById(id: string, tenantId: string): Promise<Employee | undefined> {
     const client = await pool.connect();
     try {
-        const res = await client.query('SELECT * FROM employees WHERE id = $1', [id]);
+        const res = await client.query('SELECT * FROM employees WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
         if (res.rows.length > 0) {
             return mapRowToEmployee(res.rows[0]);
         }
         return undefined;
     } catch (err) {
-        console.error(`Error fetching employee with id ${id}:`, err);
+        console.error(`Error fetching employee with id ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
+// Add employee for a specific tenant
 export async function addEmployee(employeeData: EmployeeFormData): Promise<Employee> {
     const client = await pool.connect();
+    if (!employeeData.tenantId) {
+        throw new Error("Tenant ID is required to add an employee.");
+    }
     // Note: Database should generate the ID (e.g., using UUID or SERIAL)
     const query = `
-        INSERT INTO employees (name, email, phone, position, department, hire_date, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO employees (tenant_id, name, email, phone, position, department, hire_date, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *;
     `;
     // Ensure phone is null if empty string or undefined
     const phoneValue = employeeData.phone || null;
     const values = [
+        employeeData.tenantId,
         employeeData.name,
         employeeData.email,
         phoneValue,
@@ -69,8 +78,8 @@ export async function addEmployee(employeeData: EmployeeFormData): Promise<Emplo
     } catch (err: any) {
         console.error('Error adding employee:', err);
          // Check for specific DB errors like unique constraint violation
-        if (err.code === '23505' && err.constraint === 'employees_email_key') { // Adjust constraint name if different
-            throw new Error('Email address already exists.');
+        if (err.code === '23505' && err.constraint === 'employees_tenant_id_email_key') { // Adjust constraint name if different
+            throw new Error('Email address already exists for this tenant.');
         }
         throw err;
     } finally {
@@ -78,7 +87,8 @@ export async function addEmployee(employeeData: EmployeeFormData): Promise<Emplo
     }
 }
 
-export async function updateEmployee(id: string, updates: Partial<EmployeeFormData>): Promise<Employee | undefined> {
+// Update employee (ensure it belongs to the tenant)
+export async function updateEmployee(id: string, tenantId: string, updates: Partial<EmployeeFormData>): Promise<Employee | undefined> {
     const client = await pool.connect();
     // Build the SET part of the query dynamically
     const setClauses: string[] = [];
@@ -97,6 +107,9 @@ export async function updateEmployee(id: string, updates: Partial<EmployeeFormDa
     };
 
     for (const key in updates) {
+        // Don't allow updating tenantId via this function
+        if (key === 'tenantId') continue;
+
         if (Object.prototype.hasOwnProperty.call(updates, key) && updates[key as keyof EmployeeFormData] !== undefined) {
             const dbKey = columnMap[key as keyof EmployeeFormData];
             if (dbKey) {
@@ -114,14 +127,15 @@ export async function updateEmployee(id: string, updates: Partial<EmployeeFormDa
 
     if (setClauses.length === 0) {
         // No valid fields to update, maybe just return the existing record?
-        return getEmployeeById(id);
+        return getEmployeeById(id, tenantId);
     }
 
     values.push(id); // Add the ID for the WHERE clause
+    values.push(tenantId); // Add the tenantId for the WHERE clause
     const query = `
         UPDATE employees
         SET ${setClauses.join(', ')}
-        WHERE id = $${valueIndex}
+        WHERE id = $${valueIndex} AND tenant_id = $${valueIndex + 1}
         RETURNING *;
     `;
 
@@ -130,11 +144,11 @@ export async function updateEmployee(id: string, updates: Partial<EmployeeFormDa
         if (res.rows.length > 0) {
             return mapRowToEmployee(res.rows[0]);
         }
-        return undefined; // Employee not found
+        return undefined; // Employee not found or tenant mismatch
     } catch (err: any) {
-        console.error(`Error updating employee with id ${id}:`, err);
-         if (err.code === '23505' && err.constraint === 'employees_email_key') {
-            throw new Error('Email address already exists.');
+        console.error(`Error updating employee with id ${id} for tenant ${tenantId}:`, err);
+         if (err.code === '23505' && err.constraint === 'employees_tenant_id_email_key') {
+            throw new Error('Email address already exists for this tenant.');
         }
         throw err;
     } finally {
@@ -142,51 +156,19 @@ export async function updateEmployee(id: string, updates: Partial<EmployeeFormDa
     }
 }
 
-export async function deleteEmployee(id: string): Promise<boolean> {
+// Delete employee (ensure it belongs to the tenant)
+export async function deleteEmployee(id: string, tenantId: string): Promise<boolean> {
     const client = await pool.connect();
-    const query = 'DELETE FROM employees WHERE id = $1';
+    const query = 'DELETE FROM employees WHERE id = $1 AND tenant_id = $2';
     try {
-        const res = await client.query(query, [id]);
+        const res = await client.query(query, [id, tenantId]);
         return res.rowCount > 0; // Returns true if a row was deleted
     } catch (err) {
-        console.error(`Error deleting employee with id ${id}:`, err);
+        console.error(`Error deleting employee with id ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
-// --- Database Schema (for reference, run this in your DB tool) ---
-/*
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp"; -- If using UUIDs
-
-CREATE TYPE employee_status AS ENUM ('Active', 'Inactive', 'On Leave');
-
-CREATE TABLE employees (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    phone VARCHAR(50),
-    position VARCHAR(255) NOT NULL,
-    department VARCHAR(255) NOT NULL,
-    hire_date DATE NOT NULL,
-    status employee_status NOT NULL DEFAULT 'Active',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Optional: Trigger to update updated_at timestamp
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-   NEW.updated_at = NOW();
-   RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER update_employees_updated_at
-BEFORE UPDATE ON employees
-FOR EACH ROW
-EXECUTE FUNCTION update_updated_at_column();
-
-*/
+// Note: Schema updated in init-db.ts

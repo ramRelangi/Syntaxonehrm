@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
@@ -14,7 +15,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-// import { deleteEmployeeAction } from '@/modules/employees/actions'; // Use API call instead
 import { useToast } from '@/hooks/use-toast';
 import {
   AlertDialog,
@@ -44,15 +44,18 @@ const getStatusVariant = (status: Employee['status']): "default" | "secondary" |
 };
 
 // Action Cell Component for Delete Confirmation
-const ActionsCell = ({ employeeId, employeeName, onEmployeeDeleted }: { employeeId: string, employeeName: string, onEmployeeDeleted: () => void }) => {
+// Now accepts tenantDomain prop
+const ActionsCell = ({ employeeId, employeeName, tenantDomain, onEmployeeDeleted }: { employeeId: string, employeeName: string, tenantDomain: string, onEmployeeDeleted: () => void }) => {
   const { toast } = useToast();
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDelete = async () => {
     setIsDeleting(true);
     try {
+      // API call uses the base path, tenant context is handled by header
       const response = await fetch(`/api/employees/${employeeId}`, {
         method: 'DELETE',
+        // No need to explicitly pass tenantId here if API uses header from middleware
       });
 
       if (!response.ok) {
@@ -88,13 +91,14 @@ const ActionsCell = ({ employeeId, employeeName, onEmployeeDeleted }: { employee
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Actions</DropdownMenuLabel>
+          {/* Update links to be tenant-specific */}
           <DropdownMenuItem asChild>
-             <Link href={`/employees/${employeeId}/edit`} className="flex items-center">
+             <Link href={`/${tenantDomain}/employees/${employeeId}/edit`} className="flex items-center">
                <Pencil className="mr-2 h-4 w-4" /> Edit
              </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-             <Link href={`/employees/${employeeId}`} className="flex items-center">
+             <Link href={`/${tenantDomain}/employees/${employeeId}`} className="flex items-center">
                  <Eye className="mr-2 h-4 w-4" /> View Details
              </Link>
           </DropdownMenuItem>
@@ -210,12 +214,12 @@ export const columns: ColumnDef<Employee>[] = [
   },
    {
     id: "actions",
-    // The cell function now implicitly receives `onEmployeeDeleted` via the HOC in DataTable
+    // The cell function now implicitly receives `onEmployeeDeleted` and `tenantDomain` via the HOC in DataTable
     cell: ({ row, ...rest }) => {
       const employee = row.original;
-      // @ts-ignore - rest might include the injected prop, handle type more robustly if needed
-      const onEmployeeDeletedCallback = rest.onEmployeeDeleted;
-      return <ActionsCell employeeId={employee.id} employeeName={employee.name} onEmployeeDeleted={onEmployeeDeletedCallback} />;
+      // @ts-ignore - rest includes injected props, handle type more robustly if needed
+      const { onEmployeeDeleted, tenantDomain } = rest;
+      return <ActionsCell employeeId={employee.id} employeeName={employee.name} tenantDomain={tenantDomain} onEmployeeDeleted={onEmployeeDeleted} />;
     },
   },
 ];

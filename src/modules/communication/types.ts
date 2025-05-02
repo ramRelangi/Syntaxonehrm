@@ -4,6 +4,7 @@ import { z } from 'zod';
 // --- Email Template ---
 export const emailTemplateSchema = z.object({
   id: z.string().optional(), // Optional for creation, present for existing
+  tenantId: z.string().uuid(), // Add tenant ID
   name: z.string().min(3, "Template name must be at least 3 characters"),
   subject: z.string().min(5, "Subject must be at least 5 characters"),
   body: z.string().min(10, "Body must be at least 10 characters"), // Can add more complex validation if using HTML
@@ -11,12 +12,13 @@ export const emailTemplateSchema = z.object({
 });
 
 export type EmailTemplate = z.infer<typeof emailTemplateSchema>;
-export type EmailTemplateFormData = Omit<EmailTemplate, 'id'>;
+// FormData might not need tenantId explicitly if it's derived from context/session
+export type EmailTemplateFormData = Omit<EmailTemplate, 'id' | 'tenantId'> & { tenantId?: string }; // Allow optional tenantId for forms
 
 
 // --- Email Settings ---
 export const emailSettingsSchema = z.object({
-  // Using generic SMTP settings as an example
+  tenantId: z.string().uuid(), // Add tenant ID
   smtpHost: z.string().min(1, "SMTP Host is required"),
   smtpPort: z.coerce.number().int().positive("SMTP Port must be a positive number"),
   smtpUser: z.string().min(1, "SMTP Username is required"),
@@ -44,5 +46,3 @@ export type ConnectionStatus = 'idle' | 'checking' | 'success' | 'failed' | 'unc
 
 // No separate FormData needed if all fields are editable
 // export type EmailSettingsFormData = EmailSettings;
-
-

@@ -1,3 +1,4 @@
+
 // src/lib/init-db.ts
 import pool from './db';
 
@@ -46,20 +47,20 @@ END $$;
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    email VARCHAR(255) UNIQUE NOT NULL,
+    email VARCHAR(255) NOT NULL, -- Email uniqueness enforced per tenant
     password_hash TEXT NOT NULL,
     name VARCHAR(255) NOT NULL,
     role user_role NOT NULL DEFAULT 'Employee',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, email) -- Ensure email is unique within a tenant
 );
 SELECT 'users table ensured.';
 
 -- Indexes for users table
 DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_users_tenant_id' AND n.nspname = 'public') THEN CREATE INDEX idx_users_tenant_id ON users(tenant_id); RAISE NOTICE 'Index idx_users_tenant_id created.'; ELSE RAISE NOTICE 'Index idx_users_tenant_id already exists.'; END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_users_email' AND n.nspname = 'public') THEN CREATE INDEX idx_users_email ON users(email); RAISE NOTICE 'Index idx_users_email created.'; ELSE RAISE NOTICE 'Index idx_users_email already exists.'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_users_tenant_id_email' AND n.nspname = 'public') THEN CREATE UNIQUE INDEX idx_users_tenant_id_email ON users(tenant_id, email); RAISE NOTICE 'Index idx_users_tenant_id_email created.'; ELSE RAISE NOTICE 'Index idx_users_tenant_id_email already exists.'; END IF;
 END$$;
 
 -- Employee Status Enum
@@ -74,32 +75,45 @@ END $$;
 -- Employees Table
 CREATE TABLE IF NOT EXISTS employees (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    -- tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id if employees are tenant-specific
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
     name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
+    email VARCHAR(255) NOT NULL, -- Email uniqueness enforced per tenant
     phone VARCHAR(50),
     position VARCHAR(255) NOT NULL,
     department VARCHAR(255) NOT NULL,
     hire_date DATE NOT NULL,
     status employee_status NOT NULL DEFAULT 'Active',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, email) -- Ensure email is unique within a tenant
 );
 SELECT 'employees table ensured.';
+
+-- Index for employees table
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_employees_tenant_id' AND n.nspname = 'public') THEN CREATE INDEX idx_employees_tenant_id ON employees(tenant_id); RAISE NOTICE 'Index idx_employees_tenant_id created.'; ELSE RAISE NOTICE 'Index idx_employees_tenant_id already exists.'; END IF;
+END$$;
 
 -- Leave Types Table
 CREATE TABLE IF NOT EXISTS leave_types (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    -- tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id if leave types are tenant-specific
-    name VARCHAR(100) UNIQUE NOT NULL,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
+    name VARCHAR(100) NOT NULL, -- Name uniqueness enforced per tenant
     description TEXT,
     requires_approval BOOLEAN NOT NULL DEFAULT TRUE,
     default_balance NUMERIC(5, 2) DEFAULT 0,
     accrual_rate NUMERIC(5, 2) DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, name) -- Ensure name is unique within a tenant
 );
 SELECT 'leave_types table ensured.';
+
+-- Index for leave_types table
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_leave_types_tenant_id' AND n.nspname = 'public') THEN CREATE INDEX idx_leave_types_tenant_id ON leave_types(tenant_id); RAISE NOTICE 'Index idx_leave_types_tenant_id created.'; ELSE RAISE NOTICE 'Index idx_leave_types_tenant_id already exists.'; END IF;
+END$$;
+
 
 -- Leave Request Status Enum
 DO $$ BEGIN
@@ -113,6 +127,7 @@ END $$;
 -- Leave Requests Table
 CREATE TABLE IF NOT EXISTS leave_requests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
     employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
     leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE RESTRICT,
     start_date DATE NOT NULL,
@@ -129,15 +144,30 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 );
 SELECT 'leave_requests table ensured.';
 
+-- Index for leave_requests table
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_leave_requests_tenant_id' AND n.nspname = 'public') THEN CREATE INDEX idx_leave_requests_tenant_id ON leave_requests(tenant_id); RAISE NOTICE 'Index idx_leave_requests_tenant_id created.'; ELSE RAISE NOTICE 'Index idx_leave_requests_tenant_id already exists.'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_leave_requests_employee_id' AND n.nspname = 'public') THEN CREATE INDEX idx_leave_requests_employee_id ON leave_requests(employee_id); RAISE NOTICE 'Index idx_leave_requests_employee_id created.'; ELSE RAISE NOTICE 'Index idx_leave_requests_employee_id already exists.'; END IF;
+END$$;
+
+
 -- Leave Balances Table
 CREATE TABLE IF NOT EXISTS leave_balances (
+    -- id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Optional primary key if needed
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
     employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
     leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE,
     balance NUMERIC(5, 2) NOT NULL DEFAULT 0,
     last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (employee_id, leave_type_id)
+    PRIMARY KEY (tenant_id, employee_id, leave_type_id) -- Composite key including tenant
 );
 SELECT 'leave_balances table ensured.';
+
+-- Index for leave_balances table
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_leave_balances_tenant_id_employee_id' AND n.nspname = 'public') THEN CREATE INDEX idx_leave_balances_tenant_id_employee_id ON leave_balances(tenant_id, employee_id); RAISE NOTICE 'Index idx_leave_balances_tenant_id_employee_id created.'; ELSE RAISE NOTICE 'Index idx_leave_balances_tenant_id_employee_id already exists.'; END IF;
+END$$;
+
 
 -- Job Posting Status Enum
 DO $$ BEGIN
@@ -151,7 +181,7 @@ END $$;
 -- Job Postings Table
 CREATE TABLE IF NOT EXISTS job_postings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    -- tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id if postings are tenant-specific
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
     title VARCHAR(255) NOT NULL,
     description TEXT NOT NULL,
     department VARCHAR(255) NOT NULL,
@@ -165,6 +195,12 @@ CREATE TABLE IF NOT EXISTS job_postings (
 );
 SELECT 'job_postings table ensured.';
 
+-- Index for job_postings table
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_job_postings_tenant_id_status' AND n.nspname = 'public') THEN CREATE INDEX idx_job_postings_tenant_id_status ON job_postings(tenant_id, status); RAISE NOTICE 'Index idx_job_postings_tenant_id_status created.'; ELSE RAISE NOTICE 'Index idx_job_postings_tenant_id_status already exists.'; END IF;
+END$$;
+
+
 -- Candidate Status Enum
 DO $$ BEGIN
     CREATE TYPE candidate_status AS ENUM ('Applied', 'Screening', 'Interviewing', 'Offer Extended', 'Hired', 'Rejected', 'Withdrawn');
@@ -177,8 +213,9 @@ END $$;
 -- Candidates Table
 CREATE TABLE IF NOT EXISTS candidates (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
     name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL, -- Unique per posting within a tenant
     phone VARCHAR(50),
     job_posting_id UUID NOT NULL REFERENCES job_postings(id) ON DELETE CASCADE,
     application_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -188,27 +225,40 @@ CREATE TABLE IF NOT EXISTS candidates (
     notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (email, job_posting_id) -- Prevent duplicate applications
+    UNIQUE (tenant_id, email, job_posting_id) -- Prevent duplicate applications within a tenant
 );
 SELECT 'candidates table ensured.';
+
+-- Index for candidates table
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_candidates_tenant_id_job_posting_id' AND n.nspname = 'public') THEN CREATE INDEX idx_candidates_tenant_id_job_posting_id ON candidates(tenant_id, job_posting_id); RAISE NOTICE 'Index idx_candidates_tenant_id_job_posting_id created.'; ELSE RAISE NOTICE 'Index idx_candidates_tenant_id_job_posting_id already exists.'; END IF;
+END$$;
+
 
 -- Email Templates Table
 CREATE TABLE IF NOT EXISTS email_templates (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    -- tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id if templates are tenant-specific
-    name VARCHAR(255) NOT NULL UNIQUE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id
+    name VARCHAR(255) NOT NULL, -- Unique per tenant
     subject VARCHAR(255) NOT NULL,
     body TEXT NOT NULL,
     usage_context VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, name) -- Ensure name is unique within a tenant
 );
 SELECT 'email_templates table ensured.';
 
--- Email Configuration Table (Single Row)
+-- Index for email_templates table
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_email_templates_tenant_id' AND n.nspname = 'public') THEN CREATE INDEX idx_email_templates_tenant_id ON email_templates(tenant_id); RAISE NOTICE 'Index idx_email_templates_tenant_id created.'; ELSE RAISE NOTICE 'Index idx_email_templates_tenant_id already exists.'; END IF;
+END$$;
+
+
+-- Email Configuration Table (Single Row Per Tenant)
 CREATE TABLE IF NOT EXISTS email_configuration (
-    id INT PRIMARY KEY DEFAULT 1,
-    -- tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Add tenant_id if settings are tenant-specific (change PK logic)
+    -- id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Use tenant_id as PK if 1-to-1
+    tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE, -- Use tenant_id as PK
     smtp_host VARCHAR(255) NOT NULL,
     smtp_port INT NOT NULL,
     smtp_user VARCHAR(255) NOT NULL,
@@ -216,8 +266,7 @@ CREATE TABLE IF NOT EXISTS email_configuration (
     smtp_secure BOOLEAN NOT NULL DEFAULT TRUE,
     from_email VARCHAR(255) NOT NULL,
     from_name VARCHAR(255) NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT only_one_email_config_row CHECK (id = 1) -- Enforce single row if not tenant-specific
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 SELECT 'email_configuration table ensured.';
 

@@ -1,10 +1,18 @@
+
+// src/app/(app)/[domain]/employees/add/page.tsx
 "use client"; // AddEmployeePage needs to be a client component to use the form
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmployeeForm } from '@/modules/employees/components/employee-form';
 import { UserPlus } from "lucide-react";
+import { useParams } from 'next/navigation';
 
-export default function AddEmployeePage() {
+interface AddEmployeePageProps {
+  params: { domain: string };
+}
+
+export default function TenantAddEmployeePage({ params }: AddEmployeePageProps) {
+  const tenantDomain = params.domain;
 
   return (
     <div className="flex flex-col gap-6">
@@ -16,14 +24,17 @@ export default function AddEmployeePage() {
       <Card className="shadow-sm">
         <CardHeader>
           <CardTitle>Employee Details</CardTitle>
-          <CardDescription>Fill in the details for the new employee.</CardDescription>
+          <CardDescription>Fill in the details for the new employee for {tenantDomain}.</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* EmployeeForm handles its own API call */}
+          {/* Pass tenantDomain for context or form default values if needed */}
+          {/* The form itself will get tenantId from session/context ideally */}
           <EmployeeForm
              formTitle="Add New Employee"
              formDescription="Enter the employee's information below."
              submitButtonText="Add Employee"
+             // tenantId could be passed if needed, but action should derive it
+             // tenantId={tenantId} // Assuming you derive tenantId from domain
            />
         </CardContent>
       </Card>

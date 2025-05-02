@@ -1,3 +1,4 @@
+
 import pool from '@/lib/db';
 import type { Tenant, User } from '@/modules/auth/types';
 
@@ -33,7 +34,7 @@ export async function addTenant(tenantData: Pick<Tenant, 'name' | 'domain'>): Pr
         }
          // Handle case where table doesn't exist
         if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized (relation "tenants" does not exist). Please run `npm run db:init`.');
+            throw new Error('Database schema not initialized. Relation "tenants" does not exist.');
         }
         throw err; // Re-throw other errors
     } finally {
@@ -53,7 +54,7 @@ export async function getTenantById(id: string): Promise<Tenant | undefined> {
     } catch (err: any) {
         console.error(`[DB getTenantById] Error fetching tenant ${id}:`, err);
          if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized (relation "tenants" does not exist). Please run `npm run db:init`.');
+            throw new Error('Database schema not initialized. Relation "tenants" does not exist.');
         }
         throw err;
     } finally {
@@ -74,11 +75,11 @@ export async function getTenantByDomain(domain: string): Promise<Tenant | undefi
     } catch (err: any) {
         console.error(`[DB getTenantByDomain] Error fetching tenant by domain ${lowerCaseDomain}:`, err);
          if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized (relation "tenants" does not exist). Please run `npm run db:init`.');
+            throw new Error('Database schema not initialized. Relation "tenants" does not exist.');
         }
         throw err;
     } finally {
-        client.release();
+         client.release();
          console.log('[DB getTenantByDomain] Client released.');
     }
 }
@@ -124,12 +125,16 @@ export async function addUser(userData: Omit<User, 'id' | 'createdAt' | 'updated
     } catch (err: any) {
         console.error('[DB addUser] Error adding user:', err);
          if (err.code === '23505') { // Handle unique constraint violations
-            if (err.constraint === 'users_email_key') { // Global email uniqueness
-                 throw new Error('User email already exists.');
+            if (err.constraint === 'idx_users_tenant_id_email') { // Use the correct constraint name
+                 throw new Error('User email already exists for this tenant.');
             }
+            // Could potentially handle global email uniqueness here if needed
+             if (err.constraint === 'users_email_key') { // Assuming a global unique constraint still exists (might be removed)
+                 throw new Error('User email already exists globally.');
+             }
         }
         if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized (relation "users" does not exist). Please run `npm run db:init`.');
+            throw new Error('Database schema not initialized. Relation "users" does not exist.');
         }
         throw err;
     } finally {
@@ -149,7 +154,7 @@ export async function getUserById(id: string): Promise<User | undefined> {
     } catch (err: any) {
         console.error(`[DB getUserById] Error fetching user ${id}:`, err);
         if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized (relation "users" does not exist). Please run `npm run db:init`.');
+            throw new Error('Database schema not initialized. Relation "users" does not exist.');
         }
         throw err;
     } finally {
@@ -158,18 +163,13 @@ export async function getUserById(id: string): Promise<User | undefined> {
     }
 }
 
-// Get user by email (globally, or filter by tenantId if needed)
-export async function getUserByEmail(email: string, tenantId?: string): Promise<User | undefined> {
+// Get user by email WITHIN a specific tenant
+export async function getUserByEmail(email: string, tenantId: string): Promise<User | undefined> {
     const client = await pool.connect();
     const lowerCaseEmail = email.toLowerCase();
-    console.log(`[DB getUserByEmail] Fetching user with email: ${lowerCaseEmail}` + (tenantId ? ` for tenant ${tenantId}` : ' (globally)'));
-    let query = 'SELECT * FROM users WHERE email = $1';
-    const values = [lowerCaseEmail];
-
-    if (tenantId) {
-        query += ' AND tenant_id = $2';
-        values.push(tenantId);
-    }
+    console.log(`[DB getUserByEmail] Fetching user with email: ${lowerCaseEmail} for tenant ${tenantId}`);
+    const query = 'SELECT * FROM users WHERE tenant_id = $1 AND email = $2';
+    const values = [tenantId, lowerCaseEmail];
 
     try {
         const res = await client.query(query, values);
@@ -177,9 +177,9 @@ export async function getUserByEmail(email: string, tenantId?: string): Promise<
         console.log(`[DB getUserByEmail] User found: ${!!user}`);
         return user;
     } catch (err: any) {
-        console.error(`[DB getUserByEmail] Error fetching user by email ${lowerCaseEmail}:`, err);
+        console.error(`[DB getUserByEmail] Error fetching user by email ${lowerCaseEmail} for tenant ${tenantId}:`, err);
          if (err.code === '42P01') { // undefined_table
-            throw new Error('Database schema not initialized (relation "users" does not exist). Please run `npm run db:init`.');
+            throw new Error('Database schema not initialized. Relation "users" does not exist.');
         }
         throw err;
     } finally {

@@ -1,7 +1,9 @@
-// This component is designated as a Client Component
+
+// src/app/(app)/[domain]/employees/page.tsx
 "use client";
 
 import * as React from "react";
+import { useParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Users, UserPlus } from "lucide-react";
@@ -12,14 +14,17 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Employee } from '@/modules/employees/types';
 
-// Helper to fetch data from API routes - CLIENT SIDE VERSION
+interface EmployeesPageProps {
+  params: { domain: string };
+}
+
+// Helper to fetch data from API routes - CLIENT SIDE VERSION (API handles tenant context)
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
-    // Use relative paths for client-side fetching
+    // API routes are called directly, middleware ensures tenant context via header
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
     console.log(`[Employees Page - fetchData] Fetching data from: ${fullUrl}`);
 
     try {
-        // Fetch relative to the current origin
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
         console.log(`[Employees Page - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
 
@@ -34,6 +39,10 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
                  // Ignore JSON parsing error if response is not JSON
              }
              console.error(`[Employees Page - fetchData] Fetch error for ${fullUrl}:`, errorPayload.message);
+             // Handle specific 400 error for missing tenant
+             if (response.status === 400 && errorPayload.message.includes('Tenant context')) {
+                 throw new Error('Tenant information is missing. Unable to load data.');
+             }
              throw new Error(errorPayload.message);
         }
         const data = await response.json();
@@ -50,25 +59,26 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 
-export default function EmployeesPage() {
+export default function TenantEmployeesPage({ params }: EmployeesPageProps) {
+  const tenantDomain = params.domain;
   const [employees, setEmployees] = React.useState<Employee[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const { toast } = useToast();
 
-  // Function to refetch employees via API
+  // Function to refetch employees via API (API route uses tenant header)
   const fetchEmployees = React.useCallback(async () => {
-    console.log("[Employees Page] Starting fetchEmployees...");
+    console.log(`[Employees Page - ${tenantDomain}] Starting fetchEmployees...`);
     setIsLoading(true);
     setError(null);
     try {
-      // Use the relative path to the API route
+      // The API route implicitly uses the tenantId from the header set by middleware
       const data = await fetchData<Employee[]>('/api/employees');
       setEmployees(data);
-       console.log(`[Employees Page] Successfully fetched ${data.length} employees.`);
+       console.log(`[Employees Page - ${tenantDomain}] Successfully fetched ${data.length} employees.`);
     } catch (err: any) {
-      console.error("[Employees Page] Error fetching employees:", err);
-      setError("Failed to load employees. Please try refreshing the page.");
+      console.error(`[Employees Page - ${tenantDomain}] Error fetching employees:`, err);
+      setError(err.message || "Failed to load employees. Please try refreshing the page.");
       toast({
         title: "Error Loading Employees",
         description: err.message || "Could not fetch employee data.",
@@ -76,9 +86,9 @@ export default function EmployeesPage() {
       });
     } finally {
       setIsLoading(false);
-      console.log("[Employees Page] Finished fetchEmployees.");
+      console.log(`[Employees Page - ${tenantDomain}] Finished fetchEmployees.`);
     }
-  }, [toast]);
+  }, [toast, tenantDomain]);
 
   // Fetch data on component mount
   React.useEffect(() => {
@@ -87,7 +97,7 @@ export default function EmployeesPage() {
 
   // Function to handle successful deletion (passed to DataTable)
   const handleEmployeeDeleted = () => {
-     console.log("[Employees Page] handleEmployeeDeleted triggered. Refetching employees...");
+     console.log(`[Employees Page - ${tenantDomain}] handleEmployeeDeleted triggered. Refetching employees...`);
     // Refetch data to update the table after deletion
     fetchEmployees();
   };
@@ -98,8 +108,9 @@ export default function EmployeesPage() {
          <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
            <Users className="h-6 w-6" /> Employee Management
          </h1>
+         {/* Link uses tenant-relative path */}
          <Button asChild>
-             <Link href="/employees/add">
+             <Link href={`/${tenantDomain}/employees/add`}>
                 <UserPlus className="mr-2 h-4 w-4"/> Add New Employee
              </Link>
          </Button>
@@ -107,7 +118,7 @@ export default function EmployeesPage() {
       <Card className="shadow-sm">
          <CardHeader>
             <CardTitle>Employees Overview</CardTitle>
-            <CardDescription>View, search, and manage employee records.</CardDescription>
+            <CardDescription>View, search, and manage employee records for {tenantDomain}.</CardDescription>
          </CardHeader>
          <CardContent>
             {isLoading && (
@@ -120,9 +131,10 @@ export default function EmployeesPage() {
             {error && <p className="text-center text-destructive py-10">{error}</p>}
             {!isLoading && !error && (
               <EmployeeDataTable
-                columns={columns}
+                columns={columns} // Columns need to be adapted for tenant-relative links
                 data={employees}
                 onEmployeeDeleted={handleEmployeeDeleted} // Pass callback
+                tenantDomain={tenantDomain} // Pass domain for link generation in columns
               />
             )}
          </CardContent>

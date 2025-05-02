@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react';
@@ -19,10 +20,11 @@ import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 interface EmployeeFormProps {
-  employee?: Employee; // Optional employee data for editing
+  employee?: Employee; // Optional employee data for editing (includes tenantId)
   submitButtonText?: string;
   formTitle: string;
   formDescription: string;
+  // tenantId?: string; // Alternative: Pass tenantId explicitly if not in employee object
 }
 
 export function EmployeeForm({
@@ -39,6 +41,18 @@ export function EmployeeForm({
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
 
+  // TODO: Derive tenantId from session/context or ensure it's passed correctly
+  // For now, rely on `employee.tenantId` in edit mode. For add mode, it needs to be provided.
+  // This is a placeholder - replace with actual tenant context retrieval.
+  const tenantIdForForm = employee?.tenantId || "MOCK_TENANT_ID"; // Replace MOCK_TENANT_ID
+
+   if (!tenantIdForForm && !isEditMode) {
+       // Handle missing tenantId in add mode - potentially show error or disable form
+       console.error("Tenant ID is missing in EmployeeForm (add mode).");
+       // return <p className="text-destructive">Cannot add employee without tenant context.</p>;
+   }
+
+
   const getFormattedHireDate = (hireDate?: string): string => {
     if (!hireDate) return "";
     try {
@@ -53,6 +67,7 @@ export function EmployeeForm({
   const form = useForm<EmployeeFormData>({
     resolver: zodResolver(employeeSchema),
     defaultValues: {
+      tenantId: tenantIdForForm, // Set tenantId from context or employee prop
       name: employee?.name ?? "",
       email: employee?.email ?? "",
       phone: employee?.phone ?? "",
@@ -72,11 +87,14 @@ export function EmployeeForm({
     const apiUrl = isEditMode ? `/api/employees/${employee.id}` : '/api/employees';
     const method = isEditMode ? 'PUT' : 'POST';
 
+    // Ensure tenantId is included in the payload
+    const payload = { ...data, tenantId: tenantIdForForm }; // Use derived tenantId
+
     try {
         const response = await fetch(apiUrl, {
             method: method,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
+            body: JSON.stringify(payload), // Send data including tenantId
         });
 
         // Try to parse JSON regardless of status code first
@@ -89,11 +107,9 @@ export function EmployeeForm({
             }
         } catch (jsonError) {
              console.warn("[Employee Form] Failed to parse response as JSON:", jsonError);
-             // Use raw text as error message if JSON parsing failed
              if (!response.ok) {
                  throw new Error(responseText || `HTTP error! status: ${response.status}`);
              }
-             // If response was OK but not JSON (unlikely for this API), handle gracefully
              console.warn("[Employee Form] Received OK response but non-JSON content:", responseText);
              result = { name: data.name }; // Assume success based on status
         }
@@ -101,6 +117,10 @@ export function EmployeeForm({
 
         if (!response.ok) {
              console.error("[Employee Form] API Error Response:", result);
+             // Handle 400 error for missing tenant context in API
+              if (response.status === 400 && result?.error?.includes('Tenant context')) {
+                  throw new Error('Tenant information is missing. Unable to save data.');
+              }
             throw new Error(result?.error || result?.message || `HTTP error! status: ${response.status}`);
         }
 
@@ -112,7 +132,8 @@ export function EmployeeForm({
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
-        router.push('/employees'); // Redirect on success
+        // Redirect to tenant-specific employee list
+        router.push(`/${tenantIdForForm}/employees`);
         // No explicit router.refresh() needed here usually, list page should refetch on mount/focus
 
     } catch (error: any) {
@@ -120,7 +141,7 @@ export function EmployeeForm({
         let errorMessage = error.message || "An unexpected error occurred.";
         // Use specific error message for duplicate email
         if (error.message?.includes('Email address already exists')) {
-            errorMessage = 'This email address is already in use. Please use a different email.';
+            errorMessage = 'This email address is already in use for this tenant. Please use a different email.';
             form.setError("email", { type: "manual", message: errorMessage });
         } else {
              form.setError("root.serverError", { message: errorMessage });
@@ -139,6 +160,9 @@ export function EmployeeForm({
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+         {/* Hidden field for tenantId - might not be necessary if derived correctly */}
+         {/* <input type="hidden" {...form.register("tenantId")} /> */}
+
          {form.formState.errors.root?.serverError && !form.formState.errors.email && ( // Show root error only if not showing email specific error
           <FormMessage className="text-destructive text-center">
             {form.formState.errors.root.serverError.message}

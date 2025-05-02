@@ -1,8 +1,10 @@
+
 import { z } from 'zod';
 
 // --- Leave Type ---
 export interface LeaveType {
   id: string;
+  tenantId: string; // Add tenant ID
   name: string;
   description?: string;
   requiresApproval: boolean;
@@ -15,6 +17,7 @@ export type LeaveRequestStatus = 'Pending' | 'Approved' | 'Rejected' | 'Cancelle
 
 export interface LeaveRequest {
   id: string;
+  tenantId: string; // Add tenant ID
   employeeId: string; // Link to Employee
   employeeName: string; // Denormalized for easier display
   leaveTypeId: string; // Link to LeaveType
@@ -30,24 +33,36 @@ export interface LeaveRequest {
 }
 
 // --- Zod Schema for Leave Request Form ---
+// FormData usually won't include tenantId directly, derived from context/session
 export const leaveRequestSchema = z.object({
   employeeId: z.string().min(1, "Employee is required"), // In a real app, this might come from session
   leaveTypeId: z.string().min(1, "Leave type is required"),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date must be in YYYY-MM-DD format"),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format"),
   reason: z.string().min(5, "Reason must be at least 5 characters").max(200, "Reason cannot exceed 200 characters"),
-}).refine(data => new Date(data.endDate) >= new Date(data.startDate), {
+});
+// Refine needs to be added after object definition
+export const refinedLeaveRequestSchema = leaveRequestSchema.refine(data => {
+    try {
+        return new Date(data.endDate) >= new Date(data.startDate);
+    } catch {
+        return false; // Invalid date format handled by regex, but catch errors just in case
+    }
+}, {
   message: "End date cannot be earlier than start date",
   path: ["endDate"], // Point the error to the endDate field
 });
 
-export type LeaveRequestFormData = z.infer<typeof leaveRequestSchema>;
+
+export type LeaveRequestFormData = z.infer<typeof refinedLeaveRequestSchema>;
 
 
-// --- Leave Balance (Example, not fully implemented in this step) ---
+// --- Leave Balance ---
 export interface LeaveBalance {
+    tenantId: string; // Add tenant ID
     employeeId: string;
     leaveTypeId: string;
+    leaveTypeName?: string; // Optional: Name for display
     balance: number; // e.g., number of days or hours
     lastUpdated: string; // ISO string
 }

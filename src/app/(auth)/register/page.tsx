@@ -21,6 +21,7 @@ export default function RegisterPage() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [companyDomainForLogin, setCompanyDomainForLogin] = useState(''); // State to hold domain for login link
+  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app'; // Get root domain
 
   console.log("Rendering RegisterPage component");
 
@@ -46,9 +47,9 @@ export default function RegisterPage() {
         if (result.success && result.tenant) {
              toast({
                 title: "Registration Successful",
-                description: `Company "${result.tenant.name}" created. You will receive a welcome email shortly with login instructions.`,
+                description: `Company "${result.tenant.name}" created. You will receive a welcome email shortly with login instructions for ${result.tenant.domain}.${rootDomain}.`,
                 className: "bg-green-100 text-green-800 border-green-300 dark:bg-green-900 dark:text-green-100 dark:border-green-700",
-                duration: 10000, // Show longer
+                duration: 15000, // Show longer
              });
              // Don't redirect automatically, user should use email link
              form.reset(); // Clear form after success
@@ -86,7 +87,7 @@ export default function RegisterPage() {
     }
   };
 
-  // Watch the companyDomain field to update the login link
+  // Watch the companyDomain field to update the login link hint
   const watchedDomain = form.watch("companyDomain");
   React.useEffect(() => {
       setCompanyDomainForLogin(watchedDomain || '');
@@ -129,9 +130,9 @@ export default function RegisterPage() {
                     <FormLabel>Choose Your Domain</FormLabel>
                     <FormControl>
                       <div className="flex items-center">
-                         <Input placeholder="your-company" {...field} className="rounded-r-none lowercase" />
-                         <span className="inline-flex items-center rounded-r-md border border-l-0 border-input bg-secondary px-3 text-sm text-muted-foreground">
-                            .streamlinehr.app
+                         <Input placeholder="your-company" {...field} className="rounded-r-none lowercase" autoCapitalize='none'/>
+                         <span className="inline-flex h-10 items-center rounded-r-md border border-l-0 border-input bg-secondary px-3 text-sm text-muted-foreground">
+                            .{rootDomain}
                          </span>
                       </div>
                     </FormControl>
@@ -191,11 +192,11 @@ export default function RegisterPage() {
           </Form>
            <div className="mt-4 text-center text-sm">
             Already have an account?{' '}
-            {/* Dynamic link based on entered domain, or generic if empty */}
-            <Link href={companyDomainForLogin ? `/login/${companyDomainForLogin}` : '#'} className={`font-medium text-primary hover:underline ${!companyDomainForLogin ? 'opacity-50 pointer-events-none' : ''}`}>
-               Login to your company
+            {/* Link to the main login page */}
+            <Link href="/login" className="font-medium text-primary hover:underline">
+               Login
             </Link>
-            {!companyDomainForLogin && <span className="text-xs text-muted-foreground block">(Enter domain above)</span>}
+            {companyDomainForLogin && <span className="text-xs text-muted-foreground block">(Your login might be at {companyDomainForLogin}.{rootDomain})</span>}
           </div>
         </CardContent>
       </Card>

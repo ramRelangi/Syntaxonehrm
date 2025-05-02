@@ -1,3 +1,4 @@
+
 'use server';
 
 import type { Employee } from '@/modules/employees/types';
@@ -14,21 +15,28 @@ import { revalidatePath } from 'next/cache'; // Keep revalidatePath for server a
 
 // --- Server Actions ---
 
-// These functions are intended to be called DIRECTLY from client components
-// using the 'use server' directive.
+// These functions now require tenantId
 
-export async function getEmployees(): Promise<Employee[]> {
+export async function getEmployees(tenantId: string): Promise<Employee[]> {
   // No 'use server' needed here if only called by other server actions/components
-  return dbGetAllEmployees();
+  // TODO: Add authorization check: Ensure user has permission to view employees for this tenant
+  if (!tenantId) throw new Error("Tenant ID is required.");
+  return dbGetAllEmployees(tenantId);
 }
 
-export async function getEmployeeById(id: string): Promise<Employee | undefined> {
+export async function getEmployeeById(id: string, tenantId: string): Promise<Employee | undefined> {
   // No 'use server' needed here if only called by other server actions/components
-  return dbGetEmployeeById(id);
+  // TODO: Add authorization check
+  if (!tenantId) throw new Error("Tenant ID is required.");
+  return dbGetEmployeeById(id, tenantId);
 }
 
 export async function addEmployee(formData: EmployeeFormData): Promise<{ success: boolean; employee?: Employee; errors?: z.ZodIssue[] }> {
   // 'use server'; // This action will be called from the client form
+  if (!formData.tenantId) {
+      return { success: false, errors: [{ code: 'custom', path: ['tenantId'], message: 'Tenant ID is missing.' }] };
+  }
+  // TODO: Add authorization check: Ensure user has permission to add employees for this tenantId
 
   const validation = employeeSchema.safeParse(formData);
 
@@ -38,8 +46,9 @@ export async function addEmployee(formData: EmployeeFormData): Promise<{ success
   }
 
   try {
+    // dbAddEmployee now expects data including tenantId
     const newEmployee = await dbAddEmployee(validation.data);
-    revalidatePath('/employees'); // Revalidate the employee list page
+    revalidatePath(`/${validation.data.tenantId}/employees`); // Revalidate tenant-specific path
     return { success: true, employee: newEmployee };
   } catch (error: any) {
     console.error("Error adding employee (action):", error);
@@ -48,10 +57,19 @@ export async function addEmployee(formData: EmployeeFormData): Promise<{ success
   }
 }
 
-export async function updateEmployee(id: string, formData: EmployeeFormData): Promise<{ success: boolean; employee?: Employee; errors?: z.ZodIssue[] }> {
+export async function updateEmployee(id: string, tenantId: string, formData: Partial<EmployeeFormData>): Promise<{ success: boolean; employee?: Employee; errors?: z.ZodIssue[] }> {
  // 'use server'; // This action will be called from the client form
+  if (!tenantId) {
+      return { success: false, errors: [{ code: 'custom', path: ['tenantId'], message: 'Tenant ID is missing.' }] };
+  }
+  // TODO: Add authorization check
 
-  const validation = employeeSchema.safeParse(formData);
+  // Exclude tenantId from formData before validation if it's present (shouldn't be changed)
+  const { tenantId: _, ...updateData } = formData;
+
+  // Use partial schema for updates, add tenantId back after validation if needed by DB layer
+  // Or validate the full object including the correct tenantId
+  const validation = employeeSchema.partial().safeParse({ ...updateData, tenantId }); // Validate with tenantId
 
   if (!validation.success) {
      console.error("Update Employee Validation Errors:", validation.error.flatten());
@@ -59,14 +77,15 @@ export async function updateEmployee(id: string, formData: EmployeeFormData): Pr
   }
 
   try {
-    const updatedEmployee = await dbUpdateEmployee(id, validation.data);
+    // dbUpdateEmployee expects id, tenantId, and the updates object
+    const updatedEmployee = await dbUpdateEmployee(id, tenantId, validation.data);
     if (updatedEmployee) {
-      revalidatePath('/employees'); // Invalidate list
-      revalidatePath(`/employees/${id}`); // Invalidate detail page
-      revalidatePath(`/employees/${id}/edit`); // Invalidate edit page
+      revalidatePath(`/${tenantId}/employees`); // Invalidate list
+      revalidatePath(`/${tenantId}/employees/${id}`); // Invalidate detail page
+      revalidatePath(`/${tenantId}/employees/${id}/edit`); // Invalidate edit page
       return { success: true, employee: updatedEmployee };
     } else {
-      return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Employee not found' }] };
+      return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Employee not found for this tenant' }] };
     }
   } catch (error: any) {
     console.error("Error updating employee (action):", error);
@@ -74,17 +93,22 @@ export async function updateEmployee(id: string, formData: EmployeeFormData): Pr
   }
 }
 
-export async function deleteEmployeeAction(id: string): Promise<{ success: boolean; error?: string }> {
+export async function deleteEmployeeAction(id: string, tenantId: string): Promise<{ success: boolean; error?: string }> {
   // 'use server'; // This action will be called from the client (e.g., data table)
+   if (!tenantId) {
+       return { success: false, error: 'Tenant ID is required.' };
+   }
+   // TODO: Add authorization check
 
   try {
-    const deleted = await dbDeleteEmployee(id);
+    // Pass tenantId to DB function for verification
+    const deleted = await dbDeleteEmployee(id, tenantId);
     if (deleted) {
-      revalidatePath('/employees'); // Invalidate list
+      revalidatePath(`/${tenantId}/employees`); // Invalidate list
       return { success: true };
     } else {
-      // Should not happen if called from UI where ID exists, but handle defensively
-      return { success: false, error: 'Employee not found.' };
+      // Employee not found for this tenant
+      return { success: false, error: 'Employee not found for this tenant.' };
     }
   } catch (error: any) {
     console.error("Error deleting employee (action):", error);
