@@ -8,6 +8,84 @@ const schemaSQL = `
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 SELECT 'uuid-ossp extension ensured.';
 
+-- Drop existing tables in reverse dependency order (carefully!)
+-- Note: CASCADE will drop dependent objects like constraints, indexes, views, etc.
+DROP TABLE IF EXISTS email_configuration CASCADE;
+DROP TABLE IF EXISTS email_templates CASCADE;
+DROP TABLE IF EXISTS candidates CASCADE;
+DROP TABLE IF EXISTS job_postings CASCADE;
+DROP TABLE IF EXISTS leave_balances CASCADE;
+DROP TABLE IF EXISTS leave_requests CASCADE;
+DROP TABLE IF EXISTS leave_types CASCADE;
+DROP TABLE IF EXISTS employees CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS tenants CASCADE;
+SELECT 'Existing tables dropped (if they existed).';
+
+-- Drop existing types (must be done after tables using them are dropped)
+DROP TYPE IF EXISTS job_posting_status CASCADE;
+DROP TYPE IF EXISTS candidate_status CASCADE;
+DROP TYPE IF EXISTS leave_request_status CASCADE;
+DROP TYPE IF EXISTS employee_status CASCADE;
+DROP TYPE IF EXISTS user_role CASCADE;
+SELECT 'Existing custom types dropped (if they existed).';
+
+-- Drop potentially existing trigger functions
+DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
+DROP FUNCTION IF EXISTS apply_update_trigger_if_not_exists(text) CASCADE;
+SELECT 'Existing trigger functions dropped (if they existed).';
+
+
+-- Recreate Types
+
+-- User Roles Enum
+DO $$ BEGIN
+    CREATE TYPE user_role AS ENUM ('Admin', 'Manager', 'Employee');
+    RAISE NOTICE 'user_role type created.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'user_role type already exists, skipping creation.';
+END $$;
+
+-- Employee Status Enum
+DO $$ BEGIN
+    CREATE TYPE employee_status AS ENUM ('Active', 'Inactive', 'On Leave');
+    RAISE NOTICE 'employee_status type created.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'employee_status type already exists, skipping creation.';
+END $$;
+
+-- Leave Request Status Enum
+DO $$ BEGIN
+    CREATE TYPE leave_request_status AS ENUM ('Pending', 'Approved', 'Rejected', 'Cancelled');
+    RAISE NOTICE 'leave_request_status type created.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'leave_request_status type already exists, skipping creation.';
+END $$;
+
+-- Job Posting Status Enum
+DO $$ BEGIN
+    CREATE TYPE job_posting_status AS ENUM ('Open', 'Closed', 'Draft', 'Archived');
+    RAISE NOTICE 'job_posting_status type created.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'job_posting_status type already exists, skipping creation.';
+END $$;
+
+-- Candidate Status Enum
+DO $$ BEGIN
+    CREATE TYPE candidate_status AS ENUM ('Applied', 'Screening', 'Interviewing', 'Offer Extended', 'Hired', 'Rejected', 'Withdrawn');
+    RAISE NOTICE 'candidate_status type created.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'candidate_status type already exists, skipping creation.';
+END $$;
+
+
+-- Recreate Tables
+
 -- Tenants Table
 CREATE TABLE IF NOT EXISTS tenants (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -15,18 +93,8 @@ CREATE TABLE IF NOT EXISTS tenants (
     domain VARCHAR(100) UNIQUE NOT NULL, -- Unique, lowercase domain name
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-SELECT 'tenants table ensured.';
--- Index for tenants.domain (using IF NOT EXISTS)
+SELECT 'tenants table created.';
 CREATE INDEX IF NOT EXISTS idx_tenants_domain ON tenants(domain);
-
--- User Roles Enum
-DO $$ BEGIN
-    CREATE TYPE user_role AS ENUM ('Admin', 'Manager', 'Employee');
-    RAISE NOTICE 'user_role type created or already exists.';
-EXCEPTION
-    WHEN duplicate_object THEN
-        RAISE NOTICE 'user_role type already exists, skipping creation.';
-END $$;
 
 -- Users Table
 CREATE TABLE IF NOT EXISTS users (
@@ -41,18 +109,9 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, email) -- Ensure email is unique within a tenant
 );
-SELECT 'users table ensured.';
--- Index for users table (using IF NOT EXISTS)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_tenant_id_email ON users(tenant_id, email);
+SELECT 'users table created.';
+CREATE INDEX IF NOT EXISTS idx_users_tenant_id_email ON users(tenant_id, email);
 
--- Employee Status Enum
-DO $$ BEGIN
-    CREATE TYPE employee_status AS ENUM ('Active', 'Inactive', 'On Leave');
-    RAISE NOTICE 'employee_status type created or already exists.';
-EXCEPTION
-    WHEN duplicate_object THEN
-        RAISE NOTICE 'employee_status type already exists, skipping creation.';
-END $$;
 
 -- Employees Table
 CREATE TABLE IF NOT EXISTS employees (
@@ -69,8 +128,7 @@ CREATE TABLE IF NOT EXISTS employees (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, email) -- Ensure email is unique within a tenant
 );
-SELECT 'employees table ensured.';
--- Index for employees table (using IF NOT EXISTS) - Moved immediately after table creation
+SELECT 'employees table created.';
 CREATE INDEX IF NOT EXISTS idx_employees_tenant_id ON employees(tenant_id);
 
 
@@ -87,19 +145,9 @@ CREATE TABLE IF NOT EXISTS leave_types (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, name) -- Ensure name is unique within a tenant
 );
-SELECT 'leave_types table ensured.';
--- Index for leave_types table (using IF NOT EXISTS)
+SELECT 'leave_types table created.';
 CREATE INDEX IF NOT EXISTS idx_leave_types_tenant_id ON leave_types(tenant_id);
 
-
--- Leave Request Status Enum
-DO $$ BEGIN
-    CREATE TYPE leave_request_status AS ENUM ('Pending', 'Approved', 'Rejected', 'Cancelled');
-    RAISE NOTICE 'leave_request_status type created or already exists.';
-EXCEPTION
-    WHEN duplicate_object THEN
-        RAISE NOTICE 'leave_request_status type already exists, skipping creation.';
-END $$;
 
 -- Leave Requests Table
 CREATE TABLE IF NOT EXISTS leave_requests (
@@ -119,8 +167,7 @@ CREATE TABLE IF NOT EXISTS leave_requests (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT check_leave_dates CHECK (end_date >= start_date)
 );
-SELECT 'leave_requests table ensured.';
--- Index for leave_requests table (using IF NOT EXISTS)
+SELECT 'leave_requests table created.';
 CREATE INDEX IF NOT EXISTS idx_leave_requests_tenant_id ON leave_requests(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(employee_id);
 
@@ -134,19 +181,9 @@ CREATE TABLE IF NOT EXISTS leave_balances (
     last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (tenant_id, employee_id, leave_type_id) -- Composite key including tenant
 );
-SELECT 'leave_balances table ensured.';
--- Index for leave_balances table (using IF NOT EXISTS)
+SELECT 'leave_balances table created.';
 CREATE INDEX IF NOT EXISTS idx_leave_balances_tenant_id_employee_id ON leave_balances(tenant_id, employee_id);
 
-
--- Job Posting Status Enum
-DO $$ BEGIN
-    CREATE TYPE job_posting_status AS ENUM ('Open', 'Closed', 'Draft', 'Archived');
-    RAISE NOTICE 'job_posting_status type created or already exists.';
-EXCEPTION
-    WHEN duplicate_object THEN
-        RAISE NOTICE 'job_posting_status type already exists, skipping creation.';
-END $$;
 
 -- Job Postings Table
 CREATE TABLE IF NOT EXISTS job_postings (
@@ -163,19 +200,9 @@ CREATE TABLE IF NOT EXISTS job_postings (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-SELECT 'job_postings table ensured.';
--- Index for job_postings table (using IF NOT EXISTS)
+SELECT 'job_postings table created.';
 CREATE INDEX IF NOT EXISTS idx_job_postings_tenant_id_status ON job_postings(tenant_id, status);
 
-
--- Candidate Status Enum
-DO $$ BEGIN
-    CREATE TYPE candidate_status AS ENUM ('Applied', 'Screening', 'Interviewing', 'Offer Extended', 'Hired', 'Rejected', 'Withdrawn');
-    RAISE NOTICE 'candidate_status type created or already exists.';
-EXCEPTION
-    WHEN duplicate_object THEN
-        RAISE NOTICE 'candidate_status type already exists, skipping creation.';
-END $$;
 
 -- Candidates Table
 CREATE TABLE IF NOT EXISTS candidates (
@@ -194,8 +221,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, email, job_posting_id) -- Prevent duplicate applications within a tenant
 );
-SELECT 'candidates table ensured.';
--- Index for candidates table (using IF NOT EXISTS)
+SELECT 'candidates table created.';
 CREATE INDEX IF NOT EXISTS idx_candidates_tenant_id_job_posting_id ON candidates(tenant_id, job_posting_id);
 
 
@@ -211,8 +237,7 @@ CREATE TABLE IF NOT EXISTS email_templates (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, name) -- Ensure name is unique within a tenant
 );
-SELECT 'email_templates table ensured.';
--- Index for email_templates table (using IF NOT EXISTS)
+SELECT 'email_templates table created.';
 CREATE INDEX IF NOT EXISTS idx_email_templates_tenant_id ON email_templates(tenant_id);
 
 
@@ -228,10 +253,10 @@ CREATE TABLE IF NOT EXISTS email_configuration (
     from_name VARCHAR(255) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-SELECT 'email_configuration table ensured.';
+SELECT 'email_configuration table created.';
 
 
--- Trigger function to update updated_at timestamp (universal)
+-- Recreate Trigger function to update updated_at timestamp (universal)
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -239,9 +264,9 @@ BEGIN
    RETURN NEW;
 END;
 $$ language 'plpgsql';
-SELECT 'update_updated_at_column function ensured.';
+SELECT 'update_updated_at_column function created.';
 
--- Function to apply trigger if it doesn't exist
+-- Recreate Function to apply trigger if it doesn't exist
 CREATE OR REPLACE FUNCTION apply_update_trigger_if_not_exists(table_name_param TEXT)
 RETURNS void AS $$
 DECLARE
@@ -282,10 +307,10 @@ export async function initializeDatabase() {
   try {
     console.log('Attempting to connect to database for schema initialization...');
     client = await pool.connect();
-    console.log('Connected to database. Executing schema creation script...');
+    console.log('Connected to database. Executing schema recreation script...');
     // Execute the entire script as a single query
     await client.query(schemaSQL);
-    console.log('Database schema initialization script executed successfully.');
+    console.log('Database schema recreation script executed successfully.');
   } catch (err: any) {
     console.error('-----------------------------------------');
     console.error('Error during database schema initialization:', err.message);
