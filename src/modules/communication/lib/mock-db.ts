@@ -63,7 +63,9 @@ export function deleteTemplate(id: string): boolean {
 
 
 // --- Email Settings ---
-let emailSettings: EmailSettings | null = null; // Store single settings object
+// Initialize with an empty object to avoid null state after restarts during development.
+// The getEmailSettings function will determine if it's actually configured.
+let emailSettings: EmailSettings | {} = {};
 
 // Initialize with some default mock data if needed for testing
 // emailSettings = {
@@ -77,14 +79,20 @@ let emailSettings: EmailSettings | null = null; // Store single settings object
 // }
 
 export function getEmailSettings(): EmailSettings | null {
-    // Return a deep copy if settings exist
-    return emailSettings ? JSON.parse(JSON.stringify(emailSettings)) : null;
+    // Check if essential fields exist to determine if configured, before returning
+    // Cast to EmailSettings temporarily to check properties safely
+    const potentialSettings = emailSettings as EmailSettings;
+    if (potentialSettings && potentialSettings.smtpHost && potentialSettings.fromEmail) {
+       // Return a deep copy if settings seem configured
+       return JSON.parse(JSON.stringify(emailSettings)) as EmailSettings;
+    }
+    // Return null if the object is empty or missing essential fields
+    return null;
 }
 
 export function updateEmailSettings(settingsData: EmailSettings): EmailSettings {
-    // Overwrite existing settings or create if null
+    // Overwrite existing settings or create if initially empty
     emailSettings = { ...settingsData };
     // Return a deep copy
     return JSON.parse(JSON.stringify(emailSettings));
 }
-
