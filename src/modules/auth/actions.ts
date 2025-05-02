@@ -1,27 +1,118 @@
 'use server';
 
-// export const runtime = 'nodejs'; // Removed - bcrypt should work in default runtime now
+// Removed: export const runtime = 'nodejs';
 
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
-// import nodemailer from 'nodemailer'; // Removed - Not sending email from here anymore
+import nodemailer from 'nodemailer'; // Using nodemailer for internal registration email
 import { registrationSchema, type RegistrationFormData, type Tenant, type User } from '@/modules/auth/types';
 import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db';
 import pool, { testDbConnection } from '@/lib/db'; // Import pool and test function
-// import { getEmailSettings, updateEmailSettings } from '@/modules/communication/lib/db'; // Removed dependency
-// import type { EmailSettings } from '@/modules/communication/types'; // Removed dependency
+// Removed communication module imports for email settings
 import { redirect } from 'next/navigation'; // Import redirect
 import { headers } from 'next/headers'; // Import headers to potentially get domain in logout
 import { initializeDatabase } from '@/lib/init-db'; // Import initializeDatabase
 
+
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
 
-// Removed createTransporter function as it's no longer needed here
+// --- Internal Email Sending for Registration ---
+// Uses environment variables directly for registration/admin notifications
+// Ensure these are set in your .env file for registration emails to work
+const INTERNAL_SMTP_HOST = process.env.INTERNAL_SMTP_HOST || process.env.SMTP_HOST; // Fallback to general SMTP if specific not set
+const INTERNAL_SMTP_PORT = parseInt(process.env.INTERNAL_SMTP_PORT || process.env.SMTP_PORT || '587', 10);
+const INTERNAL_SMTP_USER = process.env.INTERNAL_SMTP_USER || process.env.SMTP_USER;
+const INTERNAL_SMTP_PASSWORD = process.env.INTERNAL_SMTP_PASSWORD || process.env.SMTP_PASSWORD;
+const INTERNAL_SMTP_SECURE = (process.env.INTERNAL_SMTP_SECURE || process.env.SMTP_SECURE) === 'true'; // Default depends on port
+const INTERNAL_FROM_EMAIL = process.env.INTERNAL_FROM_EMAIL || process.env.ADMIN_EMAIL || 'noreply@syntaxhivehrm.app'; // Use Admin email or a default
+const INTERNAL_FROM_NAME = process.env.INTERNAL_FROM_NAME || 'SyntaxHive Hrm Registration';
 
-// Removed sendWelcomeEmail function as it's no longer called from here
+function createInternalTransporter(): nodemailer.Transporter | null {
+    if (!INTERNAL_SMTP_HOST || !INTERNAL_SMTP_USER || !INTERNAL_SMTP_PASSWORD) {
+        console.warn('[Internal Email] Missing internal SMTP credentials (HOST, USER, PASS). Cannot create transporter.');
+        return null;
+    }
+
+    let transportOptions: nodemailer.TransportOptions = {
+        host: INTERNAL_SMTP_HOST,
+        port: INTERNAL_SMTP_PORT,
+        auth: {
+            user: INTERNAL_SMTP_USER,
+            pass: INTERNAL_SMTP_PASSWORD,
+        },
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 15000,
+    };
+
+    // Common configurations based on port
+    if (INTERNAL_SMTP_PORT === 465) {
+        transportOptions.secure = true;
+    } else if (INTERNAL_SMTP_PORT === 587) {
+        // For port 587, secure should usually be false, STARTTLS is used implicitly by Nodemailer if server supports it
+        transportOptions.secure = false;
+        transportOptions.requireTLS = true; // Explicitly require STARTTLS
+    } else {
+        // For other ports, rely on the explicit env var or default based on common practice (e.g., secure=true for 465)
+        transportOptions.secure = INTERNAL_SMTP_SECURE !== undefined ? INTERNAL_SMTP_SECURE : (INTERNAL_SMTP_PORT === 465);
+    }
+     console.log(`[Internal Email] Creating transporter with options: host=${transportOptions.host}, port=${transportOptions.port}, user=${transportOptions.auth.user}, secure=${transportOptions.secure}`);
+
+    return nodemailer.createTransport(transportOptions);
+}
+
+async function sendWelcomeEmail(
+    tenantName: string,
+    adminName: string,
+    adminEmail: string,
+    tenantDomain: string // e.g., 'demo'
+): Promise<boolean> {
+    console.log(`[sendWelcomeEmail] Attempting to send welcome email to ${adminEmail} for ${tenantDomain}`);
+    const transporter = createInternalTransporter();
+
+    if (!transporter) {
+        console.error('[sendWelcomeEmail] Failed to create internal email transporter. Check internal SMTP env vars.');
+        // Optionally notify system admin here if internal mailing fails
+        return false;
+    }
+
+    // --- Construct Login URL ---
+    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
+    const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : '';
+    const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+    // Append /login to the subdomain URL
+    const loginUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/login`;
+    console.log(`[sendWelcomeEmail] Constructed login URL: ${loginUrl}`);
+    // --- End Construct Login URL ---
+
+    const mailOptions = {
+        from: `"${INTERNAL_FROM_NAME}" <${INTERNAL_FROM_EMAIL}>`,
+        to: adminEmail,
+        subject: `Welcome to SyntaxHive Hrm - Your Account for ${tenantName}`,
+        text: `Hello ${adminName},\n\nWelcome to SyntaxHive Hrm!\n\nYour company account "${tenantName}" has been created.\n\nYou can log in using your email (${adminEmail}) and the password you set during registration.\n\nYour unique login page is: ${loginUrl}\n\nPlease bookmark this link for future access.\n\nBest regards,\nThe SyntaxHive Hrm Team`,
+        html: `<p>Hello ${adminName},</p>
+               <p>Welcome to <strong>SyntaxHive Hrm</strong>!</p>
+               <p>Your company account "<strong>${tenantName}</strong>" has been created.</p>
+               <p>You can log in using your email (${adminEmail}) and the password you set during registration.</p>
+               <p>Your unique login page is: <a href="${loginUrl}">${loginUrl}</a></p>
+               <p>Please bookmark this link for future access.</p>
+               <p>Best regards,<br>The SyntaxHive Hrm Team</p>`,
+    };
+
+    try {
+        console.log(`[sendWelcomeEmail] Sending email via ${INTERNAL_SMTP_HOST}...`);
+        const info = await transporter.sendMail(mailOptions);
+        console.log('[sendWelcomeEmail] Welcome email sent successfully:', info.messageId);
+        return true;
+    } catch (error: any) {
+        console.error('[sendWelcomeEmail] Error sending welcome email:', error);
+         // Optionally notify system admin here
+        return false;
+    }
+}
 
 
-export async function registerTenantAction(formData: RegistrationFormData): Promise<{ success: boolean; tenant?: Tenant; user?: User; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
+export async function registerTenantAction(formData: RegistrationFormData): Promise<{ success: boolean; tenant?: Tenant; user?: User; errors?: z.ZodIssue[] | { code?: string; path: (string | number)[]; message: string }[] }> {
     console.log("[registerTenantAction] Starting registration process...");
 
     // 0. Check Database Connection First
@@ -101,17 +192,12 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.log(`[registerTenantAction] Tenant created successfully with ID: ${newTenant.id}`);
 
 
-        // 5. Check if admin email already exists WITHIN THIS TENANT (Redundant due to DB constraint)
-        // console.log(`[registerTenantAction] Checking if email '${adminEmail}' exists for tenant ${newTenant.id}...`);
-        // const existingUser = await getUserByEmail(adminEmail, newTenant.id); // Pass tenant ID
-        // if (existingUser) { ... }
-
-        // 6. Hash the Admin Password
+        // 5. Hash the Admin Password
         console.log("[registerTenantAction] Hashing admin password...");
         const passwordHash = await bcrypt.hash(adminPassword, SALT_ROUNDS);
         console.log("[registerTenantAction] Password hashed.");
 
-        // 7. Create the Initial Admin User
+        // 6. Create the Initial Admin User
         console.log(`[registerTenantAction] Creating admin user '${adminName}' (${adminEmail}) for tenant ${newTenant.id}...`);
         const newUser = await addUser({
             tenantId: newTenant.id,
@@ -124,51 +210,20 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.log(`[registerTenantAction] Admin user created successfully with ID: ${newUser.id}`);
 
 
-        // 8. Initialize default Email Settings for the new tenant (Removed - No longer done here)
-        /*
-         console.log(`[registerTenantAction] Initializing default email settings for tenant ${newTenant.id}...`);
-         const defaultSettings: Omit<EmailSettings, 'smtpPassword'> & { smtpPassword?: string } = { // Make password optional for initial save
-             tenantId: newTenant.id, // Ensure tenantId is here
-             smtpHost: 'smtp.example.com', // Placeholder - user MUST configure this later
-             smtpPort: 587,
-             smtpUser: 'user@example.com',
-             smtpPassword: '', // Leave empty for user to set
-             smtpSecure: false, // Default to false (use TLS for port 587)
-             fromEmail: `noreply@${lowerCaseDomain}.${process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost'}`, // More specific default
-             fromName: `${companyName} (SyntaxHive Hrm)`,
-         };
-         // updateEmailSettings requires the full EmailSettings object including password
-         // We need to ensure the types match or adjust updateEmailSettings
-         const settingsToSave: EmailSettings = {
-             ...defaultSettings,
-             smtpPassword: defaultSettings.smtpPassword || '' // Ensure password is a string
-         };
-
-         if (!settingsToSave.tenantId) {
-             throw new Error("Tenant ID is missing before saving email settings.");
-         }
-
-         await updateEmailSettings(settingsToSave.tenantId, settingsToSave); // Pass tenantId explicitly
-         console.log(`[registerTenantAction] Default email settings initialized for tenant ${newTenant.id}.`);
-        */
-
-        // 9. Send Welcome Email (Removed - No longer sent from here)
-        /*
-         console.log("[registerTenantAction] Triggering welcome email sending...");
-         sendWelcomeEmail(newTenant.id, adminName, adminEmail, lowerCaseDomain).then(sent => {
+        // 7. Send Welcome Email using internal sender
+        console.log("[registerTenantAction] Triggering welcome email sending...");
+        sendWelcomeEmail(newTenant.name, adminName, adminEmail, newTenant.domain).then(sent => {
              if (sent) {
                  console.log("[registerTenantAction] Welcome email sending initiated successfully (async).");
              } else {
-                  console.error("[registerTenantAction] Welcome email sending failed or was skipped due to configuration (async). User must configure SMTP settings.");
+                  console.error("[registerTenantAction] Welcome email sending failed or was skipped due to configuration (async).");
              }
          }).catch(err => {
               console.error("[registerTenantAction] Unexpected error during async welcome email sending:", err);
          });
-        */
-        console.log("[registerTenantAction] Skipping welcome email sending.");
 
 
-        // 10. Return Success (don't return password hash)
+        // 8. Return Success (don't return password hash)
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash: _, ...safeUser } = newUser;
         console.log("[registerTenantAction] Registration completed successfully.");
@@ -193,6 +248,14 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
          } else if (error.message?.includes('schema not initialized')) {
              // Catch specific schema error from underlying DB functions
               errorMessage = error.message;
+         } else if (error.message?.includes('already exists')) {
+              // Catch unique constraint errors re-thrown from DB layer
+              if (error.message.includes('Tenant domain')) {
+                  return { success: false, errors: [{ code: 'custom', path: ['companyDomain'], message: error.message }] };
+              }
+               if (error.message.includes('User email')) {
+                  return { success: false, errors: [{ code: 'custom', path: ['adminEmail'], message: error.message }] };
+              }
          }
 
         return { success: false, errors: [{ code: 'custom', path: ['root'], message: errorMessage }] };
@@ -218,8 +281,9 @@ export async function logoutAction() {
       const headersList = headers();
       const host = headersList.get('host') || '';
       const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-      const match = host.match(`^(.*)\\.${rootDomain}$`);
-       const subdomain = match ? match[1] : null;
+      // Match subdomains like 'demo.localhost' or 'demo.syntaxhivehrm.app'
+      const match = host.match(`^(.*)\\.${rootDomain}(:\\d+)?$`);
+      const subdomain = match ? match[1] : null;
        if (subdomain && subdomain !== 'www' && subdomain !== 'api') {
            tenantDomain = subdomain;
        }
@@ -236,9 +300,9 @@ export async function logoutAction() {
       const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
       const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : ''; // Add port for non-production
       const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-      // Redirect specifically to the subdomain's root (which should redirect to login)
-      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/`; // Redirect to subdomain root
-      console.log(`[logoutAction] Redirecting to tenant root: ${redirectUrl}`);
+      // Redirect specifically to the tenant's login page
+      redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/login`;
+      console.log(`[logoutAction] Redirecting to tenant login: ${redirectUrl}`);
   } else {
        // If logging out from the root domain, redirect to root login
        console.log(`[logoutAction] Tenant domain not found, redirecting to root login: ${redirectUrl}`);
@@ -248,3 +312,71 @@ export async function logoutAction() {
   // Redirect to the appropriate login page after clearing session
   redirect(redirectUrl);
 }
+
+// Forgot Password Action (Placeholder)
+export async function forgotPasswordAction(email: string, domain?: string): Promise<{ success: boolean; message: string }> {
+    console.log(`[forgotPasswordAction] Received request for email: ${email}, domain: ${domain || 'root'}`);
+
+    // 1. Find Tenant (if domain provided)
+    let tenantId: string | null = null;
+    if (domain) {
+        const tenant = await getTenantByDomain(domain);
+        if (!tenant) {
+            console.warn(`[forgotPasswordAction] Tenant not found for domain: ${domain}`);
+            // Still return success to avoid revealing tenant existence
+            return { success: true, message: `If an account exists for ${email} at ${domain}, you will receive reset instructions.` };
+        }
+        tenantId = tenant.id;
+    } else {
+        // If no domain, this implies a root-level password reset, which might not be supported
+        console.warn('[forgotPasswordAction] Root domain password reset requested (not typically supported for tenants).');
+         return { success: false, message: 'Password reset from the root domain is not supported. Please use your company\'s login page.' };
+    }
+
+    // 2. Find User by email within the tenant
+    const user = await getUserByEmail(email, tenantId);
+    if (!user) {
+        console.warn(`[forgotPasswordAction] User not found for email: ${email} in tenant: ${tenantId}`);
+        // Still return success
+         return { success: true, message: `If an account exists for ${email} at ${domain}, you will receive reset instructions.` };
+    }
+
+    // 3. Generate Reset Token (implement secure token generation)
+    const resetToken = `fake-reset-token-${Date.now()}`; // Replace with secure random token
+    console.log(`[forgotPasswordAction] Generated reset token for user ${user.id}`);
+
+    // 4. Store Token Hash associated with user ID (e.g., in a separate table or user table column with expiry)
+    // await storeResetToken(user.id, resetToken); // Implement this
+
+    // 5. Send Reset Email using internal sender
+    const transporter = createInternalTransporter();
+    if (!transporter) {
+        console.error('[forgotPasswordAction] Failed to create internal email transporter.');
+        return { success: false, message: 'Failed to send reset email due to server configuration.' };
+    }
+
+    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
+    const port = process.env.NODE_ENV !== 'production' ? `:${process.env.PORT || 9002}` : '';
+    const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+    // Construct tenant-specific reset link
+    const resetUrl = `${protocol}://${domain}.${rootDomain}${port}/reset-password?token=${resetToken}`; // Example path
+
+    const mailOptions = {
+        from: `"${INTERNAL_FROM_NAME}" <${INTERNAL_FROM_EMAIL}>`,
+        to: user.email,
+        subject: `Password Reset Request for SyntaxHive Hrm (${domain})`,
+        text: `Hello ${user.name},\n\nYou requested a password reset for your SyntaxHive Hrm account associated with ${domain}.\n\nClick the link below to set a new password:\n${resetUrl}\n\nIf you didn't request this, you can safely ignore this email.\n\nBest regards,\nThe SyntaxHive Hrm Team`,
+        html: `<p>Hello ${user.name},</p><p>You requested a password reset for your SyntaxHive Hrm account associated with <strong>${domain}</strong>.</p><p>Click the link below to set a new password:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>If you didn't request this, you can safely ignore this email.</p><p>Best regards,<br>The SyntaxHive Hrm Team</p>`,
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log(`[forgotPasswordAction] Password reset email sent to ${user.email}`);
+         return { success: true, message: `If an account exists for ${email} at ${domain}, you will receive reset instructions.` };
+    } catch (error) {
+        console.error('[forgotPasswordAction] Error sending password reset email:', error);
+        return { success: false, message: 'Failed to send password reset email.' };
+    }
+}
+
+// Add more actions as needed (e.g., resetPasswordAction, verifyEmailAction)

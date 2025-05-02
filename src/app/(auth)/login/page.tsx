@@ -14,87 +14,92 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
-
-// Updated schema: Remove companyDomain
-const loginSchema = z.object({
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-});
-
-type LoginFormInputs = z.infer<typeof loginSchema>;
+// Use tenant-specific login schema (no domain field needed)
+import { tenantLoginSchema, type TenantLoginFormInputs } from '@/modules/auth/types';
+// Import login action (assuming it exists and handles tenant context)
+// import { loginAction } from '@/modules/auth/actions';
 
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  // State to hold the inferred domain (if needed for forgot password link)
   const [tenantDomain, setTenantDomain] = useState<string | null>(null);
   const [rootDomain, setRootDomain] = useState<string>('localhost');
-  const [port, setPort] = useState<string>('9002'); // State for port
-  const [fullTenantUrl, setFullTenantUrl] = useState<string | null>(null); // To store the full tenant URL for display
+  const [port, setPort] = useState<string>('9002');
+  const [fullTenantUrl, setFullTenantUrl] = useState<string | null>(null);
 
   // Attempt to infer domain from hostname on client-side
   useEffect(() => {
-    // This effect runs only on the client side
     const currentRootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
     const currentPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
     const currentProtocol = window.location.protocol;
     const hostname = window.location.hostname;
-    console.log(`[LoginPage Effect] Hostname: ${hostname}, Root Domain: ${currentRootDomain}, Port: ${currentPort}`); // Log details
+    console.log(`[LoginPage Effect] Hostname: ${hostname}, Root Domain: ${currentRootDomain}, Port: ${currentPort}`);
 
     setRootDomain(currentRootDomain);
-    setPort(currentPort); // Store the port
+    setPort(currentPort);
 
-    // Handle localhost directly
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    const isRootDomainRequest =
+       hostname === currentRootDomain ||
+       hostname === 'localhost' ||
+       hostname === '127.0.0.1' ||
+       hostname.match(/^192\.168\.\d+\.\d+$/) ||
+       hostname.match(/^10\.\d+\.\d+\.\d+$/) ||
+       hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/);
+
+    if (isRootDomainRequest) {
         setTenantDomain(null);
-        const rootUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}`;
+        const rootUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}/login`;
         setFullTenantUrl(rootUrl);
-        console.log(`[LoginPage Effect] On root domain (localhost). Full URL: ${rootUrl}`);
-        return; // Stop processing if on localhost directly
+        console.log(`[LoginPage Effect] On root domain. Full Login URL: ${rootUrl}`);
+        return;
     }
 
+    // Match subdomains like 'demo.localhost' or 'demo.syntaxhivehrm.app'
     const match = hostname.match(`^(.*)\\.${currentRootDomain}$`);
     const subdomain = match ? match[1] : null;
     console.log(`[LoginPage Effect] Extracted subdomain: ${subdomain}`);
 
     if (subdomain && !['www', 'api'].includes(subdomain)) {
         setTenantDomain(subdomain);
-        const tenantUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}`;
+        const tenantUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}/login`;
         setFullTenantUrl(tenantUrl);
-        console.log(`[LoginPage Effect] Tenant domain set to: ${subdomain}. Full URL: ${tenantUrl}`);
+        console.log(`[LoginPage Effect] Tenant domain set to: ${subdomain}. Full Login URL: ${tenantUrl}`);
     } else {
-        // If on root domain or ignored subdomain, clear tenantDomain state
         setTenantDomain(null);
-         const rootUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}`;
+         const rootUrl = `${currentProtocol}//${hostname}${currentPort !== '80' && currentPort !== '443' ? `:${currentPort}` : ''}/login`;
          setFullTenantUrl(rootUrl);
-         console.log(`[LoginPage Effect] No tenant domain detected or on root domain. Full URL: ${rootUrl}`);
+         console.log(`[LoginPage Effect] No tenant domain detected or on root domain. Full Login URL: ${rootUrl}`);
     }
-}, []); // Only run once on mount
+}, []);
 
 
-  const form = useForm<LoginFormInputs>({
-    resolver: zodResolver(loginSchema),
+  const form = useForm<TenantLoginFormInputs>({
+    resolver: zodResolver(tenantLoginSchema),
     defaultValues: {
       email: "",
       password: "",
     },
   });
 
-  const onSubmit: SubmitHandler<LoginFormInputs> = async (data) => {
+  const onSubmit: SubmitHandler<TenantLoginFormInputs> = async (data) => {
     setIsLoading(true);
     const { email, password } = data;
-    // The domain is no longer in the form data.
-    // The backend API/action needs to determine the tenant based on context (e.g., header set by middleware).
-    console.log(`Login attempt with email: ${email} (Tenant context handled by backend)`);
+    // The domain is inferred by the middleware/backend.
+    console.log(`Login attempt with email: ${email} (Tenant context from domain: ${tenantDomain})`);
 
     // --- TODO: Real Authentication Logic ---
-    // 1. Send email, password to backend API (e.g., /api/auth/login) - API needs tenant context from header
-    // 2. Backend gets tenantId from header/middleware context.
-    // 3. Find user by email WITHIN that tenantId.
-    // 4. Verify password hash.
-    // 5. Set session cookie (httpOnly).
-    // 6. Return success/error.
+    // Replace mock logic with call to your actual login server action or API endpoint
+    // const result = await loginAction({ email, password }); // Example action call
+    //
+    // if (!result.success) {
+    //   toast({ title: "Login Failed", description: result.error || "Invalid credentials.", variant: "destructive" });
+    //   setIsLoading(false);
+    // } else {
+    //   toast({ title: "Login Successful", description: "Welcome back!" });
+    //   router.push('/dashboard'); // Redirect to tenant dashboard (relative path)
+    // }
+    // --- End Real Logic Placeholder ---
 
     // --- Mock Authentication Logic ---
     await new Promise(resolve => setTimeout(resolve, 1500));
@@ -102,7 +107,7 @@ export default function LoginPage() {
     if (email.includes('fail')) {
       toast({
         title: "Login Failed",
-        description: "Invalid credentials or tenant context. Please try again.",
+        description: "Invalid credentials. Please try again.",
         variant: "destructive",
       });
       setIsLoading(false);
@@ -113,22 +118,19 @@ export default function LoginPage() {
         variant: "default",
       });
       // Redirect to the tenant-specific dashboard (middleware handles rewrite)
-      // Use relative path, middleware adds tenant context if needed
-      router.push('/dashboard');
-      // No need to setIsLoading(false) here as we are navigating away
+      router.push('/dashboard'); // Relative path, middleware ensures context
     }
     // --- End Mock Logic ---
   };
 
-  // Construct forgot password link dynamically, including port for local dev
-  // If on tenant domain, link to /forgot-password/[domain], else to /forgot-password (root)
+  // Construct forgot password link dynamically
+  // If on tenant domain, link to /forgot-password/[domain], else to root /forgot-password
   const forgotPasswordHref = tenantDomain
-    ? `/forgot-password/${tenantDomain}` // Relative path for tenant forgot password
-    : '/forgot-password'; // Root forgot password page
+    ? `/forgot-password/${tenantDomain}` // Tenant-specific forgot password
+    : '/forgot-password'; // Root forgot password
 
-  // Determine display text based on whether a tenant domain was detected
   const displayLocation = tenantDomain
-      ? `company: ${tenantDomain}` // Display like "company: demo"
+      ? `company: ${tenantDomain}`
       : `the main portal`;
 
   return (
@@ -136,17 +138,16 @@ export default function LoginPage() {
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold">Login to SyntaxHive Hrm</CardTitle>
-           {fullTenantUrl && ( // Display the URL if available
+           {fullTenantUrl && (
                 <CardDescription>
                     {`Enter your credentials for ${displayLocation}`}
-                    <span className="block text-xs text-muted-foreground mt-1">({fullTenantUrl})</span>
+                    <span className="block text-xs text-muted-foreground mt-1">({tenantDomain ? `${tenantDomain}.${rootDomain}${port !== '80' && port !== '443' ? `:${port}` : ''}` : `${rootDomain}${port !== '80' && port !== '443' ? `:${port}` : ''}`})</span>
                 </CardDescription>
            )}
         </CardHeader>
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              {/* Removed Company Domain Field */}
               <FormField
                 control={form.control}
                 name="email"
@@ -167,7 +168,7 @@ export default function LoginPage() {
                   <FormItem>
                     <div className="flex items-center justify-between">
                       <FormLabel>Password</FormLabel>
-                      {/* Link to root forgot password page or tenant-specific if domain known */}
+                      {/* Link to relevant forgot password page */}
                       <Link
                         href={forgotPasswordHref}
                         className={`text-sm font-medium text-primary hover:underline`}
@@ -193,7 +194,13 @@ export default function LoginPage() {
               </Button>
             </form>
           </Form>
-           {/* Registration link is now removed */}
+           {/* Link to root registration page */}
+           <div className="mt-4 text-center text-sm">
+            Don't have an account?{' '}
+            <Link href="/register" className="font-medium text-primary hover:underline">
+              Register your company
+            </Link>
+          </div>
         </CardContent>
       </Card>
     </div>
