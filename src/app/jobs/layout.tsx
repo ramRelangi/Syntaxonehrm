@@ -1,3 +1,4 @@
+
 import type { Metadata } from 'next';
 import '../globals.css'; // Reuse global styles
 import { Toaster } from '@/components/ui/toaster'; // Might be useful for potential future interactions
@@ -44,4 +45,4 @@ export default function PublicJobBoardLayout({
     </html>
   );
 }
-```
+
