@@ -1,21 +1,35 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Users, UserPlus } from "lucide-react";
+import { getEmployees } from '@/actions/employee-actions';
+import { EmployeeDataTable } from '@/components/features/employees/employee-data-table';
+import { columns } from '@/components/features/employees/employee-table-columns';
+import Link from "next/link";
 
-export default function EmployeesPage() {
+export default async function EmployeesPage() {
+  // Fetch employee data using the server action
+  const employees = await getEmployees();
+
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Employee Management</h1>
+      <div className="flex items-center justify-between flex-wrap gap-4">
+         <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
+           <Users className="h-6 w-6" /> Employee Management
+         </h1>
+         <Button asChild>
+             <Link href="/employees/add">
+                <UserPlus className="mr-2 h-4 w-4"/> Add New Employee
+             </Link>
+         </Button>
+      </div>
       <Card className="shadow-sm">
          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5 text-primary"/> Employees Overview</CardTitle>
-            <CardDescription>Manage employee records, profiles, and documentation.</CardDescription>
+            <CardTitle>Employees Overview</CardTitle>
+            <CardDescription>View, search, and manage employee records.</CardDescription>
          </CardHeader>
          <CardContent>
-            <p className="text-muted-foreground">Employee list, search, filtering, and profile management features will be implemented here.</p>
-            {/* Placeholder for future table/list */}
-             <div className="mt-4 h-60 w-full flex items-center justify-center bg-muted rounded-md">
-                <p className="text-muted-foreground">Employee Table Placeholder</p>
-             </div>
+            {/* Render the data table */}
+            <EmployeeDataTable columns={columns} data={employees} />
          </CardContent>
       </Card>
     </div>
