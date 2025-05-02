@@ -135,7 +135,7 @@ export default function CommunicationPage() {
         fetchSettings(); // Refetch settings after successful save
     }
 
-  // Determine if email sending is configured
+  // Determine if email sending is configured (kept for potential future use or display logic)
   const isEmailConfigured = !!settings && settings.smtpHost && settings.smtpUser;
 
   return (
@@ -173,11 +173,11 @@ export default function CommunicationPage() {
                 <AlertTriangle className="h-4 w-4" />
                 <AlertTitle>Email Sending Not Configured</AlertTitle>
                 <AlertDescription>
-                Email sending functionality is disabled. Please configure your SMTP settings in the{' '}
+                Email sending functionality might be limited. Please configure your SMTP settings in the{' '}
                 <button onClick={() => setActiveTab("settings")} className="font-medium underline hover:text-yellow-900 dark:hover:text-yellow-200">
                     Settings tab
                 </button>
-                {' '}to enable sending emails.
+                {' '}to enable full sending capabilities.
                 </AlertDescription>
             </Alert>
         )}
@@ -185,7 +185,8 @@ export default function CommunicationPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="templates">Email Templates</TabsTrigger>
-              <TabsTrigger value="send" disabled={!isEmailConfigured}>Send Email</TabsTrigger> {/* Enable/disable based on config */}
+              {/* Removed the disabled attribute to always enable the tab */}
+              <TabsTrigger value="send">Send Email</TabsTrigger>
               <TabsTrigger value="settings">Settings</TabsTrigger> {/* Always enabled */}
           </TabsList>
 
@@ -230,10 +231,11 @@ export default function CommunicationPage() {
                       <CardDescription>Compose and send emails using saved templates or custom content.</CardDescription>
                   </CardHeader>
                   <CardContent className="flex items-center justify-center h-40 bg-muted rounded-md">
-                       {isEmailConfigured ? (
-                           <p className="text-muted-foreground"><MessageSquareText className="inline h-5 w-5 mr-1" /> Email sending UI is under development.</p>
-                       ) : (
-                            <p className="text-destructive"><AlertTriangle className="inline h-5 w-5 mr-1" /> Configure email settings first.</p>
+                       {/* Keep the content indicating development status */}
+                       <p className="text-muted-foreground"><MessageSquareText className="inline h-5 w-5 mr-1" /> Email sending UI is under development.</p>
+                       {/* Show warning if not configured */}
+                       {!isEmailConfigured && !isLoadingSettings && (
+                            <p className="text-yellow-600 dark:text-yellow-400 text-sm ml-4">(Email settings not configured)</p>
                        )}
                   </CardContent>
               </Card>
