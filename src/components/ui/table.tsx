@@ -63,8 +63,8 @@ const TableRow = React.forwardRef<
         className
       )}
       {...props}
-    >
-      {children} {/* Render children */}
+    >{/* Ensure no whitespace before or after children */}
+      {children}
     </tr>
   );
 });
