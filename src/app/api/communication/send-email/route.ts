@@ -46,13 +46,13 @@ export async function POST(request: NextRequest) {
   try {
     // 1. Get Email Settings
     console.log('[Send Email API] Attempting to retrieve email settings from mock DB...');
-    settings = getEmailSettings(); // This function already logs internally
+    settings = getEmailSettings(); // This function now logs internally & returns null if empty
     console.log('[Send Email API] Raw settings retrieved from getEmailSettings:', settings ? JSON.stringify(settings) : 'null'); // Log what was actually returned
 
     // 2. Validate Settings Retrieved by THIS Request
+    // Check if settings is not null and contains the required fields
      const isSettingsValid =
-         settings &&
-         typeof settings === 'object' && // Ensure it's an object
+         settings && // Check if it's not null
          settings.smtpHost &&
          settings.fromEmail &&
          settings.smtpUser &&
@@ -61,14 +61,14 @@ export async function POST(request: NextRequest) {
          settings.smtpPort > 0;
 
      console.log(`[Send Email API] Checking retrieved settings validity: ${isSettingsValid}`);
-     console.log(`[Send Email API] Validation Details: settings=${!!settings}, isObject=${typeof settings === 'object'}, host=${!!settings?.smtpHost}, from=${!!settings?.fromEmail}, user=${!!settings?.smtpUser}, pass=${!!settings?.smtpPassword}, port=${settings?.smtpPort}`);
+     console.log(`[Send Email API] Validation Details: settings is truthy=${!!settings}, host=${!!settings?.smtpHost}, from=${!!settings?.fromEmail}, user=${!!settings?.smtpUser}, pass=${!!settings?.smtpPassword}, port=${settings?.smtpPort}`);
 
 
     if (!isSettingsValid) {
-      console.error('[Send Email API] Settings validation failed. Settings are considered unconfigured or incomplete for this request.');
+      console.error('[Send Email API] Settings validation failed. Settings are null, incomplete, or invalid.');
       return NextResponse.json({ error: 'Configuration Error', message: 'Email sending is not configured or settings are incomplete. Please check and save SMTP details in Communication Settings.' }, { status: 503 }); // 503 Service Unavailable
     }
-    console.log('[Send Email API] Settings validation passed within this request. Proceeding...');
+    console.log('[Send Email API] Settings retrieved and validated successfully. Proceeding...');
 
 
     // 3. Parse and Validate Request Body
@@ -86,13 +86,13 @@ export async function POST(request: NextRequest) {
     const { to, subject, body: emailBody } = validation.data;
 
     // 4. Create Nodemailer Transporter
-    // We already validated settings exist, so the non-null assertion is safer here
-     console.log(`[Send Email API] Creating transporter for ${settings!.smtpHost}:${settings!.smtpPort}`);
-    const transporter = createTransporter(settings!);
+    // We already validated settings exist and are not null
+     console.log(`[Send Email API] Creating transporter for ${settings.smtpHost}:${settings.smtpPort}`);
+    const transporter = createTransporter(settings);
 
     // 5. Define Mail Options
     const mailOptions = {
-      from: `"${settings!.fromName}" <${settings!.fromEmail}>`,
+      from: `"${settings.fromName}" <${settings.fromEmail}>`,
       to: to,
       subject: subject,
       // Use 'text' for plain text, 'html' for HTML content
@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
      console.log('[Send Email API] Mail options prepared:', JSON.stringify(mailOptions, null, 2)); // Log mail options
 
     // 6. Send Mail
-    console.log(`[Send Email API] Attempting to send email to ${to} via ${settings!.smtpHost}`);
+    console.log(`[Send Email API] Attempting to send email to ${to} via ${settings.smtpHost}`);
     const info = await transporter.sendMail(mailOptions);
     console.log('[Send Email API] Email sent successfully:', info.messageId);
 
@@ -148,6 +148,7 @@ export async function POST(request: NextRequest) {
          errorMessage = `SMTP Server Error (${error.responseCode}): ${error.message}`;
          statusCode = 502;
      } else if (error.message?.includes('Email sending is not configured')) {
+        // This case should ideally be caught by the initial validation now
         statusCode = 503; // Service Unavailable
         errorMessage = error.message;
      } else {

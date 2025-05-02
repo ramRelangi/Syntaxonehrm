@@ -26,10 +26,20 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION
-async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
+async function fetchData<T>(url: string, options?: RequestInit): Promise<T | null> { // Allow null return
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
+    console.log(`[Communication Page - fetchData] Fetching from ${fullUrl}`);
     try {
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
+        console.log(`[Communication Page - fetchData] Response status for ${fullUrl}: ${response.status}`);
+
+        // Special handling for 404 on settings fetch
+        if (response.status === 404 && url.includes('/api/communication/settings')) {
+            console.log("[Communication Page - fetchData] Settings not found (404), returning null.");
+            return null; // Return null if settings endpoint returns 404
+        }
+
+
         if (!response.ok) {
             // Attempt to parse error, provide fallback
             const errorText = await response.text();
@@ -38,25 +48,26 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
                 const errorData = JSON.parse(errorText);
                 errorMessage = errorData.message || errorData.error || errorMessage;
             } catch {
-                // If JSON parsing fails, use the raw text if available
                 errorMessage = errorText || errorMessage;
             }
-             // Special handling for 404 on settings fetch
-            if (response.status === 404 && url.includes('/api/communication/settings')) {
-                console.log("Settings not found (404), returning {}");
-                return {} as T; // Return empty object if settings not found
-            }
+            console.error(`[Communication Page - fetchData] HTTP error for ${fullUrl}: ${errorMessage}`);
             throw new Error(errorMessage);
         }
-        // Handle cases where response might be empty (e.g., GET settings before configured)
+
+        // Handle cases where response might be empty even with 200 OK
         const text = await response.text();
-        return text ? JSON.parse(text) : ({} as T) // Return empty object if no content
+        if (!text) {
+           console.log(`[Communication Page - fetchData] Received empty response body for ${fullUrl}, returning null.`);
+           // If the response is ok but empty, treat it as null (relevant for initial settings GET)
+           return null;
+        }
+        // Parse JSON only if text is not empty
+        console.log(`[Communication Page - fetchData] Received data for ${fullUrl}, parsing JSON...`);
+        return JSON.parse(text) as T;
+
     } catch (error: any) {
-           // Log error but rethrow
-           console.error(`Failed to fetch ${fullUrl}: ${error.message}`);
-           throw error;
-           // Throw original error for specific handling (like 404 above) or rethrow a generic one
-          // throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
+           console.error(`[Communication Page - fetchData] Failed to fetch ${fullUrl}: ${error.message}`);
+           throw error; // Rethrow the error for specific handling in callers
     }
 }
 
@@ -75,8 +86,13 @@ export default function CommunicationPage() {
   const [connectionStatus, setConnectionStatus] = React.useState<ConnectionStatus>('idle'); // State for connection status
 
   // --- Background Connection Check ---
-  const checkConnectionInBackground = React.useCallback(async (currentSettings: EmailSettings) => {
-    // No need to check for null/empty here as fetchSettings handles it
+  const checkConnectionInBackground = React.useCallback(async (currentSettings: EmailSettings | null) => {
+     if (!currentSettings) {
+       console.log("[Communication Page - checkConnectionInBackground] No settings provided, skipping check.");
+       setConnectionStatus('unconfigured');
+       return;
+     }
+    console.log("[Communication Page - checkConnectionInBackground] Starting background check...");
     setConnectionStatus('checking');
     try {
         const response = await fetch('/api/communication/test-connection', {
@@ -87,39 +103,44 @@ export default function CommunicationPage() {
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ message: 'Unknown connection error' }));
-            console.error('Background connection check failed:', errorData.message);
+            console.error('[Communication Page - checkConnectionInBackground] Background check failed:', errorData.message);
             setConnectionStatus('failed');
+            // Maybe send admin notification here if needed, but API might already do it
         } else {
+             console.log("[Communication Page - checkConnectionInBackground] Background check successful.");
             setConnectionStatus('success');
         }
     } catch (error) {
-        console.error('Error during background connection check:', error);
+        console.error('[Communication Page - checkConnectionInBackground] Error during background check:', error);
         setConnectionStatus('failed');
     }
-  }, []); // No dependencies, relies on passed settings
+  }, []); // No external dependencies, uses passed settings
 
   // --- Fetch Settings ---
  const fetchSettings = React.useCallback(async () => {
+    console.log("[Communication Page - fetchSettings] Starting fetch...");
     setIsLoadingSettings(true);
     setSettingsError(null);
-    // Don't reset status immediately, let the check handle it
-    // setConnectionStatus('idle');
+    setConnectionStatus('checking'); // Assume checking initially
     try {
-        const data = await fetchData<EmailSettings | null>('/api/communication/settings');
-        // Check if data is null or empty object and has required fields
-        if (data && Object.keys(data).length > 0 && data.smtpHost && data.fromEmail) {
+        const data = await fetchData<EmailSettings>('/api/communication/settings');
+        console.log("[Communication Page - fetchSettings] Data received from fetchData:", data);
+        // fetchData now returns null if 404 or empty, so check for truthiness
+        if (data) {
+            console.log("[Communication Page - fetchSettings] Valid settings data found.");
             setSettings(data);
-            // Trigger background check only if settings seem complete
-            // Run check but don't await it here, let it update state in background
+            // Trigger background check only if settings data is present
              checkConnectionInBackground(data); // No await
         } else {
+            console.log("[Communication Page - fetchSettings] No valid settings data found (null or empty).");
             setSettings(null); // Explicitly set to null if no valid settings
-            setConnectionStatus('unconfigured'); // Set status if no settings found or incomplete
+            setConnectionStatus('unconfigured'); // Set status if no settings found or empty
         }
     } catch (err: any) {
-         // Don't set 'unconfigured' status on fetch error, only if 404 or empty
+        console.error("[Communication Page - fetchSettings] Error during fetch:", err.message);
         setSettingsError("Failed to load email settings.");
         setConnectionStatus('failed'); // Indicate failure to fetch settings
+        setSettings(null); // Ensure settings state is null on error
         toast({
             title: "Error Loading Settings",
             description: err.message || "Could not fetch settings.",
@@ -127,18 +148,23 @@ export default function CommunicationPage() {
         });
     } finally {
         setIsLoadingSettings(false);
+        console.log("[Communication Page - fetchSettings] Fetch finished.");
     }
 }, [toast, checkConnectionInBackground]); // Added checkConnectionInBackground dependency
 
 
   // --- Fetch Templates ---
   const fetchTemplates = React.useCallback(async () => {
+    console.log("[Communication Page - fetchTemplates] Starting fetch...");
     setIsLoadingTemplates(true);
     setTemplateError(null);
     try {
       const data = await fetchData<EmailTemplate[]>('/api/communication/templates');
-      setTemplates(data);
+      console.log("[Communication Page - fetchTemplates] Data received:", data);
+      // If data is null (though unlikely for templates GET), treat as empty array
+      setTemplates(data || []);
     } catch (err: any) {
+      console.error("[Communication Page - fetchTemplates] Error during fetch:", err.message);
       setTemplateError("Failed to load email templates.");
       toast({
         title: "Error Loading Templates",
@@ -147,34 +173,40 @@ export default function CommunicationPage() {
       });
     } finally {
       setIsLoadingTemplates(false);
+       console.log("[Communication Page - fetchTemplates] Fetch finished.");
     }
   }, [toast]);
 
 
-   // --- Initial Data Fetch and Background Check ---
+   // --- Initial Data Fetch ---
   React.useEffect(() => {
+    console.log("[Communication Page - useEffect] Initializing data fetch.");
     fetchTemplates();
     fetchSettings(); // This now includes the initial checkConnectionInBackground call if settings are valid
   }, [fetchTemplates, fetchSettings]); // Keep dependencies as they trigger the fetches
 
   // --- Handlers ---
   const handleTemplateFormSuccess = () => {
+    console.log("[Communication Page - handleTemplateFormSuccess] Triggering refetch.");
     setIsTemplateFormOpen(false); // Close dialog
     setEditingTemplate(null); // Clear editing state
     fetchTemplates(); // Refetch templates
   };
 
    const handleEditTemplate = (template: EmailTemplate) => {
+     console.log("[Communication Page - handleEditTemplate] Setting template for edit:", template.id);
      setEditingTemplate(template);
      setIsTemplateFormOpen(true);
    };
 
    const handleAddNewTemplate = () => {
+     console.log("[Communication Page - handleAddNewTemplate] Opening form for new template.");
      setEditingTemplate(null); // Ensure not in edit mode
      setIsTemplateFormOpen(true);
    };
 
    const handleTemplateDialogClose = (open: boolean) => {
+        console.log("[Communication Page - handleTemplateDialogClose] Dialog open state changed:", open);
         if (!open) {
             setEditingTemplate(null); // Reset editing state when dialog is closed
         }
@@ -182,11 +214,13 @@ export default function CommunicationPage() {
     }
 
     const handleSettingsSuccess = async () => {
+        console.log("[Communication Page - handleSettingsSuccess] Settings saved, triggering refetch and check.");
         // Refetch settings AND trigger connection check *after* saving new settings
         await fetchSettings(); // Await fetchSettings here to ensure check runs after save
     }
 
     const handleManualTestConnectionResult = (success: boolean) => {
+        console.log("[Communication Page - handleManualTestConnectionResult] Manual test result:", success);
         // Update status based on manual test result
         setConnectionStatus(success ? 'success' : 'failed');
     }
@@ -202,6 +236,7 @@ export default function CommunicationPage() {
 
     // Helper to render connection status indicator
     const renderConnectionStatus = () => {
+        console.log(`[Communication Page - renderConnectionStatus] Current status: ${connectionStatus}, isLoadingSettings: ${isLoadingSettings}, settings: ${!!settings}`);
         switch (connectionStatus) {
             case 'checking':
                 return <span className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Checking...</span>;
@@ -214,11 +249,14 @@ export default function CommunicationPage() {
             case 'idle':
             default:
                  // Show idle only if settings are present but check hasn't run/finished
-                 if (settings && !isLoadingSettings) {
+                 // Now also check isLoadingStatus to avoid showing 'Idle' while 'checking'
+                 if (settings && !isLoadingSettings && connectionStatus === 'idle') {
                      return <span className="text-xs text-muted-foreground">Status: Idle</span>;
                  }
-                 // Otherwise show checking or unconfigured based on other states
-                 return isLoadingSettings ? <span className="text-xs text-muted-foreground">Loading...</span> : <span className="text-xs text-yellow-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Unconfigured</span>;
+                 // Otherwise show loading, checking, or unconfigured based on other states
+                 return isLoadingSettings ? <span className="text-xs text-muted-foreground">Loading...</span> :
+                        connectionStatus === 'checking' ? <span className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Checking...</span> :
+                        <span className="text-xs text-yellow-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Unconfigured</span>;
         }
     };
 
@@ -252,7 +290,8 @@ export default function CommunicationPage() {
       </div>
 
        {/* Alert if email sending is not configured or misconfigured */}
-        {(isEmailUnconfigured || isEmailMisconfigured) && !isLoadingSettings && !isLoadingStatus && (
+       {/* Show alert only when not loading AND status is relevant (unconfigured/failed) */}
+        {(isEmailUnconfigured || isEmailMisconfigured) && !isLoadingSettings && connectionStatus !== 'checking' && (
              <Alert variant={isEmailUnconfigured ? "default" : "destructive"} className={isEmailUnconfigured ? "bg-yellow-50 border-yellow-300 text-yellow-800 [&>svg]:text-yellow-600 dark:bg-yellow-950 dark:border-yellow-800 dark:text-yellow-300 dark:[&>svg]:text-yellow-500" : ""}>
                 <AlertTriangle className="h-4 w-4" />
                 <AlertTitle>Email Sending {isEmailUnconfigured ? 'Not Configured' : 'Configuration Issue'}</AlertTitle>
@@ -269,16 +308,17 @@ export default function CommunicationPage() {
         )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          {/* Use simpler status icons for tabs */}
           <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="templates">Email Templates</TabsTrigger>
-              {/* Send tab is disabled if connection is not successful or still loading/checking */}
-              <TabsTrigger value="send" disabled={!isEmailConfigured || isLoadingStatus}>
+              {/* Send tab is disabled if connection is not explicitly successful */}
+              <TabsTrigger value="send" disabled={connectionStatus !== 'success'}>
                   <Send className="mr-1 h-4 w-4"/> Send Email
-                  {(!isEmailConfigured || isLoadingStatus) && <AlertTriangle className="ml-2 h-3 w-3 text-yellow-600 dark:text-yellow-500" title="Email not configured or status checking" />}
+                  {connectionStatus !== 'success' && <AlertTriangle className="ml-2 h-3 w-3 text-yellow-600 dark:text-yellow-500" title="Email not configured or status issue" />}
               </TabsTrigger>
               <TabsTrigger value="settings">
                  <Settings className="mr-1 h-4 w-4"/> Settings
-                 {(connectionStatus === 'checking' || (connectionStatus === 'idle' && !isLoadingSettings && settings)) && <Loader2 className="ml-2 h-3 w-3 animate-spin"/>}
+                 {connectionStatus === 'checking' && <Loader2 className="ml-2 h-3 w-3 animate-spin"/>}
                  {connectionStatus === 'success' && <CheckCircle className="ml-2 h-3 w-3 text-green-600"/>}
                  {connectionStatus === 'failed' && <XCircle className="ml-2 h-3 w-3 text-red-600"/>}
                  {connectionStatus === 'unconfigured' && <AlertTriangle className="ml-2 h-3 w-3 text-yellow-600"/>}
@@ -328,12 +368,14 @@ export default function CommunicationPage() {
                    <CardContent>
                         {isLoadingTemplates ? (
                             <Skeleton className="h-64 w-full" />
-                        ) : isEmailConfigured && !isLoadingStatus ? ( // Only enable form if truly configured and not loading status
+                        ) : isEmailConfigured ? ( // Check only if configured
                              <SendEmailForm templates={templates} connectionStatus={connectionStatus}/>
                          ) : (
                              <div className="flex items-center justify-center h-40 bg-muted rounded-md">
                                <p className="text-muted-foreground text-center px-4">
-                                  Email sending is disabled. Please configure and verify your SMTP settings in the Settings tab.
+                                  {connectionStatus === 'checking' ? 'Checking email configuration...' :
+                                   connectionStatus === 'failed' ? 'Email configuration failed. Please check the Settings tab.' :
+                                   'Email sending is disabled. Please configure your SMTP settings in the Settings tab.'}
                                </p>
                              </div>
                          )}
@@ -376,5 +418,3 @@ export default function CommunicationPage() {
     </div>
   );
 }
-
-
