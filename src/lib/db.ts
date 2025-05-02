@@ -1,7 +1,9 @@
 import { Pool } from 'pg';
 
 // Ensure environment variables are loaded
-const requiredEnvVars = ['DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'];
+// DB_PORT is made optional as it has a default fallback
+// DB_PASSWORD is changed to DB_PASS to match user's .env
+const requiredEnvVars = ['DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME'];
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
 if (missingEnvVars.length > 0) {
@@ -17,9 +19,9 @@ let pool: Pool;
 try {
     pool = new Pool({
       host: process.env.DB_HOST,
-      port: parseInt(process.env.DB_PORT || '5432', 10),
+      port: parseInt(process.env.DB_PORT || '5432', 10), // Keep default for port
       user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
+      password: process.env.DB_PASS, // Use DB_PASS
       database: process.env.DB_NAME,
       // Optional: Add SSL configuration if required for your database connection
       // ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false, // Example SSL config
@@ -34,7 +36,7 @@ try {
       // process.exit(-1); // Consider if exiting is appropriate for your deployment
     });
 
-    console.log(`Database pool created for ${process.env.DB_USER}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`);
+    console.log(`Database pool created for ${process.env.DB_USER}@${process.env.DB_HOST}:${process.env.DB_PORT || '5432'}/${process.env.DB_NAME}`);
 
 } catch (error) {
      console.error('FATAL ERROR: Failed to create database pool.', error);
@@ -67,7 +69,7 @@ export async function testDbConnection() {
         } else if (err.code === 'ETIMEDOUT') {
              friendlyMessage = 'Database connection timed out. Check network and server status.';
         } else if (err.code === '28P01') { // invalid_password (PostgreSQL specific)
-             friendlyMessage = 'Database authentication failed. Check DB_USER and DB_PASSWORD.';
+             friendlyMessage = 'Database authentication failed. Check DB_USER and DB_PASS.'; // Updated message
         } else if (err.code === '3D000') { // invalid_catalog_name (database doesn't exist)
              friendlyMessage = `Database "${process.env.DB_NAME}" does not exist. Check DB_NAME.`;
         }
