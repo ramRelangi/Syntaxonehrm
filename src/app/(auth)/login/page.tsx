@@ -14,39 +14,56 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
 
-// Combined schema for domain selection + login
-const domainLoginSchema = z.object({
-  companyDomain: z.string().min(1, "Company domain is required").regex(/^[a-zA-Z0-9-]+$/, "Invalid domain format"),
+// Updated schema: Remove companyDomain
+const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
-type DomainLoginFormInputs = z.infer<typeof domainLoginSchema>;
+type LoginFormInputs = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  // State to hold the inferred domain (if needed for forgot password link)
+  const [tenantDomain, setTenantDomain] = useState<string | null>(null);
 
-  const form = useForm<DomainLoginFormInputs>({
-    resolver: zodResolver(domainLoginSchema),
+  // Attempt to infer domain from hostname on client-side
+  useState(() => {
+    if (typeof window !== 'undefined') {
+      const hostname = window.location.hostname;
+      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app';
+      const match = hostname.match(`^(.*)\\.${rootDomain}$`);
+      const subdomain = match ? match[1] : null;
+      if (subdomain && !['www', 'api'].includes(subdomain)) {
+        setTenantDomain(subdomain);
+      }
+    }
+  });
+
+  const form = useForm<LoginFormInputs>({
+    resolver: zodResolver(loginSchema),
     defaultValues: {
-      companyDomain: "",
       email: "",
       password: "",
     },
   });
 
-  const onSubmit: SubmitHandler<DomainLoginFormInputs> = async (data) => {
+  const onSubmit: SubmitHandler<LoginFormInputs> = async (data) => {
     setIsLoading(true);
-    const { companyDomain, email, password } = data;
-    console.log("Login attempt for domain:", companyDomain, "with email:", email);
+    const { email, password } = data;
+    // The domain is no longer in the form data.
+    // The backend API/action needs to determine the tenant based on context (e.g., header set by middleware).
+    console.log(`Login attempt with email: ${email} (Tenant context handled by backend)`);
 
     // --- TODO: Real Authentication Logic ---
-    // 1. Send companyDomain, email, password to your backend API (e.g., /api/auth/login)
-    // 2. Backend verifies tenant domain, finds user, checks password hash.
-    // 3. Backend sets a session cookie (e.g., using httpOnly cookie).
-    // 4. Backend returns success/error.
+    // 1. Send email, password to backend API (e.g., /api/auth/login)
+    // 2. Backend gets tenantId from header/middleware context.
+    // 3. Find user by email WITHIN that tenantId.
+    // 4. Verify password hash.
+    // 5. Set session cookie (httpOnly).
+    // 6. Return success/error.
 
     // --- Mock Authentication Logic ---
     await new Promise(resolve => setTimeout(resolve, 1500));
@@ -54,7 +71,7 @@ export default function LoginPage() {
     if (email.includes('fail')) {
       toast({
         title: "Login Failed",
-        description: "Invalid credentials or domain. Please try again.",
+        description: "Invalid credentials or tenant context. Please try again.",
         variant: "destructive",
       });
       setIsLoading(false);
@@ -64,50 +81,31 @@ export default function LoginPage() {
         description: "Welcome back!",
         variant: "default",
       });
-      // Redirect to the tenant-specific dashboard (using middleware rewrite)
-      // The browser URL will remain subdomain.domain.com/dashboard
-      // The internal Next.js route is /<domain>/dashboard
+      // Redirect to the tenant-specific dashboard (middleware handles rewrite)
       router.push('/dashboard'); // The middleware will handle the rewrite
       // No need to setIsLoading(false) here as we are navigating away
     }
     // --- End Mock Logic ---
   };
 
-  const watchedDomain = form.watch("companyDomain");
+  // Construct forgot password link dynamically
+  const forgotPasswordHref = tenantDomain ? `/forgot-password/${tenantDomain}` : '/forgot-password';
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold">Login to StreamlineHR</CardTitle>
-          <CardDescription>Enter your company domain and credentials</CardDescription>
+          <CardDescription>
+            {tenantDomain
+             ? `Enter your credentials for ${tenantDomain}.${process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app'}`
+             : "Enter your email and password"}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="companyDomain"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Company Domain</FormLabel>
-                    <FormControl>
-                      <div className="flex items-center">
-                        <Input
-                          placeholder="your-company"
-                          {...field}
-                          className="rounded-r-none lowercase"
-                          autoCapitalize="none"
-                        />
-                        <span className="inline-flex h-10 items-center rounded-r-md border border-l-0 border-input bg-secondary px-3 text-sm text-muted-foreground">
-                          .{process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app'}
-                        </span>
-                      </div>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {/* Removed Company Domain Field */}
               <FormField
                 control={form.control}
                 name="email"
@@ -128,12 +126,10 @@ export default function LoginPage() {
                   <FormItem>
                     <div className="flex items-center justify-between">
                       <FormLabel>Password</FormLabel>
-                      {/* Update forgot password link to include domain */}
+                      {/* Link to root forgot password page or tenant-specific if domain known */}
                       <Link
-                        href={watchedDomain ? `/forgot-password/${watchedDomain}` : '#'}
-                        className={`text-sm font-medium text-primary hover:underline ${!watchedDomain ? 'opacity-50 pointer-events-none' : ''}`}
-                        aria-disabled={!watchedDomain}
-                        tabIndex={!watchedDomain ? -1 : undefined}
+                        href={forgotPasswordHref}
+                        className={`text-sm font-medium text-primary hover:underline`}
                       >
                         Forgot password?
                       </Link>
@@ -156,13 +152,13 @@ export default function LoginPage() {
               </Button>
             </form>
           </Form>
-          <div className="mt-4 text-center text-sm">
+          {/* Removed "Register Company" link */}
+          {/* <div className="mt-4 text-center text-sm">
             Don&apos;t have an account?{' '}
-            {/* Link to the main registration page */}
             <Link href="/register" className="font-medium text-primary hover:underline">
               Register Company
             </Link>
-          </div>
+          </div> */}
         </CardContent>
       </Card>
     </div>

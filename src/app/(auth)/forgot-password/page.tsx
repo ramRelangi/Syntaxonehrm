@@ -13,14 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
-
-// Schema for root forgot password form (includes domain)
-const rootForgotPasswordSchema = z.object({
-  companyDomain: z.string().min(1, "Company domain is required").regex(/^[a-zA-Z0-9-]+$/, "Invalid domain format"),
-  email: z.string().email("Invalid email address"),
-});
-
-type RootForgotPasswordFormInputs = z.infer<typeof rootForgotPasswordSchema>;
+import { rootForgotPasswordSchema, type RootForgotPasswordFormInputs } from '@/modules/auth/types'; // Use root schema
 
 export default function RootForgotPasswordPage() {
   const router = useRouter();
@@ -134,10 +127,10 @@ export default function RootForgotPasswordPage() {
           )}
           <div className="mt-4 text-center text-sm">
             Remembered your password?{' '}
-            {/* Link back to the main login page */}
-            <Link href="/login" className="font-medium text-primary hover:underline">
+            {/* Link back to the root login page, which should redirect based on domain */}
+            <a href={`http://${form.watch("companyDomain")}.${rootDomain}`} className="font-medium text-primary hover:underline">
               Login
-            </Link>
+            </a>
           </div>
         </CardContent>
       </Card>

@@ -24,6 +24,7 @@ export const userSchema = z.object({
     role: userRoleSchema.default('Employee'),
     isActive: z.boolean().default(true),
     createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(), // Added for consistency with trigger
 });
 
 export type User = z.infer<typeof userSchema>;
@@ -40,7 +41,7 @@ export const registrationSchema = z.object({
 
 export type RegistrationFormData = z.infer<typeof registrationSchema>;
 
-// --- Tenant-Specific Login Form ---
+// --- Tenant-Specific Login Form (No domain needed in form) ---
 export const tenantLoginSchema = z.object({
   email: z.string().email("Invalid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
@@ -55,3 +56,10 @@ export const tenantForgotPasswordSchema = z.object({
 
 export type TenantForgotPasswordFormInputs = z.infer<typeof tenantForgotPasswordSchema>;
 
+// --- Root Forgot Password Form (Needs domain) ---
+export const rootForgotPasswordSchema = z.object({
+  companyDomain: z.string().min(1, "Company domain is required").regex(/^[a-zA-Z0-9-]+$/, "Invalid domain format"),
+  email: z.string().email("Invalid email address"),
+});
+
+export type RootForgotPasswordFormInputs = z.infer<typeof rootForgotPasswordSchema>;
