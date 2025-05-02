@@ -6,9 +6,11 @@ export async function GET(request: NextRequest) {
   try {
     const employees = await getEmployees(); // Call the server action
     return NextResponse.json(employees);
-  } catch (error) {
+  } catch (error: any) { // Catch as any to access error properties
     console.error('Error fetching employees (API):', error);
-    return NextResponse.json({ error: 'Failed to fetch employees' }, { status: 500 });
+    // Try to return a more specific message if available
+    const message = error.message || 'Failed to fetch employees due to an internal server error.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
