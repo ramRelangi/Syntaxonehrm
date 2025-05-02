@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import type { Employee } from "@/modules/employees/types"; // Updated import path
+import type { Employee } from "@/modules/employees/types";
 import { Button } from "@/components/ui/button";
 import { ArrowUpDown, MoreHorizontal, Pencil, Trash2, Eye } from "lucide-react";
 import {
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import { deleteEmployeeAction } from '@/modules/employees/actions'; // Updated import path
+// import { deleteEmployeeAction } from '@/modules/employees/actions'; // Use API call instead
 import { useToast } from '@/hooks/use-toast';
 import {
   AlertDialog,
@@ -44,28 +44,36 @@ const getStatusVariant = (status: Employee['status']): "default" | "secondary" |
 };
 
 // Action Cell Component for Delete Confirmation
-const ActionsCell = ({ employeeId, employeeName }: { employeeId: string, employeeName: string }) => {
+const ActionsCell = ({ employeeId, employeeName, onEmployeeDeleted }: { employeeId: string, employeeName: string, onEmployeeDeleted: () => void }) => {
   const { toast } = useToast();
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDelete = async () => {
     setIsDeleting(true);
-    const result = await deleteEmployeeAction(employeeId);
-    setIsDeleting(false);
+    try {
+      const response = await fetch(`/api/employees/${employeeId}`, {
+        method: 'DELETE',
+      });
 
-    if (result.success) {
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: `Failed to delete ${employeeName}. Please try again.` }));
+        throw new Error(errorData.message || `Failed to delete ${employeeName}. Status: ${response.status}`);
+      }
+
       toast({
         title: "Employee Deleted",
         description: `${employeeName} has been successfully deleted.`,
         className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
       });
-      // Revalidation is handled by the server action, table should update
-    } else {
+      onEmployeeDeleted(); // Trigger callback to refetch data in parent component
+    } catch (error: any) {
       toast({
         title: "Error Deleting Employee",
-        description: `Failed to delete ${employeeName}. Please try again.`,
+        description: error.message || `Failed to delete ${employeeName}. Please try again.`,
         variant: "destructive",
       });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -202,9 +210,12 @@ export const columns: ColumnDef<Employee>[] = [
   },
    {
     id: "actions",
-    cell: ({ row }) => {
+    // The cell function now implicitly receives `onEmployeeDeleted` via the HOC in DataTable
+    cell: ({ row, ...rest }) => {
       const employee = row.original;
-      return <ActionsCell employeeId={employee.id} employeeName={employee.name} />;
+      // @ts-ignore - rest might include the injected prop, handle type more robustly if needed
+      const onEmployeeDeletedCallback = rest.onEmployeeDeleted;
+      return <ActionsCell employeeId={employee.id} employeeName={employee.name} onEmployeeDeleted={onEmployeeDeletedCallback} />;
     },
   },
 ];

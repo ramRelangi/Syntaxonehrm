@@ -2,10 +2,30 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Users, Briefcase, FileText, Calendar, BarChart2, UploadCloud } from "lucide-react";
 import Link from "next/link";
-import { getEmployees } from "@/modules/employees/actions"; // Updated import path
-import { getLeaveRequests } from "@/modules/leave/actions"; // Updated import path
 import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { Employee } from "@/modules/employees/types"; // Keep type import
+import type { LeaveRequest } from "@/modules/leave/types"; // Keep type import
+
+
+// Helper to fetch data from API routes
+async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
+    // Construct the full URL relative to the application's base URL
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; // Adjust port if needed
+    const fullUrl = `${baseUrl}${url}`;
+
+    try {
+        const response = await fetch(fullUrl, { cache: 'no-store', ...options }); // Use no-store for dynamic data
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return await response.json() as T;
+    } catch (error) {
+        console.error(`Error fetching ${fullUrl}:`, error);
+        throw error; // Re-throw to be caught by Suspense boundary or error component
+    }
+}
+
 
 // Async component to fetch metrics
 async function MetricCard({ title, icon: Icon, valuePromise, link, linkText, changeText }: { title: string, icon: React.ElementType, valuePromise: Promise<any>, link?: string, linkText?: string, changeText?: string }) {
@@ -28,21 +48,22 @@ async function MetricCard({ title, icon: Icon, valuePromise, link, linkText, cha
     );
 }
 
-// --- Async Data Fetching Functions ---
+// --- Async Data Fetching Functions via API ---
 async function getTotalEmployees() {
-    const employees = await getEmployees();
+    const employees = await fetchData<Employee[]>('/api/employees');
     return employees.length;
 }
 
 async function getUpcomingLeavesCount() {
     const today = new Date();
-    const upcomingRequests = await getLeaveRequests({ status: 'Approved' }); // Fetch approved requests
+    // Fetch approved requests via API
+    const upcomingRequests = await fetchData<LeaveRequest[]>('/api/leave/requests?status=Approved');
     // Filter for requests starting today or later
     const count = upcomingRequests.filter(req => new Date(req.startDate) >= today).length;
     return count;
 }
 
-// Mock functions for other metrics
+// Mock functions for other metrics (can be replaced with API calls later)
 async function getOpenPositionsCount() { await new Promise(res => setTimeout(res, 80)); return 8; }
 async function getPendingTasksCount() { await new Promise(res => setTimeout(res, 50)); return 3; }
 // --- End Data Fetching Functions ---

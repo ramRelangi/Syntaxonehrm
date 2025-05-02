@@ -18,6 +18,10 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+   // Make environment variables available on the client side
+   env: {
+    NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002', // Provide a default for local dev
+  },
 };
 
 export default nextConfig;

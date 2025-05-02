@@ -1,17 +1,16 @@
-'use server';
 
 /**
- * @fileOverview An AI agent for parsing resumes and extracting key information.
+ * @fileOverview Client-side function to call the resume parsing AI flow via API.
  *
- * - parseResume - A function that handles the resume parsing process.
+ * - parseResume - A function that sends the resume data to the API endpoint.
  * - ParseResumeInput - The input type for the parseResume function.
- * - ParseResumeOutput - The return type for the parseResume function.
+ * - ParseResumeOutput - The return type expected from the API.
  */
 
-import {ai} from '@/modules/ai/lib/ai-instance'; // Updated import path
-import {z} from 'genkit';
+import { z } from 'zod';
 
-const ParseResumeInputSchema = z.object({
+// Re-export schemas for use in the client component
+export const ParseResumeInputSchema = z.object({
   resumeDataUri: z
     .string()
     .describe(
@@ -20,7 +19,7 @@ const ParseResumeInputSchema = z.object({
 });
 export type ParseResumeInput = z.infer<typeof ParseResumeInputSchema>;
 
-const ParseResumeOutputSchema = z.object({
+export const ParseResumeOutputSchema = z.object({
   name: z.string().describe('The name of the candidate.'),
   contactDetails: z.object({
     email: z.string().email().optional().describe('The email address of the candidate.'),
@@ -32,56 +31,30 @@ const ParseResumeOutputSchema = z.object({
 });
 export type ParseResumeOutput = z.infer<typeof ParseResumeOutputSchema>;
 
+
 export async function parseResume(input: ParseResumeInput): Promise<ParseResumeOutput> {
-  return parseResumeFlow(input);
+    // Call the Genkit API endpoint
+    const response = await fetch('/api/ai/parseResumeFlow', { // Assuming endpoint follows /api/ai/[flowName] convention
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(input),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: `HTTP error! status: ${response.status}` }));
+        throw new Error(errorData.message || `Failed to parse resume. Status: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    // Optionally validate the result against the output schema
+    const validation = ParseResumeOutputSchema.safeParse(result);
+    if (!validation.success) {
+        console.error("API response validation error:", validation.error);
+        throw new Error("Received invalid data format from the resume parser.");
+    }
+
+    return validation.data;
 }
-
-const prompt = ai.definePrompt({
-  name: 'parseResumePrompt',
-  input: {
-    schema: z.object({
-      resumeDataUri: z
-        .string()
-        .describe(
-          "A resume file, as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
-        ),
-    }),
-  },
-  output: {
-    schema: z.object({
-      name: z.string().describe('The name of the candidate.'),
-      contactDetails: z.object({
-        email: z.string().email().optional().describe('The email address of the candidate.'),
-        phone: z.string().optional().describe('The phone number of the candidate.'),
-        linkedin: z.string().optional().describe('The LinkedIn profile URL of the candidate.'),
-      }).describe('The contact details of the candidate.'),
-      skills: z.array(z.string()).describe('A list of skills possessed by the candidate.'),
-      experience: z.array(z.string()).describe('A list of previous job experiences of the candidate.'),
-    }),
-  },
-  prompt: `You are an expert resume parser. Extract key information from the resume provided.
-
-Resume: {{media url=resumeDataUri}}
-
-Output the following information in JSON format:
-- name: The name of the candidate.
-- contactDetails: An object containing the email, phone, and LinkedIn profile URL of the candidate.
-- skills: A list of skills possessed by the candidate.
-- experience: A list of previous job experiences of the candidate.
-`,
-});
-
-const parseResumeFlow = ai.defineFlow<
-  typeof ParseResumeInputSchema,
-  typeof ParseResumeOutputSchema
->(
-  {
-    name: 'parseResumeFlow',
-    inputSchema: ParseResumeInputSchema,
-    outputSchema: ParseResumeOutputSchema,
-  },
-  async input => {
-    const {output} = await prompt(input);
-    return output!;
-  }
-);

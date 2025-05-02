@@ -4,32 +4,31 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
-import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types'; // Updated import path
-import type { Employee } from '@/modules/employees/types'; // Updated import path
+import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types';
+import type { Employee } from '@/modules/employees/types';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Label } from "@/components/ui/label"; // Keep Label import for consistency if used elsewhere
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, CalendarIcon, Save, UserPlus } from 'lucide-react';
-import { format, parseISO, isValid } from 'date-fns'; // Import isValid
+import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 interface EmployeeFormProps {
   employee?: Employee; // Optional employee data for editing
-  onSubmitAction: (data: EmployeeFormData) => Promise<{ success: boolean; employee?: Employee; errors?: any[] }>;
+  // onSubmitAction removed - component handles API calls directly
   submitButtonText?: string;
   formTitle: string;
   formDescription: string;
 }
 
 export function EmployeeForm({
-  employee,
-  onSubmitAction,
-  submitButtonText = "Save Employee",
+  employee, // If employee is passed, we are editing
+  submitButtonText, // Custom button text is still useful
   formTitle,
   formDescription,
 }: EmployeeFormProps) {
@@ -37,6 +36,9 @@ export function EmployeeForm({
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
   const [datePickerOpen, setDatePickerOpen] = React.useState(false);
+
+  const isEditMode = !!employee;
+  const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
 
   // Function to safely parse and format the date
   const getFormattedHireDate = (hireDate?: string): string => {
@@ -65,57 +67,65 @@ export function EmployeeForm({
     },
   });
 
-   // Watch the hireDate field to handle date picker updates
-   const hireDateValue = form.watch('hireDate');
+  // Watch the hireDate field to handle date picker updates
+  const hireDateValue = form.watch('hireDate');
 
 
   const onSubmit = async (data: EmployeeFormData) => {
     setIsLoading(true);
     console.log("Submitting form data:", data); // Debug: Log form data
-    const result = await onSubmitAction(data);
-    setIsLoading(false);
 
-    if (result.success && result.employee) {
-      toast({
-        title: `Employee ${employee ? 'Updated' : 'Added'}`,
-        description: `${result.employee.name} has been successfully ${employee ? 'updated' : 'added'}.`,
-        className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
-      });
-      // Redirect to the employee list or the updated employee's detail page
-      router.push('/employees');
-      router.refresh(); // Force refresh to ensure data table updates
-    } else {
-      console.error("Form submission error:", result.errors); // Debug: Log errors
-      // Handle validation errors from server action if any
-      if (result.errors) {
-         result.errors.forEach((err: any) => {
-             // Ensure err.path exists and is an array before joining
-             const fieldName = Array.isArray(err.path) ? err.path.join('.') : 'unknownField';
-             // Check if the field exists in the form before setting the error
-             if (fieldName in form.getValues()) {
-                 form.setError(fieldName as keyof EmployeeFormData, { message: err.message });
-             } else {
-                 console.warn(`Attempted to set error on non-existent field: ${fieldName}`);
-             }
-         });
-         toast({
-           title: "Validation Error",
-           description: "Please check the form fields.",
-           variant: "destructive",
-         });
-      } else {
-        toast({
-          title: `Error ${employee ? 'Updating' : 'Adding'} Employee`,
-          description: `An unexpected error occurred. Please try again.`,
-          variant: "destructive",
+    const apiUrl = isEditMode ? `/api/employees/${employee.id}` : '/api/employees';
+    const method = isEditMode ? 'PUT' : 'POST';
+
+    try {
+        const response = await fetch(apiUrl, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
         });
-      }
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: `Failed to ${isEditMode ? 'update' : 'add'} employee. Status: ${response.status}` }));
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json(); // Assuming API returns the added/updated employee
+
+        toast({
+            title: `Employee ${isEditMode ? 'Updated' : 'Added'}`,
+            description: `${result.name} has been successfully ${isEditMode ? 'updated' : 'added'}.`,
+            className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+        });
+
+        router.push('/employees'); // Redirect to the employee list
+        router.refresh(); // Force refresh on the client-side after redirect (important for data tables)
+
+    } catch (error: any) {
+        console.error("Form submission error:", error); // Debug: Log errors
+        toast({
+            title: `Error ${isEditMode ? 'Updating' : 'Adding'} Employee`,
+            description: error.message || "An unexpected error occurred. Please try again.",
+            variant: "destructive",
+        });
+        // Optionally map specific API errors back to form fields if possible
+        // Example: if (error.message.includes('email already exists')) { form.setError('email', ...) }
+        form.setError("root.serverError", { message: error.message || "An unexpected server error occurred." });
+
+    } finally {
+        setIsLoading(false);
     }
   };
 
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+         {/* Display root level errors */}
+         {form.formState.errors.root?.serverError && (
+          <FormMessage className="text-destructive text-center">
+            {form.formState.errors.root.serverError.message}
+          </FormMessage>
+        )}
         <div className="space-y-4">
           {/* Basic Information */}
           <FormField
@@ -287,9 +297,9 @@ export function EmployeeForm({
           <Button type="submit" disabled={isLoading}>
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (employee ? <Save className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />)
+            ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />)
             }
-            {isLoading ? 'Saving...' : submitButtonText}
+            {isLoading ? 'Saving...' : actualSubmitButtonText}
           </Button>
         </div>
       </form>

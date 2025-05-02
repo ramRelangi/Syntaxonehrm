@@ -1,50 +1,63 @@
 import { genkit } from "genkit";
 import { googleAI } from "@genkit-ai/googleai";
 import { NextRequest } from "next/server";
-import { defineFlow } from "genkit";
-import { z } from "zod";
+import { defineFlow, ai } from "genkit"; // Use ai from instance
+import { z } from 'zod';
 import { handleRequest } from "@genkit-ai/next";
+import { ParseResumeInputSchema, ParseResumeOutputSchema } from '@/modules/ai/flows/smart-resume-parser';
 
-import '@/modules/ai/flows/smart-resume-parser'; // Ensure your flows are imported from the module
+// Import ai instance - Ensure this initializes Genkit correctly
+import '@/modules/ai/lib/ai-instance';
 
-export const config = {
-  runtime: 'edge', // Specify the runtime environment
-};
+// Define the prompt directly in the API route file
+const parseResumePrompt = ai.definePrompt({
+  name: 'parseResumePrompt',
+  input: { schema: ParseResumeInputSchema },
+  output: { schema: ParseResumeOutputSchema },
+  prompt: `You are an expert resume parser. Extract key information from the resume provided.
 
-// If you haven't initialized Genkit globally (e.g., in ai-instance.ts), do it here.
-// Otherwise, make sure your global instance is configured correctly.
-// genkit({
-//   plugins: [
-//     googleAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY }),
-//   ],
-//   logLevel: 'debug',
-//   enableTracingAndMetrics: true,
-// });
+Resume: {{media url=resumeDataUri}}
 
+Output the following information in JSON format:
+- name: The name of the candidate.
+- contactDetails: An object containing the email, phone, and LinkedIn profile URL of the candidate. If a field is not found, omit it or set it to null.
+- skills: A list of skills possessed by the candidate. If none are found, return an empty array.
+- experience: A list of previous job experiences (company, title, duration if available) of the candidate. Summarize each role briefly. If none are found, return an empty array.
+`,
+});
 
-// Example flow definition (if not defined elsewhere)
-// const menuSuggestionFlow = defineFlow(
-//   {
-//     name: 'menuSuggestionFlow',
-//     inputSchema: z.string(),
-//     outputSchema: z.string(),
-//   },
-//   async (subject) => {
-//     // Your flow logic here...
-//     return `Suggestions for ${subject}`;
-//   }
-// );
+// Define the flow using the prompt
+const parseResumeFlow = ai.defineFlow(
+  {
+    name: 'parseResumeFlow', // This name will be part of the URL: /api/ai/parseResumeFlow
+    inputSchema: ParseResumeInputSchema,
+    outputSchema: ParseResumeOutputSchema,
+  },
+  async (input) => {
+    const { output } = await parseResumePrompt(input);
+    if (!output) {
+      throw new Error("Resume parsing failed to produce output.");
+    }
+    return output;
+  }
+);
 
-
-// Export the flows you want to expose via the API
-// export { menuSuggestionFlow };
-
+// Export the flow for handleRequest
+export { parseResumeFlow };
 
 // Define the POST handler using handleRequest
 export async function POST(req: NextRequest) {
-  const result = await handleRequest({req});
-  if (!result) {
-    return new Response(null, { status: 404 });
-  }
-  return new Response(result.body, result);
+    console.log(`Handling POST request for: ${req.nextUrl.pathname}`); // Log incoming request path
+    const result = await handleRequest({ req });
+    if (!result) {
+        console.error(`No result from handleRequest for: ${req.nextUrl.pathname}`);
+        return new Response(JSON.stringify({ error: 'Flow not found or invalid request' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }
+    console.log(`handleRequest result status: ${result.status}`);
+    return new Response(result.body, result);
 }
+
+// Optional: Add GET handler for testing or listing flows if needed
+// export async function GET(req: NextRequest) {
+//    return NextResponse.json({ message: "Genkit AI endpoint. Use POST for flows." });
+// }

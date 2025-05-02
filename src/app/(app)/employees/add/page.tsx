@@ -1,9 +1,11 @@
+"use client"; // AddEmployeePage needs to be a client component to use the form
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { EmployeeForm } from '@/modules/employees/components/employee-form'; // Updated import path
-import { addEmployee } from '@/modules/employees/actions'; // Updated import path
+import { EmployeeForm } from '@/modules/employees/components/employee-form';
 import { UserPlus } from "lucide-react";
 
 export default function AddEmployeePage() {
+
   return (
     <div className="flex flex-col gap-6">
        <div className="flex items-center justify-between">
@@ -17,8 +19,8 @@ export default function AddEmployeePage() {
           <CardDescription>Fill in the details for the new employee.</CardDescription>
         </CardHeader>
         <CardContent>
+          {/* EmployeeForm handles its own API call */}
           <EmployeeForm
-             onSubmitAction={addEmployee}
              formTitle="Add New Employee"
              formDescription="Enter the employee's information below."
              submitButtonText="Add Employee"

@@ -1,7 +1,7 @@
-'use server';
 
-import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus } from '@/modules/leave/types'; // Updated import
-import { leaveRequestSchema } from '@/modules/leave/types'; // Updated import
+
+import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus } from '@/modules/leave/types';
+import { leaveRequestSchema } from '@/modules/leave/types';
 import {
   getAllLeaveRequests as dbGetAllLeaveRequests,
   getLeaveRequestById as dbGetLeaveRequestById,
@@ -14,10 +14,12 @@ import {
   updateLeaveType as dbUpdateLeaveType,
   deleteLeaveType as dbDeleteLeaveType,
   getLeaveBalancesForEmployee as dbGetLeaveBalances,
-} from '@/modules/leave/lib/mock-db'; // Updated import
+} from '@/modules/leave/lib/mock-db';
 import { z } from 'zod';
-import { revalidatePath } from 'next/cache';
+// import { revalidatePath } from 'next/cache'; // No longer needed here
 import { differenceInDays } from 'date-fns';
+
+// --- These functions are now intended to be called by API routes ---
 
 // --- Leave Request Actions ---
 
@@ -46,8 +48,8 @@ export async function addLeaveRequest(formData: LeaveRequestFormData): Promise<{
   // }
 
   try {
-    const newRequest = dbAddLeaveRequest(validation.data);
-    revalidatePath('/leave'); // Revalidate the main leave page
+    const newRequest = await dbAddLeaveRequest(validation.data); // Await the async addLeaveRequest
+    // revalidatePath('/leave'); // Revalidation handled by client-side cache invalidation
     // Optionally revalidate employee-specific views if they exist
     return { success: true, request: newRequest };
   } catch (error: any) {
@@ -71,7 +73,7 @@ export async function updateLeaveRequestStatus(
   try {
     const updatedRequest = dbUpdateLeaveRequest(id, { status, comments, approverId });
     if (updatedRequest) {
-      revalidatePath('/leave'); // Revalidate list
+      // revalidatePath('/leave'); // Revalidate list
       // Revalidate detail page if exists: revalidatePath(`/leave/${id}`);
       return { success: true, request: updatedRequest };
     } else {
@@ -79,7 +81,7 @@ export async function updateLeaveRequestStatus(
     }
   } catch (error) {
     console.error("Error updating leave request status:", error);
-    return { success: false };
+    return { success: false }; // Consider adding error message detail here
   }
 }
 
@@ -94,7 +96,7 @@ export async function cancelLeaveRequest(id: string): Promise<{ success: boolean
         if (request?.status === 'Pending') {
              const updated = dbUpdateLeaveRequest(id, { status: 'Cancelled' });
              if (updated) {
-                revalidatePath('/leave');
+                // revalidatePath('/leave');
                 return { success: true };
              }
         }
@@ -102,7 +104,7 @@ export async function cancelLeaveRequest(id: string): Promise<{ success: boolean
         return { success: false };
     } catch (error) {
         console.error("Error cancelling leave request:", error);
-        return { success: false };
+        return { success: false }; // Consider adding error message detail here
     }
 }
 
@@ -121,12 +123,12 @@ export async function addLeaveTypeAction(formData: Omit<LeaveType, 'id'>): Promi
   }
 
   try {
-    const newLeaveType = dbAddLeaveType(formData);
-    revalidatePath('/leave'); // Revalidate page where types are displayed/managed
+    const newLeaveType = await dbAddLeaveType(formData); // Await async addLeaveType
+    // revalidatePath('/leave'); // Revalidate page where types are displayed/managed
     return { success: true, leaveType: newLeaveType };
   } catch (error) {
     console.error("Error adding leave type:", error);
-    return { success: false };
+    return { success: false }; // Consider adding error message detail here
   }
 }
 
@@ -140,14 +142,14 @@ export async function updateLeaveTypeAction(id: string, formData: Partial<Omit<L
   try {
     const updatedLeaveType = dbUpdateLeaveType(id, formData);
     if (updatedLeaveType) {
-      revalidatePath('/leave');
+      // revalidatePath('/leave');
       return { success: true, leaveType: updatedLeaveType };
     } else {
       return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Leave type not found' }] };
     }
   } catch (error) {
     console.error("Error updating leave type:", error);
-    return { success: false };
+    return { success: false }; // Consider adding error message detail here
   }
 }
 
@@ -157,14 +159,14 @@ export async function deleteLeaveTypeAction(id: string): Promise<{ success: bool
     // Consider adding checks here: can't delete if requests use this type?
     const deleted = dbDeleteLeaveType(id);
     if (deleted) {
-      revalidatePath('/leave');
+      // revalidatePath('/leave');
       return { success: true };
     } else {
       return { success: false }; // Not found or couldn't delete
     }
   } catch (error) {
     console.error("Error deleting leave type:", error);
-    return { success: false };
+    return { success: false }; // Consider adding error message detail here
   }
 }
 

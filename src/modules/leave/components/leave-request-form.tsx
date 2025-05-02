@@ -4,10 +4,10 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
-import { leaveRequestSchema, type LeaveRequestFormData, type LeaveType } from '@/modules/leave/types'; // Updated import path
+import { leaveRequestSchema, type LeaveRequestFormData, type LeaveType } from '@/modules/leave/types';
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input"; // Not used directly, but kept for consistency
-import { Label } from "@/components/ui/label";
+// import { Input } from "@/components/ui/input"; // Not used directly
+import { Label } from "@/components/ui/label"; // Keep for consistency if used elsewhere
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -21,15 +21,16 @@ import { Textarea } from '@/components/ui/textarea';
 interface LeaveRequestFormProps {
   employeeId: string; // Assume current user's employee ID is passed
   leaveTypes: LeaveType[];
-  onSubmitAction: (data: LeaveRequestFormData) => Promise<{ success: boolean; request?: any; errors?: any[] }>;
+  // onSubmitAction removed, replaced by onSuccess callback
+  onSuccess: () => void; // Callback function on successful submission
 }
 
 export function LeaveRequestForm({
   employeeId,
   leaveTypes,
-  onSubmitAction,
+  onSuccess, // Use the onSuccess callback
 }: LeaveRequestFormProps) {
-  const router = useRouter();
+  const router = useRouter(); // Keep router if needed for other purposes, but not for refresh
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
   const [startDatePickerOpen, setStartDatePickerOpen] = React.useState(false);
@@ -65,44 +66,40 @@ export function LeaveRequestForm({
 
   const onSubmit = async (data: LeaveRequestFormData) => {
     setIsLoading(true);
-    console.log("Submitting leave request:", data);
-    const result = await onSubmitAction(data);
-    setIsLoading(false);
+    console.log("Submitting leave request via API:", data);
 
-    if (result.success) {
-      toast({
-        title: "Leave Request Submitted",
-        description: `Your request for ${result.request?.leaveTypeName || 'leave'} has been submitted.`,
-        className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
-      });
-      form.reset(); // Reset form on success
-      router.refresh(); // Refresh the page to show the updated list
-      // Consider closing a modal if the form is in one: router.back() or similar
-    } else {
-      console.error("Leave request submission error:", result.errors);
-      if (result.errors) {
-         result.errors.forEach((err: any) => {
-             const fieldName = Array.isArray(err.path) ? err.path.join('.') : 'unknownField';
-             if (fieldName && fieldName in form.getValues()) {
-                 form.setError(fieldName as keyof LeaveRequestFormData, { message: err.message });
-             } else {
-                 // Show general error if path is missing or not a field
-                 form.setError("root.serverError", { message: err.message });
-             }
-         });
-         toast({
-           title: "Validation Error",
-           description: "Please check the form fields.",
-           variant: "destructive",
-         });
-      } else {
-        toast({
-          title: "Error Submitting Request",
-          description: "An unexpected error occurred. Please try again.",
-          variant: "destructive",
+    try {
+        const response = await fetch('/api/leave/requests', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
         });
-         form.setError("root.serverError", { message: "An unexpected server error occurred." });
-      }
+
+        const result = await response.json(); // Always try to parse response
+
+        if (!response.ok) {
+            throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
+        }
+
+        toast({
+            title: "Leave Request Submitted",
+            description: `Your request has been submitted successfully.`, // Use generic success message
+            className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+        });
+        form.reset(); // Reset form on success
+        onSuccess(); // Call the success callback
+
+    } catch (error: any) {
+        console.error("Leave request submission error:", error);
+        toast({
+            title: "Error Submitting Request",
+            description: error.message || "An unexpected error occurred. Please try again.",
+            variant: "destructive",
+        });
+        // Optionally map specific API errors back to form fields if possible
+        form.setError("root.serverError", { message: error.message || "An unexpected server error occurred." });
+    } finally {
+        setIsLoading(false);
     }
   };
 

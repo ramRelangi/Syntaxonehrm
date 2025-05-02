@@ -35,33 +35,52 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ChevronDown, Search, Filter } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import type { Employee } from "@/modules/employees/types"; // Updated import path
+import type { Employee } from "@/modules/employees/types";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
+  onEmployeeDeleted: () => void; // Callback for when an employee is deleted
 }
 
-export function EmployeeDataTable<TData extends Employee, TValue>({ // Ensure TData extends Employee
+export function EmployeeDataTable<TData extends Employee, TValue>({
   columns,
   data,
+  onEmployeeDeleted, // Receive callback
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
-   const [rowSelection, setRowSelection] = React.useState({}); // If needed for bulk actions
+  const [rowSelection, setRowSelection] = React.useState({}); // If needed for bulk actions
+
+  // Pass the onEmployeeDeleted callback down to the columns definition if needed,
+  // or handle it within the ActionsCell if actions are defined directly here.
+  // For this example, we'll assume the columns definition is updated separately
+  // or the ActionsCell component handles the API call and callback trigger.
+  const tableColumns = React.useMemo(() => columns.map(col => {
+      if (col.id === 'actions' && col.cell) {
+          // Inject the callback into the actions cell component's props
+          const OriginalCell = col.cell;
+          return {
+              ...col,
+              cell: (props: any) => <OriginalCell {...props} onEmployeeDeleted={onEmployeeDeleted} />
+          };
+      }
+      return col;
+  }), [columns, onEmployeeDeleted]);
+
 
   const table = useReactTable({
     data,
-    columns,
+    columns: tableColumns, // Use the potentially modified columns
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     onSortingChange: setSorting,
     getSortedRowModel: getSortedRowModel(),
     onColumnFiltersChange: setColumnFilters,
     getFilteredRowModel: getFilteredRowModel(),
-     onColumnVisibilityChange: setColumnVisibility,
-     onRowSelectionChange: setRowSelection,
+    onColumnVisibilityChange: setColumnVisibility,
+    onRowSelectionChange: setRowSelection,
     state: {
       sorting,
       columnFilters,
@@ -223,7 +242,7 @@ export function EmployeeDataTable<TData extends Employee, TValue>({ // Ensure TD
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={columns.length}
+                  colSpan={tableColumns.length} // Use tableColumns length
                   className="h-24 text-center"
                 >
                   No results found.

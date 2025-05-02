@@ -1,5 +1,5 @@
 import type { LeaveRequest, LeaveType, LeaveRequestStatus } from '@/modules/leave/types'; // Updated import
-import { getEmployees } from '@/modules/employees/actions'; // Updated import to use employee module action
+import { getEmployees } from '@/modules/employees/actions'; // Correct function name
 
 // --- Mock Leave Types ---
 let leaveTypes: LeaveType[] = [
@@ -22,8 +22,8 @@ export function getLeaveTypeById(id: string): LeaveType | undefined {
    return type ? JSON.parse(JSON.stringify(type)) : undefined;
 }
 
-// Function to add a new leave type
-export function addLeaveType(typeData: Omit<LeaveType, 'id'>): LeaveType {
+// Function to add a new leave type - Make it async
+export async function addLeaveType(typeData: Omit<LeaveType, 'id'>): Promise<LeaveType> {
   const newId = `lt-${String(leaveTypes.length + 1).padStart(3, '0')}`;
   const newType: LeaveType = {
     ...typeData,
@@ -35,7 +35,7 @@ export function addLeaveType(typeData: Omit<LeaveType, 'id'>): LeaveType {
   };
   leaveTypes.push(newType);
   // When adding a new type, potentially initialize balances for existing employees?
-  initializeBalancesForNewType(newId, newType.defaultBalance ?? 0); // Pass defaultBalance
+  await initializeBalancesForNewType(newId, newType.defaultBalance ?? 0); // Await initialization
   return JSON.parse(JSON.stringify(newType));
 }
 
@@ -245,9 +245,19 @@ async function initializeEmployeeBalances(employeeId: string) {
 }
 
 // Initialize for existing employees asynchronously
+let balancesInitialized = false; // Flag to prevent multiple initializations
 async function initializeAllBalances() {
-  const allEmployees = await fetchAllEmployees();
-  allEmployees.forEach(emp => initializeEmployeeBalances(emp.id));
+    if (balancesInitialized) return;
+    balancesInitialized = true; // Set flag immediately
+    console.log("Initializing leave balances...");
+    try {
+        const allEmployees = await fetchAllEmployees();
+        allEmployees.forEach(emp => initializeEmployeeBalances(emp.id)); // This pushes to the array directly
+        console.log("Leave balances initialized.");
+    } catch (error) {
+        console.error("Error initializing leave balances:", error);
+        balancesInitialized = false; // Reset flag on error
+    }
 }
 initializeAllBalances(); // Call async initialization
 
@@ -265,7 +275,14 @@ async function initializeBalancesForNewType(leaveTypeId: string, defaultBalance:
 
 export async function getLeaveBalancesForEmployee(employeeId: string) {
     // Ensure balances are initialized for the employee if they somehow weren't
-    await initializeEmployeeBalances(employeeId); // Make sure initialization is awaited
+    if (!balancesInitialized) {
+       console.log(`Balances not yet initialized, attempting init for ${employeeId}`);
+       await initializeAllBalances(); // Wait for global init if not done
+    } else {
+       // If already initialized globally, just check for this specific employee
+       await initializeEmployeeBalances(employeeId);
+    }
+
     return JSON.parse(JSON.stringify(leaveBalances.filter(bal => bal.employeeId === employeeId)));
 }
 
@@ -276,16 +293,20 @@ function adjustLeaveBalance(employeeId: string, leaveTypeId: string, amount: num
         leaveBalances[balanceIndex].balance += amount;
         console.log(`Adjusted balance for ${employeeId}, type ${leaveTypeId} by ${amount}. New balance: ${leaveBalances[balanceIndex].balance}`);
     } else {
-        // If balance record doesn't exist, create it (shouldn't happen with initialization)
+        // If balance record doesn't exist, create it (should happen only if init failed or race condition)
+        console.warn(`Balance record for ${employeeId}, type ${leaveTypeId} not found. Creating.`);
         const leaveType = getLeaveTypeById(leaveTypeId);
         leaveBalances.push({ employeeId, leaveTypeId, balance: (leaveType?.defaultBalance ?? 0) + amount });
-        console.log(`Initialized and adjusted balance for ${employeeId}, type ${leaveTypeId} by ${amount}.`);
     }
 }
 
 // Note: Functions for accrual logic (e.g., running a monthly job) would be needed.
 // Placeholder for accrual - in real app, run this periodically
 async function runMonthlyAccrual() {
+  if (!balancesInitialized) {
+      console.log("Waiting for balances to initialize before running accrual...");
+      await initializeAllBalances(); // Ensure balances are ready
+  }
   console.log("Running monthly leave accrual...");
   const allEmployees = await fetchAllEmployees();
   const currentLeaveTypes = getAllLeaveTypes();
@@ -296,6 +317,7 @@ async function runMonthlyAccrual() {
       }
     });
   });
+  console.log("Monthly accrual complete.");
 }
-// Example: Simulate running accrual once on load (REMOVE in real app)
-// runMonthlyAccrual();
+// Example: Simulate running accrual after a delay (more realistic than immediate)
+// setTimeout(runMonthlyAccrual, 5000); // Run after 5 seconds

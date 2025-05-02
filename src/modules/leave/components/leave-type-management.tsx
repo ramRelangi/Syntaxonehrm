@@ -4,16 +4,12 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import type { LeaveType } from '@/modules/leave/types'; // Updated import path
-import {
-  addLeaveTypeAction,
-  updateLeaveTypeAction,
-  deleteLeaveTypeAction,
-} from '@/modules/leave/actions'; // Updated import path
+import type { LeaveType } from '@/modules/leave/types';
+// import { addLeaveTypeAction, updateLeaveTypeAction, deleteLeaveTypeAction } from '@/modules/leave/actions'; // Use API calls
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Label } from '@/components/ui/label'; // Keep for consistency
 import { Switch } from '@/components/ui/switch';
 import {
   Table,
@@ -60,7 +56,6 @@ const leaveTypeSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
   description: z.string().optional(),
   requiresApproval: z.boolean().default(true),
-  // Add other fields like defaultBalance, accrualRate if they are configurable
   defaultBalance: z.coerce.number().min(0, "Default balance cannot be negative").optional().default(0),
   accrualRate: z.coerce.number().min(0, "Accrual rate cannot be negative").optional().default(0),
 });
@@ -68,12 +63,14 @@ const leaveTypeSchema = z.object({
 type LeaveTypeFormData = z.infer<typeof leaveTypeSchema>;
 
 interface LeaveTypeManagementProps {
-  leaveTypes: LeaveType[];
+  initialLeaveTypes: LeaveType[];
+  onUpdate: () => void; // Callback function on successful update/add/delete
 }
 
-export function LeaveTypeManagement({ leaveTypes: initialLeaveTypes }: LeaveTypeManagementProps) {
+export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeManagementProps) {
   const { toast } = useToast();
-  const [leaveTypes, setLeaveTypes] = React.useState(initialLeaveTypes); // Local state to reflect updates
+  // Use initialLeaveTypes prop directly, parent component handles updates
+  const leaveTypes = initialLeaveTypes;
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState<Record<string, boolean>>({});
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
@@ -116,93 +113,83 @@ export function LeaveTypeManagement({ leaveTypes: initialLeaveTypes }: LeaveType
 
   const onSubmit = async (data: LeaveTypeFormData) => {
     setIsSubmitting(true);
-    let result;
+    const isEditMode = !!editingLeaveType;
+    const apiUrl = isEditMode ? `/api/leave/types/${editingLeaveType.id}` : '/api/leave/types';
+    const method = isEditMode ? 'PUT' : 'POST';
+
+    // Remove id from data if adding
+    const payload = { ...data };
+    if (!isEditMode) {
+      delete payload.id;
+    }
 
     try {
-        if (editingLeaveType) {
-        // Update existing leave type
-        result = await updateLeaveTypeAction(editingLeaveType.id, data);
-        } else {
-        // Add new leave type
-        result = await addLeaveTypeAction(data);
+        const response = await fetch(apiUrl, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        const result = await response.json(); // Always try to parse
+
+        if (!response.ok) {
+             throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
         }
 
-        if (result.success && result.leaveType) {
         toast({
-            title: `Leave Type ${editingLeaveType ? 'Updated' : 'Added'}`,
-            description: `${result.leaveType.name} has been successfully ${editingLeaveType ? 'updated' : 'added'}.`,
+            title: `Leave Type ${isEditMode ? 'Updated' : 'Added'}`,
+            description: `${result.name} has been successfully ${isEditMode ? 'updated' : 'added'}.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
-        // Update local state optimistically or refetch (simple update here)
-        setLeaveTypes(prev => {
-             if (editingLeaveType) {
-                 return prev.map(lt => lt.id === result.leaveType!.id ? result.leaveType! : lt);
-             } else {
-                 return [...prev, result.leaveType!];
-             }
-         });
 
         setIsDialogOpen(false); // Close dialog on success
         setEditingLeaveType(null); // Clear editing state
         form.reset(); // Reset form
-        } else {
-         console.error("Error:", result.errors);
+        onUpdate(); // Trigger refetch in parent
+
+    } catch (error: any) {
+        console.error("Submit error:", error);
         toast({
-            title: `Error ${editingLeaveType ? 'Updating' : 'Adding'} Leave Type`,
-            description: result.errors?.[0]?.message || "An unexpected error occurred.",
+            title: `Error ${isEditMode ? 'Updating' : 'Adding'} Leave Type`,
+            description: error.message || "An unexpected error occurred.",
             variant: "destructive",
         });
-         // Handle specific field errors if needed
-         result.errors?.forEach((err: any) => {
-             const fieldName = Array.isArray(err.path) ? err.path.join('.') : 'unknownField';
-             if (fieldName && fieldName in form.getValues()) {
-                 form.setError(fieldName as keyof LeaveTypeFormData, { message: err.message });
-             } else {
-                  form.setError("root.serverError", { message: err.message || 'Server error' });
-             }
-         });
-        }
-    } catch (error) {
-         console.error("Submit error:", error);
-         toast({
-            title: "Action Failed",
-            description: "An unexpected error occurred. Please try again.",
-            variant: "destructive",
-         });
-          form.setError("root.serverError", { message: "An unexpected server error occurred." });
+        form.setError("root.serverError", { message: error.message || "An unexpected server error occurred." });
     } finally {
-      setIsSubmitting(false);
+        setIsSubmitting(false);
     }
   };
 
   const handleDelete = async (id: string, name: string) => {
     setIsDeleting(prev => ({ ...prev, [id]: true }));
     try {
-        const result = await deleteLeaveTypeAction(id);
-        if (result.success) {
-            toast({
-                title: "Leave Type Deleted",
-                description: `${name} has been successfully deleted.`,
-                className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
-            });
-            // Update local state
-            setLeaveTypes(prev => prev.filter(lt => lt.id !== id));
-        } else {
-            toast({
-                title: "Error Deleting Leave Type",
-                description: `Failed to delete ${name}. It might be in use by leave requests or balances.`,
-                variant: "destructive",
-            });
+        const response = await fetch(`/api/leave/types/${id}`, {
+            method: 'DELETE',
+        });
+
+        const result = await response.json(); // Attempt to parse response
+
+        if (!response.ok) {
+            throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
         }
-    } catch (error) {
+
+        toast({
+            title: "Leave Type Deleted",
+            description: `${name} has been successfully deleted.`,
+            className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+        });
+        onUpdate(); // Trigger refetch in parent
+
+    } catch (error: any) {
         console.error("Delete error:", error);
          toast({
             title: "Deletion Failed",
-            description: "An unexpected error occurred. Please try again.",
+            description: error.message || "An unexpected error occurred. Please try again.",
             variant: "destructive",
         });
     } finally {
         setIsDeleting(prev => ({ ...prev, [id]: false }));
+        // Ensure the alert dialog closes even on error if needed, managed by AlertDialog itself typically.
     }
   };
 
@@ -386,7 +373,7 @@ export function LeaveTypeManagement({ leaveTypes: initialLeaveTypes }: LeaveType
                      <AlertDialog>
                        <AlertDialogTrigger asChild>
                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={isDeleting[type.id]}>
-                             <Trash2 className="h-4 w-4" />
+                             {isDeleting[type.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                              <span className="sr-only">Delete</span>
                            </Button>
                        </AlertDialogTrigger>

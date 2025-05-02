@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import type { LeaveRequest, LeaveRequestStatus, LeaveType } from "@/modules/leave/types"; // Updated import
+import type { LeaveRequest, LeaveRequestStatus, LeaveType } from "@/modules/leave/types";
 import { format, parseISO } from 'date-fns';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { updateLeaveRequestStatus, cancelLeaveRequest } from "@/modules/leave/actions"; // Updated import path
+// import { updateLeaveRequestStatus, cancelLeaveRequest } from '@/modules/leave/actions'; // Use API calls
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 
@@ -61,9 +61,10 @@ interface LeaveRequestListProps {
   leaveTypes: LeaveType[]; // Add leaveTypes prop
   isAdminView?: boolean;
   currentUserId?: string; // To check if user can cancel their own request
+  onUpdate: () => void; // Callback function on successful update/cancel
 }
 
-export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, currentUserId }: LeaveRequestListProps) {
+export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, currentUserId, onUpdate }: LeaveRequestListProps) {
   const { toast } = useToast();
   const [actionLoading, setActionLoading] = React.useState<Record<string, boolean>>({}); // Track loading state per request ID
 
@@ -76,43 +77,68 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
 
   const handleStatusUpdate = async (id: string, status: 'Approved' | 'Rejected') => {
      setActionLoading(prev => ({ ...prev, [id]: true }));
-     // Add comments input if needed
-     const result = await updateLeaveRequestStatus(id, status, status === 'Rejected' ? 'Rejected by admin' : 'Approved by admin' /*, approverId */);
-     setActionLoading(prev => ({ ...prev, [id]: false }));
+     // Add comments input if needed later
+     const comments = status === 'Rejected' ? 'Rejected by admin' : 'Approved by admin';
 
-     if (result.success) {
-        toast({
-            title: `Request ${status}`,
-            description: `Leave request ${result.request?.id} has been ${status.toLowerCase()}.`,
-            className: status === 'Approved' ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100" : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
-        });
-        // Revalidation should happen via server action revalidatePath
-     } else {
+     try {
+         const response = await fetch(`/api/leave/requests/${id}/status`, {
+             method: 'PATCH',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ status, comments /*, approverId from session */ }),
+         });
+
+         const result = await response.json(); // Always try to parse
+
+         if (!response.ok) {
+             throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
+         }
+
+         toast({
+             title: `Request ${status}`,
+             description: `Leave request has been ${status.toLowerCase()}.`,
+             className: status === 'Approved' ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100" : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
+         });
+         onUpdate(); // Trigger refetch in parent
+
+     } catch (error: any) {
          toast({
             title: `Error Updating Status`,
-            description: `Failed to update request ${id}. ${result.errors?.[0]?.message || ''}`,
+            description: error.message || `Failed to update request ${id}.`,
             variant: "destructive",
          });
+     } finally {
+         setActionLoading(prev => ({ ...prev, [id]: false }));
      }
   };
 
-  const handleCancel = async (id: string, employeeName: string) => {
+  const handleCancel = async (id: string) => {
      setActionLoading(prev => ({ ...prev, [id]: true }));
-     const result = await cancelLeaveRequest(id);
-     setActionLoading(prev => ({ ...prev, [id]: false }));
+     try {
+         const response = await fetch(`/api/leave/requests/${id}/cancel`, {
+             method: 'PATCH',
+         });
 
-     if (result.success) {
-        toast({
-            title: "Request Cancelled",
-            description: `Your leave request has been cancelled.`,
+         const result = await response.json(); // Always try to parse
+
+         if (!response.ok) {
+             throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
+         }
+
+         toast({
+             title: "Request Cancelled",
+             description: `Your leave request has been cancelled.`,
              className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:yellow-green-100", // Use a warning/info color
-        });
-     } else {
+         });
+         onUpdate(); // Trigger refetch in parent
+
+     } catch (error: any) {
          toast({
             title: "Error Cancelling Request",
-            description: `Could not cancel the request. It might have already been processed.`,
+            description: error.message || `Could not cancel the request. It might have already been processed.`,
             variant: "destructive",
          });
+     } finally {
+         setActionLoading(prev => ({ ...prev, [id]: false }));
      }
   };
 
@@ -216,7 +242,7 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
                                                 <AlertDialogCancel disabled={actionLoading[req.id]}>Back</AlertDialogCancel>
-                                                <AlertDialogAction onClick={() => handleCancel(req.id, req.employeeName)} disabled={actionLoading[req.id]} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                                <AlertDialogAction onClick={() => handleCancel(req.id)} disabled={actionLoading[req.id]} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                                                     Yes, Cancel Request
                                                 </AlertDialogAction>
                                             </AlertDialogFooter>
@@ -224,9 +250,10 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                                     </AlertDialog>
                                 )}
                                 {/* Add a View Details Button/Link if needed */}
-                                {/* <Button variant="ghost" size="icon" asChild>
-                                    <Link href={`/leave/${req.id}`}><Eye className="h-4 w-4"/></Link>
-                                </Button> */}
+                                {/* <Tooltip>
+                                    <TooltipTrigger asChild><Button variant="ghost" size="icon"><Eye className="h-4 w-4"/></Button></TooltipTrigger>
+                                    <TooltipContent><p>View Details (Not Implemented)</p></TooltipContent>
+                                </Tooltip> */}
                             </TableCell>
                          </TableRow>
                      ))

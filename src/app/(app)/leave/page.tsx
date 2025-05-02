@@ -1,22 +1,101 @@
+"use client"; // Make LeavePage a client component
+
+import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar, PlusCircle, ListChecks, Settings } from "lucide-react";
-import { LeaveRequestForm } from "@/modules/leave/components/leave-request-form"; // Updated import
-import { LeaveRequestList } from "@/modules/leave/components/leave-request-list"; // Updated import
-import { getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances, addLeaveRequest } from "@/modules/leave/actions"; // Updated import
+import { LeaveRequestForm } from "@/modules/leave/components/leave-request-form";
+import { LeaveRequestList } from "@/modules/leave/components/leave-request-list";
 import { Badge } from "@/components/ui/badge";
-import { LeaveTypeManagement } from "@/modules/leave/components/leave-type-management"; // Updated import path
+import { LeaveTypeManagement } from "@/modules/leave/components/leave-type-management";
+import { useToast } from "@/hooks/use-toast";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { LeaveType, LeaveRequest, LeaveBalance } from "@/modules/leave/types";
 
 // Mock current user ID and admin status - replace with actual auth context
 const MOCK_USER_ID = "emp-001"; // Example: Alice Wonderland
 const MOCK_IS_ADMIN = true; // Example: Assume user is admin for testing
 
-export default async function LeavePage() {
-  // Fetch data using server actions
-  const leaveTypes = await getLeaveTypes();
-  const allRequests = await getLeaveRequests(); // Fetch all for admin view
-  const myRequests = await getLeaveRequests({ employeeId: MOCK_USER_ID }); // Filter for user view
-  const myBalances = await getEmployeeLeaveBalances(MOCK_USER_ID); // Fetch balances for the current user
+// Helper to fetch data from API routes
+async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '/';
+    const fullUrl = `${baseUrl.endsWith('/') ? baseUrl : baseUrl + '/'}${url.startsWith('/') ? url.substring(1) : url}`;
+    try {
+        const response = await fetch(fullUrl, { cache: 'no-store', ...options });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: `HTTP error! status: ${response.status}` }));
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+        }
+        return await response.json() as T;
+    } catch (error) {
+        console.error(`Error fetching ${fullUrl}:`, error);
+        throw error;
+    }
+}
+
+export default function LeavePage() {
+  const { toast } = useToast();
+  const [leaveTypes, setLeaveTypes] = React.useState<LeaveType[]>([]);
+  const [allRequests, setAllRequests] = React.useState<LeaveRequest[]>([]);
+  const [myRequests, setMyRequests] = React.useState<LeaveRequest[]>([]);
+  const [myBalances, setMyBalances] = React.useState<LeaveBalance[]>([]);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [activeTab, setActiveTab] = React.useState('request'); // Manage active tab
+
+   // Function to refetch all necessary data
+  const refetchData = React.useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [typesData, allReqData, myReqData, balancesData] = await Promise.all([
+        fetchData<LeaveType[]>('api/leave/types'),
+        MOCK_IS_ADMIN ? fetchData<LeaveRequest[]>('api/leave/requests') : Promise.resolve([]), // Only fetch all if admin
+        fetchData<LeaveRequest[]>(`api/leave/requests?employeeId=${MOCK_USER_ID}`),
+        fetchData<LeaveBalance[]>(`api/leave/balances/${MOCK_USER_ID}`),
+      ]);
+      setLeaveTypes(typesData);
+      setAllRequests(allReqData);
+      setMyRequests(myReqData);
+      setMyBalances(balancesData);
+    } catch (err) {
+      setError("Failed to load leave management data. Please try refreshing.");
+      toast({
+        title: "Error Loading Data",
+        description: "Could not fetch necessary leave information.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [toast]); // Add toast to dependency array
+
+  // Fetch data on mount
+  React.useEffect(() => {
+    refetchData();
+  }, [refetchData]);
+
+   // Callbacks for components to trigger refetch
+   const handleLeaveRequestSubmitted = () => {
+     refetchData(); // Refetch all data
+     setActiveTab('my-requests'); // Switch to "My Requests" tab
+   };
+
+   const handleLeaveRequestUpdated = () => {
+     refetchData(); // Refetch all data
+   };
+
+    const handleLeaveTypeUpdated = () => {
+     refetchData(); // Refetch all data
+   };
+
+   // Derive leave type name map
+   const leaveTypeNameMap = React.useMemo(() => {
+     const map = new Map<string, string>();
+     leaveTypes.forEach(lt => map.set(lt.id, lt.name));
+     return map;
+   }, [leaveTypes]);
+
 
   return (
     <div className="flex flex-col gap-6">
@@ -31,16 +110,17 @@ export default async function LeavePage() {
             <CardDescription>Your current available leave balances.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-4">
-             {myBalances.length > 0 ? (
-                myBalances.map(balance => {
-                    const leaveType = leaveTypes.find(lt => lt.id === balance.leaveTypeId);
-                    return (
-                        <div key={balance.leaveTypeId} className="flex items-center gap-2 p-3 border rounded-md bg-secondary/50">
-                            <span className="font-medium">{leaveType?.name || 'Unknown Type'}:</span>
-                            <Badge variant="outline">{balance.balance} days</Badge>
-                        </div>
-                    );
-                })
+             {isLoading ? (
+                <> <Skeleton className="h-10 w-24 rounded-md" /> <Skeleton className="h-10 w-28 rounded-md" /> </>
+             ) : error ? (
+                <p className="text-destructive">Error loading balances.</p>
+             ): myBalances.length > 0 ? (
+                myBalances.map(balance => (
+                    <div key={balance.leaveTypeId} className="flex items-center gap-2 p-3 border rounded-md bg-secondary/50">
+                        <span className="font-medium">{leaveTypeNameMap.get(balance.leaveTypeId) || 'Unknown Type'}:</span>
+                        <Badge variant="outline">{balance.balance} days</Badge>
+                    </div>
+                ))
              ) : (
                  <p className="text-muted-foreground">No leave balance information available.</p>
              )}
@@ -49,7 +129,7 @@ export default async function LeavePage() {
 
 
        {/* Tabs for Request Form, Lists, and Type Management */}
-       <Tabs defaultValue="request" className="w-full" id="leave-tabs"> {/* Add id for linking */}
+       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="leave-tabs"> {/* Control active tab state */}
          <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
            <TabsTrigger value="request" className="flex items-center gap-1">
                 <PlusCircle className="h-4 w-4"/> Request Leave
@@ -77,49 +157,56 @@ export default async function LeavePage() {
                     <CardDescription>Fill out the form below to request time off.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <LeaveRequestForm
-                        employeeId={MOCK_USER_ID}
-                        leaveTypes={leaveTypes}
-                        onSubmitAction={addLeaveRequest} // Pass the server action directly
-                    />
+                     {isLoading ? <Skeleton className="h-64 w-full" /> : error ? <p className="text-destructive">{error}</p> :
+                        <LeaveRequestForm
+                            employeeId={MOCK_USER_ID}
+                            leaveTypes={leaveTypes}
+                            onSuccess={handleLeaveRequestSubmitted} // Pass success callback
+                        />
+                     }
                 </CardContent>
             </Card>
          </TabsContent>
 
          {/* My Requests Tab */}
          <TabsContent value="my-requests">
-             <LeaveRequestList requests={myRequests} currentUserId={MOCK_USER_ID} isAdminView={false} leaveTypes={leaveTypes} />
+              {isLoading ? <Skeleton className="h-64 w-full" /> : error ? <p className="text-destructive">{error}</p> :
+                 <LeaveRequestList
+                     requests={myRequests}
+                     leaveTypes={leaveTypes}
+                     isAdminView={false}
+                     currentUserId={MOCK_USER_ID}
+                     onUpdate={handleLeaveRequestUpdated} // Pass update callback
+                 />
+              }
          </TabsContent>
 
          {/* All Requests Tab (Admin Only) */}
          {MOCK_IS_ADMIN && (
             <TabsContent value="all-requests">
-                <LeaveRequestList requests={allRequests} isAdminView={true} leaveTypes={leaveTypes} />
+                {isLoading ? <Skeleton className="h-64 w-full" /> : error ? <p className="text-destructive">{error}</p> :
+                    <LeaveRequestList
+                        requests={allRequests}
+                        leaveTypes={leaveTypes}
+                        isAdminView={true}
+                        onUpdate={handleLeaveRequestUpdated} // Pass update callback
+                    />
+                }
             </TabsContent>
          )}
 
          {/* Manage Leave Types Tab (Admin Only) */}
          {MOCK_IS_ADMIN && (
             <TabsContent value="manage-types">
-                <LeaveTypeManagement leaveTypes={leaveTypes} />
+                 {isLoading ? <Skeleton className="h-64 w-full" /> : error ? <p className="text-destructive">{error}</p> :
+                    <LeaveTypeManagement
+                        initialLeaveTypes={leaveTypes}
+                        onUpdate={handleLeaveTypeUpdated} // Pass update callback
+                    />
+                 }
             </TabsContent>
          )}
        </Tabs>
-
-
-       {/* Future: Leave Calendar View */}
-       {/* <Card className="shadow-sm">
-         <CardHeader>
-            <CardTitle>Team Leave Calendar</CardTitle>
-            <CardDescription>Placeholder for team leave visualization.</CardDescription>
-         </CardHeader>
-         <CardContent>
-             <div className="h-60 w-full flex items-center justify-center bg-muted rounded-md">
-                <p className="text-muted-foreground">Calendar Component Placeholder</p>
-             </div>
-         </CardContent>
-      </Card> */}
-
     </div>
   );
 }
