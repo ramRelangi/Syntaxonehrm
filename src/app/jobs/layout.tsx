@@ -16,7 +16,8 @@ export default function PublicJobBoardLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="antialiased bg-background text-foreground">
+      {/* Remove bg-background and text-foreground as they are applied globally */}
+      <body className="antialiased">
            {/* Simple Header */}
             <header className="border-b sticky top-0 bg-card z-10">
                 <nav className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -45,4 +46,3 @@ export default function PublicJobBoardLayout({
     </html>
   );
 }
-
