@@ -23,10 +23,13 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
 
-# local env files
-# .env*.local # Removed to make .env traceable
+# local env files - IMPORTANT: Removed .env to allow tracking for this specific use case.
+# Ensure sensitive keys are NOT committed if this becomes public.
+# .env.local
+# .env.development.local
+# .env.test.local
+# .env.production.local
 
 # vercel
 .vercel
@@ -35,10 +38,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Netlify deployment variables
-.netlify
-
-# IDE files
-.idea
-.vscode/*
-!.vscode/settings.json
+# misc
+.eslintcache

@@ -31,6 +31,10 @@ export async function addTenant(tenantData: Pick<Tenant, 'name' | 'domain'>): Pr
         if (err.code === '23505' && err.constraint === 'tenants_domain_key') {
             throw new Error('Tenant domain already exists.');
         }
+         // Handle case where table doesn't exist
+        if (err.code === '42P01') { // undefined_table
+            throw new Error('Database schema not initialized. Relation "tenants" does not exist.');
+        }
         throw err; // Re-throw other errors
     } finally {
         client.release();
@@ -46,8 +50,11 @@ export async function getTenantById(id: string): Promise<Tenant | undefined> {
         const tenant = res.rows.length > 0 ? mapRowToTenant(res.rows[0]) : undefined;
         console.log(`[DB getTenantById] Tenant found: ${!!tenant}`);
         return tenant;
-    } catch (err) {
+    } catch (err: any) {
         console.error(`[DB getTenantById] Error fetching tenant ${id}:`, err);
+         if (err.code === '42P01') { // undefined_table
+            throw new Error('Database schema not initialized. Relation "tenants" does not exist.');
+        }
         throw err;
     } finally {
         client.release();
@@ -64,12 +71,15 @@ export async function getTenantByDomain(domain: string): Promise<Tenant | undefi
         const tenant = res.rows.length > 0 ? mapRowToTenant(res.rows[0]) : undefined;
         console.log(`[DB getTenantByDomain] Tenant found: ${!!tenant}`);
         return tenant;
-    } catch (err) {
+    } catch (err: any) {
         console.error(`[DB getTenantByDomain] Error fetching tenant by domain ${lowerCaseDomain}:`, err);
+         if (err.code === '42P01') { // undefined_table
+            throw new Error('Database schema not initialized. Relation "tenants" does not exist.');
+        }
         throw err;
     } finally {
         client.release();
-        console.log('[DB getTenantByDomain] Client released.');
+         console.log('[DB getTenantByDomain] Client released.');
     }
 }
 
@@ -121,6 +131,9 @@ export async function addUser(userData: Omit<User, 'id' | 'createdAt'>): Promise
             //     throw new Error('Email already exists for this tenant.');
             // }
         }
+        if (err.code === '42P01') { // undefined_table
+            throw new Error('Database schema not initialized. Relation "users" does not exist.');
+        }
         throw err;
     } finally {
         client.release();
@@ -136,8 +149,11 @@ export async function getUserById(id: string): Promise<User | undefined> {
         const user = res.rows.length > 0 ? mapRowToUser(res.rows[0]) : undefined;
         console.log(`[DB getUserById] User found: ${!!user}`);
         return user;
-    } catch (err) {
+    } catch (err: any) {
         console.error(`[DB getUserById] Error fetching user ${id}:`, err);
+        if (err.code === '42P01') { // undefined_table
+            throw new Error('Database schema not initialized. Relation "users" does not exist.');
+        }
         throw err;
     } finally {
         client.release();
@@ -163,8 +179,11 @@ export async function getUserByEmail(email: string, tenantId?: string): Promise<
         const user = res.rows.length > 0 ? mapRowToUser(res.rows[0]) : undefined;
         console.log(`[DB getUserByEmail] User found: ${!!user}`);
         return user;
-    } catch (err) {
+    } catch (err: any) {
         console.error(`[DB getUserByEmail] Error fetching user by email ${lowerCaseEmail}:`, err);
+         if (err.code === '42P01') { // undefined_table
+            throw new Error('Database schema not initialized. Relation "users" does not exist.');
+        }
         throw err;
     } finally {
         client.release();
@@ -172,55 +191,4 @@ export async function getUserByEmail(email: string, tenantId?: string): Promise<
     }
 }
 
-
-// --- Database Schema (for reference) ---
-/*
--- Ensure uuid-ossp extension is enabled
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- Tenants Table
-CREATE TABLE tenants (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name VARCHAR(255) NOT NULL,
-    domain VARCHAR(100) UNIQUE NOT NULL, -- Unique, lowercase domain name
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_tenants_domain ON tenants(domain);
-
--- User Roles Enum (Example)
-CREATE TYPE user_role AS ENUM ('Admin', 'Manager', 'Employee');
-
--- Users Table
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Link to tenant, cascade delete users if tenant is deleted
-    email VARCHAR(255) UNIQUE NOT NULL, -- Ensure email is globally unique
-    -- OR UNIQUE (tenant_id, email) if emails only need to be unique within a tenant
-    password_hash TEXT NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    role user_role NOT NULL DEFAULT 'Employee',
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP -- Add trigger for this
-    -- Add other user profile fields as needed
-);
-
-CREATE INDEX idx_users_tenant_id ON users(tenant_id);
-CREATE INDEX idx_users_email ON users(email);
-
--- Trigger to update updated_at timestamp (if not already created globally)
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-   NEW.updated_at = NOW();
-   RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER update_users_updated_at
-BEFORE UPDATE ON users
-FOR EACH ROW
-EXECUTE FUNCTION update_updated_at_column();
-
-*/
+// Note: The database schema has been moved to src/lib/init-db.ts
