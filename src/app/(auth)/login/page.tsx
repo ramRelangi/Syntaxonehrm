@@ -1,7 +1,8 @@
 
 "use client";
 
-import { useState } from 'react';
+import * as React from 'react'; // Import React
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { z } from 'zod';
@@ -28,19 +29,26 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   // State to hold the inferred domain (if needed for forgot password link)
   const [tenantDomain, setTenantDomain] = useState<string | null>(null);
+  const [rootDomain, setRootDomain] = useState<string>('localhost');
 
   // Attempt to infer domain from hostname on client-side
-  useState(() => {
-    if (typeof window !== 'undefined') {
-      const hostname = window.location.hostname;
-      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app';
-      const match = hostname.match(`^(.*)\\.${rootDomain}$`);
-      const subdomain = match ? match[1] : null;
-      if (subdomain && !['www', 'api'].includes(subdomain)) {
+  useEffect(() => {
+    // This effect runs only on the client side
+    const currentRootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
+    setRootDomain(currentRootDomain);
+
+    const hostname = window.location.hostname;
+    const match = hostname.match(`^(.*)\\.${currentRootDomain}$`);
+    const subdomain = match ? match[1] : null;
+
+    if (subdomain && !['www', 'api'].includes(subdomain)) {
         setTenantDomain(subdomain);
-      }
+    } else {
+        // If on root domain or ignored subdomain, clear tenantDomain state
+        setTenantDomain(null);
     }
-  });
+}, []); // Empty dependency array ensures this runs once on mount
+
 
   const form = useForm<LoginFormInputs>({
     resolver: zodResolver(loginSchema),
@@ -95,10 +103,10 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
-          <CardTitle className="text-2xl font-bold">Login to StreamlineHR</CardTitle>
+          <CardTitle className="text-2xl font-bold">Login to SyntaxHive Hrm</CardTitle>
           <CardDescription>
             {tenantDomain
-             ? `Enter your credentials for ${tenantDomain}.${process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app'}`
+             ? `Enter your credentials for ${tenantDomain}.${rootDomain}`
              : "Enter your email and password"}
           </CardDescription>
         </CardHeader>

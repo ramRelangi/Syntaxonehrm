@@ -11,6 +11,7 @@ import { getEmailSettings } from '@/modules/communication/lib/db'; // Import fun
 import type { EmailSettings } from '@/modules/communication/types'; // Import EmailSettings type
 import { redirect } from 'next/navigation'; // Import redirect
 import { headers } from 'next/headers'; // Import headers to potentially get domain in logout
+import { initializeDatabase } from '@/lib/init-db'; // Import initializeDatabase
 
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
 
@@ -77,7 +78,7 @@ async function sendWelcomeEmail(tenantId: string, adminName: string, adminEmail:
         const transporter = createTransporter(settings); // Pass validated settings
 
         // Construct tenant-specific login URL using tenant domain and root domain
-        const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app'; // Use configured root domain
+        const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'syntaxhivehrm.app'; // Use configured root domain
         // Construct the subdomain URL
         const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
         const loginUrl = `${protocol}://${companyDomain}.${rootDomain}`; // Construct subdomain login URL (point to root, middleware handles redirect)
@@ -86,15 +87,15 @@ async function sendWelcomeEmail(tenantId: string, adminName: string, adminEmail:
         const mailOptions = {
             from: `"${settings.fromName}" <${settings.fromEmail}>`,
             to: adminEmail,
-            subject: 'Welcome to StreamlineHR!',
-            text: `Hi ${adminName},\n\nWelcome to StreamlineHR!\n\nYour company account "${companyDomain}" has been created.\n\nYou can log in using your email (${adminEmail}) and the password you set during registration.\n\nYour unique login URL is: ${loginUrl}\n\nPlease bookmark this link for future access.\n\nThanks,\nThe StreamlineHR Team`,
+            subject: 'Welcome to SyntaxHive Hrm!',
+            text: `Hi ${adminName},\n\nWelcome to SyntaxHive Hrm!\n\nYour company account "${companyDomain}" has been created.\n\nYou can log in using your email (${adminEmail}) and the password you set during registration.\n\nYour unique login URL is: ${loginUrl}\n\nPlease bookmark this link for future access.\n\nThanks,\nThe SyntaxHive Hrm Team`,
             html: `<p>Hi ${adminName},</p>
-                   <p>Welcome to StreamlineHR!</p>
+                   <p>Welcome to SyntaxHive Hrm!</p>
                    <p>Your company account "<strong>${companyDomain}</strong>" has been created.</p>
                    <p>You can log in using your email (<strong>${adminEmail}</strong>) and the password you set during registration.</p>
                    <p>Your unique login URL is: <a href="${loginUrl}">${loginUrl}</a></p>
                    <p>Please bookmark this link for future access.</p>
-                   <p>Thanks,<br/>The StreamlineHR Team</p>`,
+                   <p>Thanks,<br/>The SyntaxHive Hrm Team</p>`,
         };
 
         console.log('[sendWelcomeEmail] Prepared mail options (recipient/sender only):', { from: mailOptions.from, to: mailOptions.to, subject: mailOptions.subject });
@@ -156,8 +157,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
             console.log("[registerTenantAction] Attempting to initialize database schema...");
             try {
                 // Dynamically import and run the init script
-                const { initializeDatabase } = await import('@/lib/init-db');
-                await initializeDatabase();
+                await initializeDatabase(); // Removed import, assuming it's available
                 console.log("[registerTenantAction] Database schema initialization successful.");
             } catch (initError: any) {
                 console.error("[registerTenantAction] Failed to initialize database schema:", initError);
@@ -166,7 +166,9 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
             }
         } else {
             // Handle other potential errors during schema check with more detail
-            return { success: false, errors: [{ code: 'custom', path: ['root'], message: `Failed to verify database schema. DB Error: ${schemaError.message || 'Unknown error'}` }] };
+            const verifyErrorMessage = `Failed to verify database schema. DB Error: ${schemaError.message || 'Unknown error'}`;
+             console.error("[registerTenantAction]", verifyErrorMessage);
+            return { success: false, errors: [{ code: 'custom', path: ['root'], message: verifyErrorMessage }] };
         }
     }
 
@@ -276,13 +278,19 @@ export async function logoutAction() {
       //   tenantDomain = session.user.tenantDomain;
       // }
 
-      // Option 2: Infer from request headers (less reliable, requires passing headers explicitly)
+      // Option 2: Infer from request headers (more reliable if middleware sets it)
       const headersList = headers();
-      const host = headersList.get('host') || '';
-      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app';
-      const match = host.match(`^(.*)\\.${rootDomain}$`);
-      tenantDomain = match ? match[1] : null;
-      console.log(`[logoutAction] Inferred tenant domain from host "${host}": ${tenantDomain}`);
+      tenantDomain = headersList.get('X-Tenant-Id'); // Use header set by middleware
+      console.log(`[logoutAction] Tenant domain from X-Tenant-Id header: ${tenantDomain}`);
+
+      // Fallback to host header if X-Tenant-Id is not present
+      if (!tenantDomain) {
+         const host = headersList.get('host') || '';
+         const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'syntaxhivehrm.app';
+         const match = host.match(`^(.*)\\.${rootDomain}$`);
+         tenantDomain = match ? match[1] : null;
+         console.log(`[logoutAction] Inferred tenant domain from host "${host}": ${tenantDomain}`);
+      }
 
   } catch (error) {
       console.error("[logoutAction] Error retrieving tenant domain for redirect:", error);
@@ -292,7 +300,7 @@ export async function logoutAction() {
   let redirectUrl = '/login'; // Default redirect to root login page
   if (tenantDomain) {
       // Construct the tenant-specific login URL (subdomain root)
-      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app';
+      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'syntaxhivehrm.app';
       const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
       redirectUrl = `${protocol}://${tenantDomain}.${rootDomain}`; // Redirect to subdomain root
       console.log(`[logoutAction] Redirecting to tenant root: ${redirectUrl}`);

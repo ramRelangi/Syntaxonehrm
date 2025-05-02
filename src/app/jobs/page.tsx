@@ -49,7 +49,8 @@ const formatDateSafe = (dateString?: string): string => {
 
 // Async component to fetch and display job postings
 async function OpenJobPostings() {
-    // Fetch only 'Open' postings
+    // Fetch only 'Open' postings for the specific tenant (needs tenant context from middleware/domain)
+    // The API route /api/recruitment/postings should handle tenant filtering based on the request context (e.g., header)
     const openPostings = await fetchData<JobPosting[]>('/api/recruitment/postings?status=Open');
 
     if (!openPostings || openPostings.length === 0) {
@@ -102,7 +103,7 @@ export default function PublicJobBoardPage() {
     <div className="flex flex-col gap-8">
       <div className="text-center">
          <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Join Our Team</h1>
-         <p className="mt-2 text-lg text-muted-foreground">Explore exciting career opportunities at StreamlineHR.</p>
+         <p className="mt-2 text-lg text-muted-foreground">Explore exciting career opportunities at SyntaxHive Hrm.</p>
       </div>
 
       {/* Job Listings Section */}

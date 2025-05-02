@@ -77,7 +77,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                  <Link href="/dashboard" className="flex items-center gap-2 font-semibold text-lg text-primary">
                  {/* Placeholder Logo - Replace with actual logo */}
                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6"><path d="M12 3v18M3 12h18"/></svg> {/* Simple cross as placeholder */}
-                 <span className="hidden group-data-[state=expanded]:inline">StreamlineHR</span>
+                 <span className="hidden group-data-[state=expanded]:inline">SyntaxHive Hrm</span>
                  </Link>
                 <SidebarTrigger className="hidden md:flex" />
             </SidebarHeader>
@@ -150,7 +150,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
              <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4 md:hidden">
                 <SidebarTrigger />
                  {/* Potentially show tenant name here */}
-                 <h1 className="flex-1 text-lg font-semibold">{user.tenantDomain || 'StreamlineHR'}</h1>
+                 <h1 className="flex-1 text-lg font-semibold">{user.tenantDomain || 'SyntaxHive Hrm'}</h1>
                 {/* Add mobile-specific header items if needed */}
              </header>
 

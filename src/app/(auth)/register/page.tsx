@@ -21,7 +21,12 @@ export default function RegisterPage() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [companyDomainForLogin, setCompanyDomainForLogin] = useState(''); // State to hold domain for login link
-  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'streamlinehr.app'; // Get root domain
+  const [rootDomain, setRootDomain] = React.useState('localhost'); // State for root domain
+
+  // Get the root domain on the client side
+  React.useEffect(() => {
+    setRootDomain(process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost');
+  }, []);
 
   console.log("Rendering RegisterPage component");
 
@@ -98,7 +103,7 @@ export default function RegisterPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
-          <CardTitle className="text-2xl font-bold">Register for StreamlineHR</CardTitle>
+          <CardTitle className="text-2xl font-bold">Register for SyntaxHive Hrm</CardTitle>
           <CardDescription>Create your company account and admin user</CardDescription>
         </CardHeader>
         <CardContent>
@@ -203,3 +208,4 @@ export default function RegisterPage() {
     </div>
   );
 }
+

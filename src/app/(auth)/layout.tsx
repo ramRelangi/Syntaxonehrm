@@ -4,7 +4,7 @@ import { Toaster } from '@/components/ui/toaster';
 
 // Basic metadata for auth pages
 export const metadata: Metadata = {
-  title: 'StreamlineHR',
+  title: 'SyntaxHive Hrm',
   description: 'Authentication',
 };
 

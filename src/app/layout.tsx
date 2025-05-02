@@ -4,7 +4,7 @@ import { SidebarProvider } from '@/components/ui/sidebar';
 import { Toaster } from '@/components/ui/toaster';
 
 export const metadata: Metadata = {
-  title: 'StreamlineHR',
+  title: 'SyntaxHive Hrm',
   description: 'Comprehensive Human Resource Management System',
 };
 
