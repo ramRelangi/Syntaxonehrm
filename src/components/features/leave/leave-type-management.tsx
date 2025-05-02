@@ -52,7 +52,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'; // Added FormDescription
 import { PlusCircle, Edit, Trash2, Loader2, Save } from 'lucide-react';
 
 // --- Zod Schema for Leave Type Form ---
@@ -416,5 +416,3 @@ export function LeaveTypeManagement({ leaveTypes: initialLeaveTypes }: LeaveType
     </Card>
   );
 }
-        
-    
