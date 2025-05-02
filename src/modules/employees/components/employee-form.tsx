@@ -8,7 +8,7 @@ import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types
 import type { Employee } from '@/modules/employees/types';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label"; // Keep Label import for consistency if used elsewhere
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -20,15 +20,14 @@ import { cn } from '@/lib/utils';
 
 interface EmployeeFormProps {
   employee?: Employee; // Optional employee data for editing
-  // onSubmitAction removed - component handles API calls directly
   submitButtonText?: string;
   formTitle: string;
   formDescription: string;
 }
 
 export function EmployeeForm({
-  employee, // If employee is passed, we are editing
-  submitButtonText, // Custom button text is still useful
+  employee,
+  submitButtonText,
   formTitle,
   formDescription,
 }: EmployeeFormProps) {
@@ -40,18 +39,15 @@ export function EmployeeForm({
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
 
-  // Function to safely parse and format the date
   const getFormattedHireDate = (hireDate?: string): string => {
     if (!hireDate) return "";
     try {
       const parsedDate = parseISO(hireDate);
-      if (isValid(parsedDate)) {
-        return format(parsedDate, 'yyyy-MM-dd');
-      }
+      return isValid(parsedDate) ? format(parsedDate, 'yyyy-MM-dd') : "";
     } catch (e) {
       console.error("Error parsing hire date:", e);
+      return "";
     }
-    return ""; // Return empty string if parsing fails or date is invalid
   };
 
   const form = useForm<EmployeeFormData>({
@@ -62,18 +58,16 @@ export function EmployeeForm({
       phone: employee?.phone ?? "",
       position: employee?.position ?? "",
       department: employee?.department ?? "",
-      hireDate: getFormattedHireDate(employee?.hireDate), // Use helper function
+      hireDate: getFormattedHireDate(employee?.hireDate),
       status: employee?.status ?? "Active",
     },
   });
 
-  // Watch the hireDate field to handle date picker updates
   const hireDateValue = form.watch('hireDate');
-
 
   const onSubmit = async (data: EmployeeFormData) => {
     setIsLoading(true);
-    console.log("Submitting form data:", data); // Debug: Log form data
+    console.log("[Employee Form] Submitting data:", data);
 
     const apiUrl = isEditMode ? `/api/employees/${employee.id}` : '/api/employees';
     const method = isEditMode ? 'PUT' : 'POST';
@@ -85,43 +79,67 @@ export function EmployeeForm({
             body: JSON.stringify(data),
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ message: `Failed to ${isEditMode ? 'update' : 'add'} employee. Status: ${response.status}` }));
-            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+        // Try to parse JSON regardless of status code first
+        let result: any;
+        let responseText: string | null = null;
+        try {
+            responseText = await response.text();
+            if (responseText) {
+                result = JSON.parse(responseText);
+            }
+        } catch (jsonError) {
+             console.warn("[Employee Form] Failed to parse response as JSON:", jsonError);
+             // Use raw text as error message if JSON parsing failed
+             if (!response.ok) {
+                 throw new Error(responseText || `HTTP error! status: ${response.status}`);
+             }
+             // If response was OK but not JSON (unlikely for this API), handle gracefully
+             console.warn("[Employee Form] Received OK response but non-JSON content:", responseText);
+             result = { name: data.name }; // Assume success based on status
         }
 
-        const result = await response.json(); // Assuming API returns the added/updated employee
+
+        if (!response.ok) {
+             console.error("[Employee Form] API Error Response:", result);
+            throw new Error(result?.error || result?.message || `HTTP error! status: ${response.status}`);
+        }
+
+        console.log("[Employee Form] API Success Response:", result);
 
         toast({
             title: `Employee ${isEditMode ? 'Updated' : 'Added'}`,
-            description: `${result.name} has been successfully ${isEditMode ? 'updated' : 'added'}.`,
+            description: `${result?.name || data.name} has been successfully ${isEditMode ? 'updated' : 'added'}.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
-        router.push('/employees'); // Redirect to the employee list
-        router.refresh(); // Force refresh on the client-side after redirect (important for data tables)
+        router.push('/employees'); // Redirect on success
+        // No explicit router.refresh() needed here usually, list page should refetch on mount/focus
 
     } catch (error: any) {
-        console.error("Form submission error:", error); // Debug: Log errors
+        console.error("[Employee Form] Submission error:", error);
+        let errorMessage = error.message || "An unexpected error occurred.";
+        // Use specific error message for duplicate email
+        if (error.message?.includes('Email address already exists')) {
+            errorMessage = 'This email address is already in use. Please use a different email.';
+            form.setError("email", { type: "manual", message: errorMessage });
+        } else {
+             form.setError("root.serverError", { message: errorMessage });
+        }
         toast({
             title: `Error ${isEditMode ? 'Updating' : 'Adding'} Employee`,
-            description: error.message || "An unexpected error occurred. Please try again.",
+            description: errorMessage,
             variant: "destructive",
         });
-        // Optionally map specific API errors back to form fields if possible
-        // Example: if (error.message.includes('email already exists')) { form.setError('email', ...) }
-        form.setError("root.serverError", { message: error.message || "An unexpected server error occurred." });
-
     } finally {
         setIsLoading(false);
     }
   };
 
+
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-         {/* Display root level errors */}
-         {form.formState.errors.root?.serverError && (
+         {form.formState.errors.root?.serverError && !form.formState.errors.email && ( // Show root error only if not showing email specific error
           <FormMessage className="text-destructive text-center">
             {form.formState.errors.root.serverError.message}
           </FormMessage>
@@ -151,7 +169,7 @@ export function EmployeeForm({
                   <FormControl>
                     <Input type="email" placeholder="e.g. jane.doe@company.com" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage /> {/* Shows validation and server-set errors */}
                 </FormItem>
               )}
             />
@@ -220,7 +238,7 @@ export function EmployeeForm({
                control={form.control}
                name="hireDate"
                render={({ field }) => (
-                 <FormItem className="flex flex-col pt-2"> {/* Added pt-2 for alignment */}
+                 <FormItem className="flex flex-col pt-2">
                    <FormLabel>Hire Date</FormLabel>
                    <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                      <PopoverTrigger asChild>
@@ -233,7 +251,7 @@ export function EmployeeForm({
                            )}
                          >
                            {field.value ? (
-                             isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : "Invalid date" // Display formatted date or error
+                             isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : "Invalid date"
                            ) : (
                              <span>Pick a date</span>
                            )}
@@ -246,13 +264,8 @@ export function EmployeeForm({
                          mode="single"
                          selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
                          onSelect={(date) => {
-                            if (date && isValid(date)) {
-                              field.onChange(format(date, 'yyyy-MM-dd')); // Store as YYYY-MM-DD
-                              setDatePickerOpen(false); // Close picker on select
-                            } else {
-                               field.onChange(""); // Clear field if date is invalid or cleared
-                               setDatePickerOpen(false);
-                            }
+                            field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
+                            setDatePickerOpen(false);
                          }}
                          disabled={(date) =>
                            date > new Date() || date < new Date("1900-01-01")
@@ -269,7 +282,7 @@ export function EmployeeForm({
               control={form.control}
               name="status"
               render={({ field }) => (
-                <FormItem className="pt-2"> {/* Added pt-2 for alignment */}
+                <FormItem className="pt-2">
                   <FormLabel>Status</FormLabel>
                   <Select onValueChange={field.onChange} defaultValue={field.value}>
                     <FormControl>

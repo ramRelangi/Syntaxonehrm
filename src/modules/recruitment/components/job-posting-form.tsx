@@ -1,10 +1,9 @@
-
 "use client";
 
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useRouter } from 'next/navigation'; // Keep useRouter if needed elsewhere, but remove usage for cancel
+import { useRouter } from 'next/navigation'; // Keep if needed
 import { jobPostingSchema, type JobPostingFormData, type JobPosting, jobPostingStatusSchema } from '@/modules/recruitment/types';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,18 +13,17 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, CalendarIcon, Save, PlusCircle, Trash2 } from 'lucide-react';
+import { Loader2, CalendarIcon, Save, PlusCircle } from 'lucide-react'; // Removed Trash2, not needed here
 import { format, parseISO, isValid, formatISO } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { DialogClose } from '@/components/ui/dialog'; // Import DialogClose
+import { DialogClose } from '@/components/ui/dialog';
 
 interface JobPostingFormProps {
-  jobPosting?: JobPosting; // Optional data for editing
-  onSuccess: () => void; // Callback on success
+  jobPosting?: JobPosting;
+  onSuccess: () => void;
 }
 
 export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
-  const router = useRouter(); // Keep router if potentially needed for other actions
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
   const [closingDatePickerOpen, setClosingDatePickerOpen] = React.useState(false);
@@ -33,20 +31,16 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
   const isEditMode = !!jobPosting;
   const submitButtonText = isEditMode ? "Save Changes" : "Create Job Posting";
 
-  // Helper to format date string for the form default values
   const getFormattedDate = (dateString?: string): string => {
     if (!dateString) return "";
     try {
       const parsedDate = parseISO(dateString);
-      if (isValid(parsedDate)) {
-        return format(parsedDate, 'yyyy-MM-dd');
-      }
-    } catch (e) { console.error("Error parsing date:", e); }
-    return "";
+      return isValid(parsedDate) ? format(parsedDate, 'yyyy-MM-dd') : "";
+    } catch (e) { console.error("Error parsing date:", e); return ""; }
   };
 
   const form = useForm<JobPostingFormData>({
-    resolver: zodResolver(jobPostingSchema.omit({ id: true, datePosted: true })), // Validate form data
+    resolver: zodResolver(jobPostingSchema.omit({ id: true, datePosted: true })),
     defaultValues: {
       title: jobPosting?.title ?? "",
       description: jobPosting?.description ?? "",
@@ -60,14 +54,22 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
 
    const onSubmit = async (data: JobPostingFormData) => {
     setIsLoading(true);
+    console.log("[Job Posting Form] Submitting data:", data);
     const apiUrl = isEditMode ? `/api/recruitment/postings/${jobPosting!.id}` : '/api/recruitment/postings';
     const method = isEditMode ? 'PUT' : 'POST';
 
-    // Format closing date back to ISO string if present and valid
-     const payload = {
+    // Ensure closingDate is formatted correctly or undefined
+    const payload = {
          ...data,
-         closingDate: data.closingDate && isValid(parseISO(data.closingDate)) ? formatISO(parseISO(data.closingDate)) : undefined,
+         closingDate: data.closingDate && isValid(parseISO(data.closingDate))
+            ? formatISO(parseISO(data.closingDate), { representation: 'date' }) // Send as 'YYYY-MM-DD' string if valid
+            : undefined, // Send undefined if empty or invalid
      };
+
+     // Clean up empty strings to be undefined for optional fields
+     if (payload.salaryRange === '') payload.salaryRange = undefined;
+
+     console.log("[Job Posting Form] Sending payload:", payload);
 
 
     try {
@@ -77,22 +79,33 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
             body: JSON.stringify(payload),
         });
 
-        const result = await response.json();
+        let result: any;
+        let responseText: string | null = null;
+        try {
+           responseText = await response.text();
+           if(responseText) result = JSON.parse(responseText);
+        } catch (e) {
+           if (!response.ok) throw new Error(responseText || `HTTP error! status: ${response.status}`);
+           result = {}; // OK, no JSON body
+        }
 
         if (!response.ok) {
-            throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
+            console.error("[Job Posting Form] API Error Response:", result);
+            throw new Error(result?.error || result?.message || `HTTP error! status: ${response.status}`);
         }
+
+         console.log("[Job Posting Form] API Success Response:", result);
 
         toast({
             title: `Job Posting ${isEditMode ? 'Updated' : 'Created'}`,
-            description: `${result.title} has been successfully ${isEditMode ? 'updated' : 'created'}.`,
+            description: `${result.title || data.title} has been successfully ${isEditMode ? 'updated' : 'created'}.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
-        onSuccess(); // Trigger callback (e.g., close dialog, refetch data)
+        onSuccess(); // Trigger callback (close dialog, refetch data)
 
     } catch (error: any) {
-        console.error("Form submission error:", error);
+        console.error("[Job Posting Form] Submission error:", error);
         toast({
             title: `Error ${isEditMode ? 'Updating' : 'Creating'} Job Posting`,
             description: error.message || "An unexpected error occurred.",
@@ -148,7 +161,6 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Department</FormLabel>
-                  {/* Consider using a Select for predefined departments */}
                    <Select onValueChange={field.onChange} defaultValue={field.value}>
                      <FormControl>
                        <SelectTrigger>
@@ -156,7 +168,6 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
                        </SelectTrigger>
                      </FormControl>
                      <SelectContent>
-                       {/* Should match employee form departments */}
                        <SelectItem value="Technology">Technology</SelectItem>
                        <SelectItem value="Human Resources">Human Resources</SelectItem>
                        <SelectItem value="Marketing">Marketing</SelectItem>
@@ -250,10 +261,10 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
                      mode="single"
                      selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
                      onSelect={(date) => {
-                       field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
+                       field.onChange(date ? format(date, 'yyyy-MM-dd') : ""); // Store as YYYY-MM-DD string
                        setClosingDatePickerOpen(false);
                      }}
-                     disabled={(date) => date < new Date(new Date().setHours(0,0,0,0)) } // Disable past dates
+                     disabled={(date) => date < new Date(new Date().setHours(0,0,0,0)) }
                      initialFocus
                    />
                  </PopoverContent>
@@ -265,13 +276,12 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
 
 
         <div className="flex justify-end gap-2 pt-4">
-           {/* Use DialogClose for the Cancel button */}
           <DialogClose asChild>
               <Button type="button" variant="outline" disabled={isLoading}>
                 Cancel
               </Button>
           </DialogClose>
-          <Button type="submit" disabled={isLoading || !form.formState.isValid}>
+          <Button type="submit" disabled={isLoading || !form.formState.isDirty}> {/* Disable if not dirty */}
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <PlusCircle className="mr-2 h-4 w-4" />)

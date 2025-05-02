@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle, XCircle, Hourglass, Trash2, Eye } from 'lucide-react'; // Added Eye for View
+import { CheckCircle, XCircle, Hourglass, Trash2, Eye, Loader2 } from 'lucide-react'; // Added Loader2
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,55 +20,41 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-// import { updateLeaveRequestStatus, cancelLeaveRequest } from '@/modules/leave/actions'; // Use API calls
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 
-// Helper function to determine badge variant based on status
 const getStatusVariant = (status: LeaveRequestStatus): "default" | "secondary" | "outline" | "destructive" => {
   switch (status) {
-    case 'Approved':
-      return 'default'; // Usually green-ish
-    case 'Pending':
-      return 'secondary'; // Usually yellow-ish/orange
-     case 'Rejected':
-       return 'destructive'; // Usually red
-    case 'Cancelled':
-       return 'outline'; // Gray
-    default:
-      return 'outline';
+    case 'Approved': return 'default';
+    case 'Pending': return 'secondary';
+    case 'Rejected': return 'destructive';
+    case 'Cancelled': return 'outline';
+    default: return 'outline';
   }
 };
 
-// Helper function to get status icon
 const getStatusIcon = (status: LeaveRequestStatus) => {
   switch (status) {
-    case 'Approved':
-      return <CheckCircle className="h-4 w-4 text-green-600" />;
-    case 'Pending':
-      return <Hourglass className="h-4 w-4 text-yellow-600" />;
-    case 'Rejected':
-       return <XCircle className="h-4 w-4 text-red-600" />;
-    case 'Cancelled':
-       return <XCircle className="h-4 w-4 text-muted-foreground" />; // Or a different cancel icon
-    default:
-      return null;
+    case 'Approved': return <CheckCircle className="h-4 w-4 text-green-600" />;
+    case 'Pending': return <Hourglass className="h-4 w-4 text-yellow-600" />;
+    case 'Rejected': return <XCircle className="h-4 w-4 text-red-600" />;
+    case 'Cancelled': return <XCircle className="h-4 w-4 text-muted-foreground" />;
+    default: return null;
   }
 };
 
 interface LeaveRequestListProps {
   requests: LeaveRequest[];
-  leaveTypes: LeaveType[]; // Add leaveTypes prop
+  leaveTypes: LeaveType[];
   isAdminView?: boolean;
-  currentUserId?: string; // To check if user can cancel their own request
-  onUpdate: () => void; // Callback function on successful update/cancel
+  currentUserId?: string;
+  onUpdate: () => void;
 }
 
 export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, currentUserId, onUpdate }: LeaveRequestListProps) {
   const { toast } = useToast();
-  const [actionLoading, setActionLoading] = React.useState<Record<string, boolean>>({}); // Track loading state per request ID
+  const [actionLoading, setActionLoading] = React.useState<Record<string, boolean>>({});
 
-   // Create a map for quick lookup of leave type names
   const leaveTypeMap = React.useMemo(() => {
     const map = new Map<string, string>();
     leaveTypes.forEach(lt => map.set(lt.id, lt.name));
@@ -76,21 +62,29 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
   }, [leaveTypes]);
 
   const handleStatusUpdate = async (id: string, status: 'Approved' | 'Rejected') => {
-     setActionLoading(prev => ({ ...prev, [id]: true }));
-     // Add comments input if needed later
-     const comments = status === 'Rejected' ? 'Rejected by admin' : 'Approved by admin';
+     setActionLoading(prev => ({ ...prev, [`${id}-${status}`]: true })); // Unique key per action
+     const comments = status === 'Rejected' ? 'Rejected by admin' : 'Approved by admin'; // Placeholder
 
      try {
          const response = await fetch(`/api/leave/requests/${id}/status`, {
              method: 'PATCH',
              headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ status, comments /*, approverId from session */ }),
+             // TODO: Get approverId from session on server-side in API route
+             body: JSON.stringify({ status, comments }),
          });
 
-         const result = await response.json(); // Always try to parse
+         let result: any;
+         let responseText: string | null = null;
+         try {
+            responseText = await response.text();
+             if(responseText) result = JSON.parse(responseText);
+         } catch (e) {
+            if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
+            result = {}; // OK but not JSON
+         }
 
          if (!response.ok) {
-             throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
+             throw new Error(result?.error || result?.message || `HTTP error! Status: ${response.status}`);
          }
 
          toast({
@@ -98,7 +92,7 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
              description: `Leave request has been ${status.toLowerCase()}.`,
              className: status === 'Approved' ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100" : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
          });
-         onUpdate(); // Trigger refetch in parent
+         onUpdate();
 
      } catch (error: any) {
          toast({
@@ -107,43 +101,51 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
             variant: "destructive",
          });
      } finally {
-         setActionLoading(prev => ({ ...prev, [id]: false }));
+         setActionLoading(prev => ({ ...prev, [`${id}-${status}`]: false }));
      }
   };
 
   const handleCancel = async (id: string) => {
-     setActionLoading(prev => ({ ...prev, [id]: true }));
+     setActionLoading(prev => ({ ...prev, [`${id}-cancel`]: true }));
      try {
+         // API route handles user auth check (should get user ID from session)
          const response = await fetch(`/api/leave/requests/${id}/cancel`, {
              method: 'PATCH',
          });
 
-         const result = await response.json(); // Always try to parse
+          let result: any;
+          let responseText: string | null = null;
+          try {
+            responseText = await response.text();
+            if(responseText) result = JSON.parse(responseText);
+          } catch (e) {
+            if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
+            result = {}; // OK but not JSON
+          }
 
          if (!response.ok) {
-             throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
+             throw new Error(result?.error || result?.message || `HTTP error! Status: ${response.status}`);
          }
 
          toast({
              title: "Request Cancelled",
              description: `Your leave request has been cancelled.`,
-             className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:yellow-green-100", // Use a warning/info color
+             className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100", // Use a warning/info color
          });
-         onUpdate(); // Trigger refetch in parent
+         onUpdate();
 
      } catch (error: any) {
          toast({
             title: "Error Cancelling Request",
-            description: error.message || `Could not cancel the request. It might have already been processed.`,
+            description: error.message || `Could not cancel the request.`,
             variant: "destructive",
          });
      } finally {
-         setActionLoading(prev => ({ ...prev, [id]: false }));
+         setActionLoading(prev => ({ ...prev, [`${id}-cancel`]: false }));
      }
   };
 
   const getLeaveTypeName = (leaveTypeId: string) => {
-      // Use the map, fallback to the stored name (in case type was deleted), or 'Unknown'
       return leaveTypeMap.get(leaveTypeId) || requests.find(r => r.leaveTypeId === leaveTypeId)?.leaveTypeName || 'Unknown Type';
   };
 
@@ -178,10 +180,16 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                              </TableCell>
                          </TableRow>
                      ) : (
-                     requests.map((req) => (
+                     requests.map((req) => {
+                       const isLoadingApprove = actionLoading[`${req.id}-Approved`];
+                       const isLoadingReject = actionLoading[`${req.id}-Rejected`];
+                       const isLoadingCancel = actionLoading[`${req.id}-cancel`];
+                       const isAnyActionLoading = isLoadingApprove || isLoadingReject || isLoadingCancel;
+
+                       return (
                          <TableRow key={req.id}>
                             {isAdminView && <TableCell>{req.employeeName}</TableCell>}
-                            <TableCell>{getLeaveTypeName(req.leaveTypeId)}</TableCell> {/* Use helper */}
+                            <TableCell>{getLeaveTypeName(req.leaveTypeId)}</TableCell>
                             <TableCell>
                                 {format(parseISO(req.startDate), "MMM d, yyyy")} - {format(parseISO(req.endDate), "MMM d, yyyy")}
                             </TableCell>
@@ -210,27 +218,30 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => handleStatusUpdate(req.id, 'Approved')}
-                                            disabled={actionLoading[req.id]}
+                                            disabled={isAnyActionLoading}
                                             className="text-green-600 hover:text-green-700 hover:bg-green-100"
                                         >
-                                            <CheckCircle className="h-4 w-4 mr-1"/> Approve
+                                            {isLoadingApprove ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <CheckCircle className="h-4 w-4 mr-1"/>}
+                                             Approve
                                         </Button>
                                         <Button
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => handleStatusUpdate(req.id, 'Rejected')}
-                                            disabled={actionLoading[req.id]}
+                                            disabled={isAnyActionLoading}
                                             className="text-red-600 hover:text-red-700 hover:bg-red-100"
                                         >
-                                            <XCircle className="h-4 w-4 mr-1"/> Reject
+                                             {isLoadingReject ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <XCircle className="h-4 w-4 mr-1"/>}
+                                              Reject
                                         </Button>
                                     </div>
                                 )}
                                 {!isAdminView && req.employeeId === currentUserId && req.status === 'Pending' && (
                                     <AlertDialog>
                                         <AlertDialogTrigger asChild>
-                                            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={actionLoading[req.id]}>
-                                                <Trash2 className="h-4 w-4 mr-1"/> Cancel
+                                            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={isAnyActionLoading}>
+                                                 {isLoadingCancel ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <Trash2 className="h-4 w-4 mr-1"/>}
+                                                  Cancel
                                             </Button>
                                         </AlertDialogTrigger>
                                         <AlertDialogContent>
@@ -241,22 +252,25 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                                                 </AlertDialogDescription>
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
-                                                <AlertDialogCancel disabled={actionLoading[req.id]}>Back</AlertDialogCancel>
-                                                <AlertDialogAction onClick={() => handleCancel(req.id)} disabled={actionLoading[req.id]} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                                                    Yes, Cancel Request
+                                                <AlertDialogCancel disabled={isLoadingCancel}>Back</AlertDialogCancel>
+                                                <AlertDialogAction onClick={() => handleCancel(req.id)} disabled={isLoadingCancel} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                                    {isLoadingCancel ? "Cancelling..." : "Yes, Cancel Request"}
                                                 </AlertDialogAction>
                                             </AlertDialogFooter>
                                         </AlertDialogContent>
                                     </AlertDialog>
                                 )}
-                                {/* Add a View Details Button/Link if needed */}
-                                {/* <Tooltip>
-                                    <TooltipTrigger asChild><Button variant="ghost" size="icon"><Eye className="h-4 w-4"/></Button></TooltipTrigger>
-                                    <TooltipContent><p>View Details (Not Implemented)</p></TooltipContent>
-                                </Tooltip> */}
+                                {/* Add View Details placeholder */}
+                                {req.comments && (
+                                     <Tooltip>
+                                         <TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><Eye className="h-4 w-4 text-muted-foreground"/></Button></TooltipTrigger>
+                                         <TooltipContent><p><strong>Approver Comment:</strong> {req.comments}</p></TooltipContent>
+                                     </Tooltip>
+                                )}
                             </TableCell>
                          </TableRow>
-                     ))
+                       );
+                     })
                      )}
                  </TableBody>
                  </Table>

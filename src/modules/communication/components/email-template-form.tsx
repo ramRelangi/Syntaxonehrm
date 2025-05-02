@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from 'react';
@@ -14,8 +13,8 @@ import { Loader2, Save, PlusCircle } from 'lucide-react';
 import { DialogClose } from '@/components/ui/dialog';
 
 interface EmailTemplateFormProps {
-  template?: EmailTemplate; // Optional data for editing
-  onSuccess: () => void; // Callback on success
+  template?: EmailTemplate;
+  onSuccess: () => void;
 }
 
 export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProps) {
@@ -26,7 +25,7 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
   const submitButtonText = isEditMode ? "Save Changes" : "Create Template";
 
   const form = useForm<EmailTemplateFormData>({
-    resolver: zodResolver(emailTemplateSchema.omit({ id: true })), // Validate form data
+    resolver: zodResolver(emailTemplateSchema.omit({ id: true })),
     defaultValues: {
       name: template?.name ?? "",
       subject: template?.subject ?? "",
@@ -37,6 +36,7 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
 
    const onSubmit = async (data: EmailTemplateFormData) => {
     setIsLoading(true);
+    console.log("[Email Template Form] Submitting data:", data);
     const apiUrl = isEditMode ? `/api/communication/templates/${template!.id}` : '/api/communication/templates';
     const method = isEditMode ? 'PUT' : 'POST';
 
@@ -47,22 +47,34 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
             body: JSON.stringify(data),
         });
 
-        const result = await response.json();
+         let result: any;
+         let responseText: string | null = null;
+         try {
+            responseText = await response.text();
+            if(responseText) result = JSON.parse(responseText);
+         } catch (e) {
+            if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
+            result = {}; // OK, no JSON
+         }
+
 
         if (!response.ok) {
-            throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
+             console.error("[Email Template Form] API Error:", result);
+            throw new Error(result?.error || result?.message || `HTTP error! status: ${response.status}`);
         }
+
+        console.log("[Email Template Form] API Success:", result);
 
         toast({
             title: `Template ${isEditMode ? 'Updated' : 'Created'}`,
-            description: `Template "${result.name}" has been successfully ${isEditMode ? 'updated' : 'created'}.`,
+            description: `Template "${result.name || data.name}" has been successfully ${isEditMode ? 'updated' : 'created'}.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
-        onSuccess(); // Trigger callback (e.g., close dialog, refetch data)
+        onSuccess(); // Trigger callback (close dialog, refetch data)
 
     } catch (error: any) {
-        console.error("Form submission error:", error);
+        console.error("[Email Template Form] Submission error:", error);
         toast({
             title: `Error ${isEditMode ? 'Updating' : 'Creating'} Template`,
             description: error.message || "An unexpected error occurred.",
@@ -118,13 +130,13 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
             <FormItem>
               <FormLabel>Email Body</FormLabel>
                <div className="text-xs text-muted-foreground mb-2">
-                  Use Handlebars syntax for placeholders, e.g., {'`{{employeeName}}`'}, {'`{{startDate}}`'}.
+                  Use Handlebars syntax for placeholders, e.g., {'{{employeeName}}'}, {'{{startDate}}'}.
                </div>
               <FormControl>
                 <Textarea
                    placeholder="Enter the email content here..."
                    rows={10}
-                   className="font-mono text-sm" // Use monospace for better placeholder visibility
+                   className="font-mono text-sm"
                    {...field}
                  />
               </FormControl>
@@ -133,7 +145,6 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
           )}
         />
 
-         {/* Optional: Usage Context - Could be a Select or free text */}
          <FormField
            control={form.control}
            name="usageContext"
@@ -155,7 +166,7 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
                 Cancel
               </Button>
           </DialogClose>
-          <Button type="submit" disabled={isLoading || !form.formState.isValid}>
+          <Button type="submit" disabled={isLoading || !form.formState.isDirty}> {/* Disable if not dirty */}
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <PlusCircle className="mr-2 h-4 w-4" />)

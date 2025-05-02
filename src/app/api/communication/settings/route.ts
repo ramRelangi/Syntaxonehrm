@@ -1,16 +1,17 @@
-
 import { NextRequest, NextResponse } from 'next/server';
-import { getEmailSettings, updateEmailSettings } from '@/modules/communication/lib/mock-db';
+import { getEmailSettingsAction, updateEmailSettingsAction } from '@/modules/communication/actions';
 import { emailSettingsSchema } from '@/modules/communication/types';
 
 // GET route to fetch current settings
 export async function GET(request: NextRequest) {
     console.log('[Settings API - GET] Received request.');
     try {
-        console.log('[Settings API - GET] Calling getEmailSettings from mock DB...');
-        const settings = getEmailSettings(); // This function now logs internally too
-        console.log('[Settings API - GET] Retrieved settings:', settings ? JSON.stringify(settings) : 'null');
-        // Return settings or an empty object if not configured yet (consistent with previous behavior)
+        console.log('[Settings API - GET] Calling getEmailSettingsAction...');
+        // Action returns settings without password
+        const settings = await getEmailSettingsAction();
+        console.log('[Settings API - GET] Retrieved safe settings from action:', settings ? JSON.stringify(settings) : 'null');
+
+        // Return settings or an empty object if not configured yet
         return NextResponse.json(settings || {});
     } catch (error) {
         console.error('[Settings API - GET] Error fetching email settings:', error);
@@ -24,25 +25,31 @@ export async function PUT(request: NextRequest) {
     try {
         console.log('[Settings API - PUT] Parsing request body...');
         const body = await request.json();
-        console.log('[Settings API - PUT] Request body parsed:', JSON.stringify(body));
+        console.log('[Settings API - PUT] Request body parsed:', JSON.stringify({ ...body, smtpPassword: '***' })); // Mask password in log
 
         // Validate the request body against the schema
         console.log('[Settings API - PUT] Validating request body...');
         const validation = emailSettingsSchema.safeParse(body);
 
         if (!validation.success) {
-            console.error('[Settings API - PUT] Validation failed:', JSON.stringify(validation.error.errors));
-            return NextResponse.json({ error: 'Invalid input', details: validation.error.errors }, { status: 400 });
+            console.error('[Settings API - PUT] Validation failed:', validation.error.flatten());
+            return NextResponse.json({ error: 'Invalid input', details: validation.error.flatten().fieldErrors }, { status: 400 });
         }
         console.log('[Settings API - PUT] Validation successful.');
 
-        // Update the settings in the mock DB
-        console.log('[Settings API - PUT] Calling updateEmailSettings in mock DB...');
-        const updatedSettings = updateEmailSettings(validation.data); // This function logs internally
-        console.log('[Settings API - PUT] Settings updated in mock DB. Responding with:', JSON.stringify(updatedSettings));
-        return NextResponse.json(updatedSettings);
+        // Call the server action to update settings
+        console.log('[Settings API - PUT] Calling updateEmailSettingsAction...');
+        const result = await updateEmailSettingsAction(validation.data);
 
-    } catch (error) {
+        if (result.success && result.settings) {
+             console.log('[Settings API - PUT] Settings updated via action. Responding with safe settings:', JSON.stringify(result.settings));
+             return NextResponse.json(result.settings); // Action returns without password
+        } else {
+             console.error('[Settings API - PUT] Action failed:', result.errors);
+             return NextResponse.json({ error: result.errors?.[0]?.message || 'Failed to save settings' }, { status: result.errors ? 400 : 500 });
+        }
+
+    } catch (error: any) {
         console.error('[Settings API - PUT] Error updating email settings:', error);
         if (error instanceof SyntaxError && error.message.includes('JSON')) {
             console.error('[Settings API - PUT] Invalid JSON payload.');

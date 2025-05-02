@@ -5,11 +5,9 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import type { LeaveType } from '@/modules/leave/types';
-// import { addLeaveTypeAction, updateLeaveTypeAction, deleteLeaveTypeAction } from '@/modules/leave/actions'; // Use API calls
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label'; // Keep for consistency
 import { Switch } from '@/components/ui/switch';
 import {
   Table,
@@ -50,9 +48,8 @@ import {
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form';
 import { PlusCircle, Edit, Trash2, Loader2, Save } from 'lucide-react';
 
-// --- Zod Schema for Leave Type Form ---
 const leaveTypeSchema = z.object({
-  id: z.string().optional(), // Optional for adding, required for editing
+  id: z.string().optional(),
   name: z.string().min(2, "Name must be at least 2 characters"),
   description: z.string().optional(),
   requiresApproval: z.boolean().default(true),
@@ -64,13 +61,12 @@ type LeaveTypeFormData = z.infer<typeof leaveTypeSchema>;
 
 interface LeaveTypeManagementProps {
   initialLeaveTypes: LeaveType[];
-  onUpdate: () => void; // Callback function on successful update/add/delete
+  onUpdate: () => void;
 }
 
 export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeManagementProps) {
   const { toast } = useToast();
-  // Use initialLeaveTypes prop directly, parent component handles updates
-  const leaveTypes = initialLeaveTypes;
+  const leaveTypes = initialLeaveTypes; // Use prop directly
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState<Record<string, boolean>>({});
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
@@ -78,16 +74,9 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
 
   const form = useForm<LeaveTypeFormData>({
     resolver: zodResolver(leaveTypeSchema),
-    defaultValues: {
-      name: '',
-      description: '',
-      requiresApproval: true,
-      defaultBalance: 0,
-      accrualRate: 0,
-    },
+    // Default values set in useEffect based on editingLeaveType
   });
 
-   // Effect to update form defaults when editingLeaveType changes
   React.useEffect(() => {
     if (editingLeaveType) {
       form.reset({
@@ -95,11 +84,11 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
         name: editingLeaveType.name,
         description: editingLeaveType.description || '',
         requiresApproval: editingLeaveType.requiresApproval,
-        defaultBalance: editingLeaveType.defaultBalance ?? 0, // Use nullish coalescing
-        accrualRate: editingLeaveType.accrualRate ?? 0,     // Use nullish coalescing
+        defaultBalance: editingLeaveType.defaultBalance ?? 0,
+        accrualRate: editingLeaveType.accrualRate ?? 0,
       });
     } else {
-      form.reset({ // Reset to default values when adding
+      form.reset({
         id: undefined,
         name: '',
         description: '',
@@ -110,18 +99,14 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
     }
   }, [editingLeaveType, form]);
 
-
   const onSubmit = async (data: LeaveTypeFormData) => {
     setIsSubmitting(true);
     const isEditMode = !!editingLeaveType;
     const apiUrl = isEditMode ? `/api/leave/types/${editingLeaveType.id}` : '/api/leave/types';
     const method = isEditMode ? 'PUT' : 'POST';
 
-    // Remove id from data if adding
     const payload = { ...data };
-    if (!isEditMode) {
-      delete payload.id;
-    }
+    if (!isEditMode) delete payload.id;
 
     try {
         const response = await fetch(apiUrl, {
@@ -130,25 +115,34 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
             body: JSON.stringify(payload),
         });
 
-        const result = await response.json(); // Always try to parse
+        let result: any;
+        let responseText: string | null = null;
+        try {
+             responseText = await response.text();
+             if(responseText) result = JSON.parse(responseText);
+        } catch(e) {
+            if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
+            result = {}; // OK but no JSON body
+        }
+
 
         if (!response.ok) {
-             throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
+             throw new Error(result?.error || result?.message || `HTTP error! Status: ${response.status}`);
         }
 
         toast({
             title: `Leave Type ${isEditMode ? 'Updated' : 'Added'}`,
-            description: `${result.name} has been successfully ${isEditMode ? 'updated' : 'added'}.`,
+            description: `${result.name || data.name} has been successfully ${isEditMode ? 'updated' : 'added'}.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
-        setIsDialogOpen(false); // Close dialog on success
-        setEditingLeaveType(null); // Clear editing state
-        form.reset(); // Reset form
-        onUpdate(); // Trigger refetch in parent
+        setIsDialogOpen(false);
+        setEditingLeaveType(null);
+        form.reset();
+        onUpdate(); // Refresh parent state
 
     } catch (error: any) {
-        console.error("Submit error:", error);
+        console.error("Leave Type Submit error:", error);
         toast({
             title: `Error ${isEditMode ? 'Updating' : 'Adding'} Leave Type`,
             description: error.message || "An unexpected error occurred.",
@@ -167,10 +161,18 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
             method: 'DELETE',
         });
 
-        const result = await response.json(); // Attempt to parse response
+         let result: any;
+         let responseText: string | null = null;
+         try {
+            responseText = await response.text();
+             if(responseText) result = JSON.parse(responseText);
+         } catch(e) {
+            if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
+            result = {}; // OK but no JSON body
+         }
 
         if (!response.ok) {
-            throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
+            throw new Error(result?.error || result?.message || `HTTP error! status: ${response.status}`);
         }
 
         toast({
@@ -178,18 +180,17 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
             description: `${name} has been successfully deleted.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
-        onUpdate(); // Trigger refetch in parent
+        onUpdate(); // Refresh parent state
 
     } catch (error: any) {
-        console.error("Delete error:", error);
+        console.error("Leave Type Delete error:", error);
          toast({
             title: "Deletion Failed",
-            description: error.message || "An unexpected error occurred. Please try again.",
+            description: error.message || "Could not delete leave type.",
             variant: "destructive",
         });
     } finally {
         setIsDeleting(prev => ({ ...prev, [id]: false }));
-        // Ensure the alert dialog closes even on error if needed, managed by AlertDialog itself typically.
     }
   };
 
@@ -199,24 +200,18 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
   };
 
   const openAddDialog = () => {
-    setEditingLeaveType(null); // Ensure we are in "add" mode
-    form.reset({ // Reset form to defaults for adding
-      id: undefined,
-      name: '',
-      description: '',
-      requiresApproval: true,
-      defaultBalance: 0,
-      accrualRate: 0,
+    setEditingLeaveType(null);
+    form.reset({
+      id: undefined, name: '', description: '', requiresApproval: true, defaultBalance: 0, accrualRate: 0,
     });
     setIsDialogOpen(true);
   };
 
    const handleDialogClose = (open: boolean) => {
      if (!open) {
-       // Reset form and editing state when dialog is closed
        setEditingLeaveType(null);
        form.reset();
-       form.clearErrors(); // Clear errors when closing
+       form.clearErrors();
      }
      setIsDialogOpen(open);
    };
@@ -324,7 +319,7 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
                    <DialogClose asChild>
                       <Button type="button" variant="outline" disabled={isSubmitting}>Cancel</Button>
                    </DialogClose>
-                  <Button type="submit" disabled={isSubmitting}>
+                  <Button type="submit" disabled={isSubmitting || !form.formState.isDirty}>
                     {isSubmitting ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
@@ -366,13 +361,13 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
                   <TableCell>{type.accrualRate ?? 0} days/month</TableCell>
                   <TableCell>{type.requiresApproval ? 'Yes' : 'No'}</TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(type)} className="mr-1">
+                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(type)} className="mr-1 h-8 w-8">
                       <Edit className="h-4 w-4" />
                        <span className="sr-only">Edit</span>
                     </Button>
                      <AlertDialog>
                        <AlertDialogTrigger asChild>
-                           <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={isDeleting[type.id]}>
+                           <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8" disabled={isDeleting[type.id]}>
                              {isDeleting[type.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                              <span className="sr-only">Delete</span>
                            </Button>

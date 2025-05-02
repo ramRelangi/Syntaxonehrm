@@ -3,11 +3,9 @@
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation'; // Keep if needed for other actions
 import { leaveRequestSchema, type LeaveRequestFormData, type LeaveType } from '@/modules/leave/types';
 import { Button } from "@/components/ui/button";
-// import { Input } from "@/components/ui/input"; // Not used directly
-import { Label } from "@/components/ui/label"; // Keep for consistency if used elsewhere
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -19,18 +17,16 @@ import { cn } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
 
 interface LeaveRequestFormProps {
-  employeeId: string; // Assume current user's employee ID is passed
+  employeeId: string;
   leaveTypes: LeaveType[];
-  // onSubmitAction removed, replaced by onSuccess callback
-  onSuccess: () => void; // Callback function on successful submission
+  onSuccess: () => void;
 }
 
 export function LeaveRequestForm({
   employeeId,
   leaveTypes,
-  onSuccess, // Use the onSuccess callback
+  onSuccess,
 }: LeaveRequestFormProps) {
-  const router = useRouter(); // Keep router if needed for other purposes, but not for refresh
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
   const [startDatePickerOpen, setStartDatePickerOpen] = React.useState(false);
@@ -39,7 +35,7 @@ export function LeaveRequestForm({
   const form = useForm<LeaveRequestFormData>({
     resolver: zodResolver(leaveRequestSchema),
     defaultValues: {
-      employeeId: employeeId, // Pre-fill employee ID
+      employeeId: employeeId,
       leaveTypeId: "",
       startDate: "",
       endDate: "",
@@ -54,10 +50,7 @@ export function LeaveRequestForm({
      if (startDateValue && endDateValue && isValid(parseISO(startDateValue)) && isValid(parseISO(endDateValue))) {
         const start = parseISO(startDateValue);
         const end = parseISO(endDateValue);
-        if (end >= start) {
-             // +1 because differenceInDays counts full 24h periods, inclusive count needed
-            return differenceInDays(end, start) + 1;
-        }
+        return end >= start ? differenceInDays(end, start) + 1 : 0;
      }
      return 0;
   };
@@ -66,7 +59,7 @@ export function LeaveRequestForm({
 
   const onSubmit = async (data: LeaveRequestFormData) => {
     setIsLoading(true);
-    console.log("Submitting leave request via API:", data);
+    console.log("[Leave Request Form] Submitting via API:", data);
 
     try {
         const response = await fetch('/api/leave/requests', {
@@ -75,29 +68,53 @@ export function LeaveRequestForm({
             body: JSON.stringify(data),
         });
 
-        const result = await response.json(); // Always try to parse response
+        let result: any;
+        let responseText: string | null = null;
+        try {
+            responseText = await response.text();
+             if (responseText) {
+                 result = JSON.parse(responseText);
+             }
+        } catch (jsonError) {
+             console.warn("[Leave Request Form] Failed to parse response JSON:", jsonError);
+             if (!response.ok) {
+                 throw new Error(responseText || `HTTP error! status: ${response.status}`);
+             }
+              console.warn("[Leave Request Form] OK response but non-JSON:", responseText);
+             result = {}; // Assume success based on status
+        }
+
 
         if (!response.ok) {
-            throw new Error(result.message || result.error || `HTTP error! status: ${response.status}`);
+            console.error("[Leave Request Form] API Error Response:", result);
+            throw new Error(result?.error || result?.message || `HTTP error! status: ${response.status}`);
         }
+
+         console.log("[Leave Request Form] API Success Response:", result);
 
         toast({
             title: "Leave Request Submitted",
-            description: `Your request has been submitted successfully.`, // Use generic success message
+            description: `Your request has been submitted successfully.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
-        form.reset(); // Reset form on success
-        onSuccess(); // Call the success callback
+        form.reset();
+        onSuccess(); // Call the success callback to refresh parent state
 
     } catch (error: any) {
-        console.error("Leave request submission error:", error);
+        console.error("[Leave Request Form] Submission error:", error);
+        let errorMessage = error.message || "An unexpected error occurred.";
+        // Display specific balance error
+         if (error.message?.includes('Insufficient leave balance')) {
+             errorMessage = 'Insufficient leave balance for the selected dates.';
+             form.setError("endDate", { type: "manual", message: errorMessage }); // Attach error to date field
+         } else {
+             form.setError("root.serverError", { message: errorMessage });
+         }
         toast({
             title: "Error Submitting Request",
-            description: error.message || "An unexpected error occurred. Please try again.",
+            description: errorMessage,
             variant: "destructive",
         });
-        // Optionally map specific API errors back to form fields if possible
-        form.setError("root.serverError", { message: error.message || "An unexpected server error occurred." });
     } finally {
         setIsLoading(false);
     }
@@ -106,17 +123,14 @@ export function LeaveRequestForm({
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-        {/* Display root level errors */}
-        {form.formState.errors.root?.serverError && (
-          <FormMessage className="text-destructive">
+        {form.formState.errors.root?.serverError && !form.formState.errors.endDate && ( // Avoid showing root error if specific field error exists
+          <FormMessage className="text-destructive text-center">
             {form.formState.errors.root.serverError.message}
           </FormMessage>
         )}
 
-         {/* Employee ID is hidden but included */}
          <input type="hidden" {...form.register("employeeId")} />
 
-         {/* Leave Type */}
          <FormField
             control={form.control}
             name="leaveTypeId"
@@ -142,9 +156,7 @@ export function LeaveRequestForm({
             )}
         />
 
-        {/* Dates */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Start Date */}
             <FormField
                 control={form.control}
                 name="startDate"
@@ -171,17 +183,11 @@ export function LeaveRequestForm({
                         mode="single"
                         selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
                         onSelect={(date) => {
-                            if (date && isValid(date)) {
-                                field.onChange(format(date, 'yyyy-MM-dd'));
-                                setStartDatePickerOpen(false);
-                                // Trigger validation for endDate if startDate changes
-                                form.trigger('endDate');
-                            } else {
-                                field.onChange("");
-                                setStartDatePickerOpen(false);
-                            }
+                            field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
+                            setStartDatePickerOpen(false);
+                            form.trigger('endDate'); // Re-validate end date
                         }}
-                        disabled={(date) => date < new Date(new Date().setHours(0,0,0,0)) } // Disable past dates
+                        disabled={(date) => date < new Date(new Date().setHours(0,0,0,0)) }
                         initialFocus
                         />
                     </PopoverContent>
@@ -191,7 +197,6 @@ export function LeaveRequestForm({
                 )}
             />
 
-            {/* End Date */}
              <FormField
                 control={form.control}
                 name="endDate"
@@ -218,17 +223,10 @@ export function LeaveRequestForm({
                         mode="single"
                         selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
                         onSelect={(date) => {
-                            if (date && isValid(date)) {
-                                field.onChange(format(date, 'yyyy-MM-dd'));
-                                setEndDatePickerOpen(false);
-                                // Trigger validation for endDate itself
-                                form.trigger('endDate');
-                            } else {
-                                field.onChange("");
-                                setEndDatePickerOpen(false);
-                            }
+                           field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
+                           setEndDatePickerOpen(false);
+                           form.trigger('endDate'); // Re-validate end date itself
                         }}
-                         // Disable dates before start date or today
                         disabled={(date) =>
                             date < (startDateValue && isValid(parseISO(startDateValue)) ? parseISO(startDateValue) : new Date(new Date().setHours(0,0,0,0)))
                         }
@@ -236,21 +234,18 @@ export function LeaveRequestForm({
                         />
                     </PopoverContent>
                     </Popover>
-                    <FormMessage />
+                    <FormMessage /> {/* Shows validation errors including custom balance error */}
                 </FormItem>
                 )}
             />
         </div>
 
-         {/* Display calculated leave days */}
          {leaveDays > 0 && (
             <div className="text-sm text-muted-foreground">
                 Total leave days requested: {leaveDays}
             </div>
         )}
 
-
-         {/* Reason */}
          <FormField
             control={form.control}
             name="reason"
@@ -268,7 +263,6 @@ export function LeaveRequestForm({
             </FormItem>
             )}
         />
-
 
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={() => form.reset()} disabled={isLoading}>

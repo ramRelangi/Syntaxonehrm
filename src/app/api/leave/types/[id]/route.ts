@@ -8,11 +8,11 @@ interface Params {
 
 // Simple Zod schema for updating (all fields optional)
 const updateLeaveTypeSchema = z.object({
-  name: z.string().min(1).optional(),
+  name: z.string().min(1, "Name cannot be empty").optional(),
   description: z.string().optional(),
   requiresApproval: z.boolean().optional(),
-  defaultBalance: z.number().min(0).optional(),
-  accrualRate: z.number().min(0).optional(),
+  defaultBalance: z.coerce.number().min(0).optional(), // Use coerce
+  accrualRate: z.coerce.number().min(0).optional(), // Use coerce
 }).partial(); // Make all fields optional for PUT/PATCH
 
 
@@ -22,9 +22,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
      const validation = updateLeaveTypeSchema.safeParse(body); // Validate input
 
     if (!validation.success) {
-       return NextResponse.json({ error: 'Invalid input', details: validation.error.errors }, { status: 400 });
+       console.error(`PUT /api/leave/types/${params.id} Validation Error:`, validation.error.flatten());
+       return NextResponse.json({ error: 'Invalid input', details: validation.error.flatten().fieldErrors }, { status: 400 });
     }
 
+    // Call server action
     const result = await updateLeaveTypeAction(params.id, validation.data);
 
     if (result.success && result.leaveType) {
@@ -32,10 +34,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
     } else if (result.errors?.some(e => e.message === 'Leave type not found')) {
         return NextResponse.json({ error: 'Leave type not found' }, { status: 404 });
     } else {
+       console.error(`PUT /api/leave/types/${params.id} Action Error:`, result.errors);
       return NextResponse.json({ error: result.errors?.[0]?.message || 'Failed to update leave type' }, { status: result.errors ? 400 : 500 });
     }
-  } catch (error) {
-    console.error(`Error updating leave type ${params.id}:`, error);
+  } catch (error: any) {
+    console.error(`Error updating leave type ${params.id} (API):`, error);
      if (error instanceof SyntaxError) {
        return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }
@@ -45,15 +48,18 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
 export async function DELETE(request: NextRequest, { params }: Params) {
   try {
+    // Call server action
     const result = await deleteLeaveTypeAction(params.id);
+
     if (result.success) {
       return NextResponse.json({ message: 'Leave type deleted successfully' }, { status: 200 }); // Or 204 No Content
     } else {
-      // Could be 404 (not found) or 400 (e.g., type in use)
-      return NextResponse.json({ error: 'Leave type not found or could not be deleted (might be in use)' }, { status: 400 });
+      // Use error from action (e.g., "in use" error)
+      const statusCode = result.error?.includes('in use') ? 400 : (result.error === 'Leave type not found.' ? 404 : 500);
+      return NextResponse.json({ error: result.error || 'Failed to delete leave type' }, { status: statusCode });
     }
-  } catch (error) {
-    console.error(`Error deleting leave type ${params.id}:`, error);
+  } catch (error: any) {
+    console.error(`Error deleting leave type ${params.id} (API):`, error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

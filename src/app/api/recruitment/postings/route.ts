@@ -1,9 +1,5 @@
-
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  getAllJobPostings as dbGetAllJobPostings,
-  addJobPosting as dbAddJobPosting,
-} from '@/modules/recruitment/lib/mock-db';
+import { getJobPostings, addJobPostingAction } from '@/modules/recruitment/actions';
 import { jobPostingSchema } from '@/modules/recruitment/types';
 import type { JobPostingStatus } from '@/modules/recruitment/types';
 
@@ -12,10 +8,10 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get('status') as JobPostingStatus | undefined;
 
   try {
-    const postings = dbGetAllJobPostings({ status });
+    const postings = await getJobPostings({ status }); // Call server action
     return NextResponse.json(postings);
   } catch (error) {
-    console.error('Error fetching job postings:', error);
+    console.error('Error fetching job postings (API):', error);
     return NextResponse.json({ error: 'Failed to fetch job postings' }, { status: 500 });
   }
 }
@@ -23,20 +19,25 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    // Validate everything except id and datePosted (which are set by the DB layer)
+    // Validate in the API route before calling the action
     const validation = jobPostingSchema.omit({ id: true, datePosted: true }).safeParse(body);
 
     if (!validation.success) {
-      return NextResponse.json({ error: 'Invalid input', details: validation.error.errors }, { status: 400 });
+       console.error("POST /api/recruitment/postings Validation Error:", validation.error.flatten());
+       return NextResponse.json({ error: 'Invalid input', details: validation.error.flatten().fieldErrors }, { status: 400 });
     }
 
-    // Pass validated data (which includes optional fields like closingDate, salaryRange correctly typed)
-    const newPosting = dbAddJobPosting(validation.data);
+    // Call server action
+    const result = await addJobPostingAction(validation.data);
 
-    return NextResponse.json(newPosting, { status: 201 });
-
-  } catch (error) {
-    console.error('Error adding job posting:', error);
+    if (result.success && result.jobPosting) {
+      return NextResponse.json(result.jobPosting, { status: 201 });
+    } else {
+      console.error("POST /api/recruitment/postings Action Error:", result.errors);
+      return NextResponse.json({ error: result.errors?.[0]?.message || 'Failed to add job posting' }, { status: result.errors ? 400 : 500 });
+    }
+  } catch (error: any) {
+    console.error('Error adding job posting (API):', error);
     if (error instanceof SyntaxError) {
        return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }

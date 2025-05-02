@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from 'react';
@@ -6,7 +5,7 @@ import type { EmailTemplate } from '@/modules/communication/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Edit, Trash2, Loader2, Eye } from 'lucide-react'; // Added Eye icon
+import { Edit, Trash2, Loader2, Eye } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,8 +27,8 @@ import { useToast } from '@/hooks/use-toast';
 
 interface EmailTemplateListProps {
   templates: EmailTemplate[];
-  onEdit: (template: EmailTemplate) => void; // Callback to open edit form/dialog
-  onDeleteSuccess: () => void; // Callback after successful deletion
+  onEdit: (template: EmailTemplate) => void;
+  onDeleteSuccess: () => void;
 }
 
 export function EmailTemplateList({ templates, onEdit, onDeleteSuccess }: EmailTemplateListProps) {
@@ -38,22 +37,36 @@ export function EmailTemplateList({ templates, onEdit, onDeleteSuccess }: EmailT
 
     const handleDelete = async (id: string, name: string) => {
         setDeletingId(id);
+        console.log(`[Email Template List] Deleting template ${id} via API...`);
         try {
             const response = await fetch(`/api/communication/templates/${id}`, { method: 'DELETE' });
-            const result = await response.json();
+
+            let result: any;
+            let responseText: string | null = null;
+            try {
+                responseText = await response.text();
+                if (responseText) result = JSON.parse(responseText);
+            } catch (e) {
+                if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
+                result = {}; // OK but no JSON body
+            }
 
             if (!response.ok) {
-                throw new Error(result.message || result.error || `Failed to delete ${name}`);
+                console.error("[Email Template List] API Delete Error:", result);
+                throw new Error(result?.error || result?.message || `Failed to delete ${name}`);
             }
+
+             console.log("[Email Template List] API Delete Success:", result);
 
             toast({
                 title: "Template Deleted",
                 description: `Template "${name}" has been successfully deleted.`,
                 className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
             });
-            onDeleteSuccess(); // Trigger refetch
+            onDeleteSuccess(); // Trigger refetch in parent
 
         } catch (error: any) {
+            console.error("[Email Template List] Delete error:", error);
             toast({
                 title: "Deletion Failed",
                 description: error.message || "An unexpected error occurred.",
@@ -87,7 +100,6 @@ export function EmailTemplateList({ templates, onEdit, onDeleteSuccess }: EmailT
                 </CardDescription>
             </CardHeader>
             <CardContent className="flex-grow">
-                {/* Optionally show a preview of the body */}
                 <Tooltip>
                    <TooltipTrigger asChild>
                        <p className="text-sm text-muted-foreground line-clamp-3">{template.body}</p>
@@ -99,11 +111,6 @@ export function EmailTemplateList({ templates, onEdit, onDeleteSuccess }: EmailT
             </CardContent>
             <div className="flex items-center justify-end p-3 border-t">
                 <div className="flex gap-1">
-                 {/* Placeholder for View/Preview action */}
-                  {/* <Button variant="ghost" size="icon" className="h-8 w-8">
-                      <Eye className="h-4 w-4" />
-                      <span className="sr-only">Preview</span>
-                  </Button> */}
                   <Button variant="ghost" size="icon" onClick={() => onEdit(template)} className="h-8 w-8">
                       <Edit className="h-4 w-4" />
                       <span className="sr-only">Edit</span>

@@ -1,25 +1,26 @@
+'use server';
 
-
-import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus } from '@/modules/leave/types';
+import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus, LeaveBalance } from '@/modules/leave/types';
 import { leaveRequestSchema } from '@/modules/leave/types';
 import {
   getAllLeaveRequests as dbGetAllLeaveRequests,
   getLeaveRequestById as dbGetLeaveRequestById,
   addLeaveRequest as dbAddLeaveRequest,
-  updateLeaveRequest as dbUpdateLeaveRequest,
-  deleteLeaveRequest as dbDeleteLeaveRequest,
+  updateLeaveRequestStatus as dbUpdateLeaveRequestStatus, // Use specific status update function
+  cancelLeaveRequest as dbCancelLeaveRequest, // Use specific cancel function
   getAllLeaveTypes as dbGetAllLeaveTypes,
   getLeaveTypeById as dbGetLeaveTypeById,
   addLeaveType as dbAddLeaveType,
   updateLeaveType as dbUpdateLeaveType,
   deleteLeaveType as dbDeleteLeaveType,
   getLeaveBalancesForEmployee as dbGetLeaveBalances,
-} from '@/modules/leave/lib/mock-db';
+  runMonthlyAccrual as dbRunMonthlyAccrual, // Import accrual function
+} from '@/modules/leave/lib/db'; // Import from the new DB file
 import { z } from 'zod';
-// import { revalidatePath } from 'next/cache'; // No longer needed here
+import { revalidatePath } from 'next/cache';
 import { differenceInDays } from 'date-fns';
 
-// --- These functions are now intended to be called by API routes ---
+// --- Server Actions ---
 
 // --- Leave Request Actions ---
 
@@ -31,81 +32,74 @@ export async function getLeaveRequestById(id: string): Promise<LeaveRequest | un
   return dbGetLeaveRequestById(id);
 }
 
-export async function addLeaveRequest(formData: LeaveRequestFormData): Promise<{ success: boolean; request?: LeaveRequest; errors?: z.ZodIssue[] }> {
+export async function addLeaveRequest(formData: LeaveRequestFormData): Promise<{ success: boolean; request?: LeaveRequest; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
+  // 'use server';
   const validation = leaveRequestSchema.safeParse(formData);
 
   if (!validation.success) {
+    console.error("Add Leave Request Validation Errors:", validation.error.flatten());
     return { success: false, errors: validation.error.errors };
   }
 
-  // Additional business logic checks (e.g., balance check) could go here
-  // const balances = await dbGetLeaveBalances(validation.data.employeeId);
-  // const leaveType = await dbGetLeaveTypeById(validation.data.leaveTypeId);
-  // const requestedDays = differenceInDays(new Date(validation.data.endDate), new Date(validation.data.startDate)) + 1;
-  // const relevantBalance = balances.find(b => b.leaveTypeId === validation.data.leaveTypeId);
-  // if (leaveType?.requiresApproval && relevantBalance && relevantBalance.balance < requestedDays) {
-  //   return { success: false, errors: [{ code: 'custom', path: ['endDate'], message: 'Insufficient leave balance' }] };
-  // }
-
   try {
-    const newRequest = await dbAddLeaveRequest(validation.data); // Await the async addLeaveRequest
-    // revalidatePath('/leave'); // Revalidation handled by client-side cache invalidation
-    // Optionally revalidate employee-specific views if they exist
+    // The dbAddLeaveRequest now handles balance check and transaction
+    const newRequest = await dbAddLeaveRequest(validation.data);
+    revalidatePath('/leave'); // Revalidate leave page
+    revalidatePath(`/api/leave/balances/${formData.employeeId}`); // Revalidate balance endpoint (if needed)
     return { success: true, request: newRequest };
   } catch (error: any) {
-    console.error("Error adding leave request:", error);
-    return { success: false, errors: [{ code: 'custom', path: [''], message: error.message || 'Failed to add leave request.' }] };
+    console.error("Error adding leave request (action):", error);
+    // Return specific error message (e.g., insufficient balance)
+    return { success: false, errors: [{ code: 'custom', path: ['endDate'], message: error.message || 'Failed to add leave request.' }] };
   }
 }
 
 export async function updateLeaveRequestStatus(
     id: string,
-    status: LeaveRequestStatus,
+    status: 'Approved' | 'Rejected', // Only allow these via this action
     comments?: string,
     approverId?: string // In real app, get from session
-): Promise<{ success: boolean; request?: LeaveRequest; errors?: z.ZodIssue[] }> {
-  if (!['Approved', 'Rejected', 'Cancelled'].includes(status)) {
-     return { success: false, errors: [{ code: 'custom', path: ['status'], message: 'Invalid status update.' }] };
+): Promise<{ success: boolean; request?: LeaveRequest; errors?: { code: string; path: string[]; message: string }[] }> {
+  // 'use server';
+  if (!['Approved', 'Rejected'].includes(status)) {
+     return { success: false, errors: [{ code: 'custom', path: ['status'], message: 'Invalid status update value.' }] };
   }
-
-  // Add more validation? E.g., only pending requests can be approved/rejected
+  // TODO: Add role check - only admins/managers can approve/reject
 
   try {
-    const updatedRequest = dbUpdateLeaveRequest(id, { status, comments, approverId });
+    // The db function now handles transaction and balance adjustment
+    const updatedRequest = await dbUpdateLeaveRequestStatus(id, status, comments, approverId /* Get from session */);
     if (updatedRequest) {
-      // revalidatePath('/leave'); // Revalidate list
-      // Revalidate detail page if exists: revalidatePath(`/leave/${id}`);
+      revalidatePath('/leave');
+      revalidatePath(`/api/leave/balances/${updatedRequest.employeeId}`); // Revalidate balance
+      // TODO: Send notification email to employee
       return { success: true, request: updatedRequest };
     } else {
+      // This case might be handled by db throwing an error now
       return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Leave request not found or cannot be updated.' }] };
     }
-  } catch (error) {
-    console.error("Error updating leave request status:", error);
-    return { success: false }; // Consider adding error message detail here
+  } catch (error: any) {
+    console.error("Error updating leave request status (action):", error);
+    return { success: false, errors: [{ code: 'custom', path: ['id'], message: error.message || 'Failed to update leave request status.' }] };
   }
 }
 
-
-export async function cancelLeaveRequest(id: string): Promise<{ success: boolean }> {
-    // This might need role checks in a real app (employee can cancel pending, admin maybe others)
-     try {
-        // Attempt to update status to 'Cancelled'. dbUpdateLeaveRequest might have internal logic
-        // OR use a dedicated cancel function if needed.
-        // For simplicity, we allow direct update if the request exists and is pending.
-        const request = await dbGetLeaveRequestById(id);
-        if (request?.status === 'Pending') {
-             const updated = dbUpdateLeaveRequest(id, { status: 'Cancelled' });
-             if (updated) {
-                // revalidatePath('/leave');
-                return { success: true };
-             }
-        }
-         // If not pending or not found
-        return { success: false };
-    } catch (error) {
-        console.error("Error cancelling leave request:", error);
-        return { success: false }; // Consider adding error message detail here
+export async function cancelLeaveRequest(id: string, userId: string /* from session */): Promise<{ success: boolean; error?: string }> {
+  // 'use server';
+  try {
+    const updatedRequest = await dbCancelLeaveRequest(id, userId /* from session */);
+    if (updatedRequest) {
+        revalidatePath('/leave');
+        // Balance refund logic should be handled within dbCancelLeaveRequest if needed
+        return { success: true };
+    } else {
+        // Should not happen if checks pass in db function
+        return { success: false, error: 'Failed to cancel request (unexpected).' };
     }
+  } catch (error: any) {
+    console.error("Error cancelling leave request (action):", error);
+    return { success: false, error: error.message || 'Failed to cancel leave request.' };
+  }
 }
 
 
@@ -115,64 +109,97 @@ export async function getLeaveTypes(): Promise<LeaveType[]> {
   return dbGetAllLeaveTypes();
 }
 
-// Add action for adding leave types - omitted schema definition for brevity
-export async function addLeaveTypeAction(formData: Omit<LeaveType, 'id'>): Promise<{ success: boolean; leaveType?: LeaveType; errors?: z.ZodIssue[] }> {
-  // Basic validation example (add zod schema in real app)
-  if (!formData.name || !formData.name.trim()) {
+export async function addLeaveTypeAction(formData: Omit<LeaveType, 'id'>): Promise<{ success: boolean; leaveType?: LeaveType; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
+  // 'use server';
+  // Add Zod schema validation here for formData
+  // const validation = leaveTypeSchema.omit({id: true}).safeParse(formData);
+  // if (!validation.success) { return ... }
+
+   if (!formData.name || !formData.name.trim()) {
      return { success: false, errors: [{ code: 'custom', path: ['name'], message: 'Leave type name is required' }] };
-  }
+   }
+   if (formData.defaultBalance !== undefined && formData.defaultBalance < 0) {
+      return { success: false, errors: [{ code: 'custom', path: ['defaultBalance'], message: 'Default balance cannot be negative' }] };
+   }
+    if (formData.accrualRate !== undefined && formData.accrualRate < 0) {
+      return { success: false, errors: [{ code: 'custom', path: ['accrualRate'], message: 'Accrual rate cannot be negative' }] };
+   }
+
 
   try {
-    const newLeaveType = await dbAddLeaveType(formData); // Await async addLeaveType
-    // revalidatePath('/leave'); // Revalidate page where types are displayed/managed
+    const newLeaveType = await dbAddLeaveType(formData);
+    revalidatePath('/leave'); // Revalidate page where types are displayed/managed
     return { success: true, leaveType: newLeaveType };
-  } catch (error) {
-    console.error("Error adding leave type:", error);
-    return { success: false }; // Consider adding error message detail here
+  } catch (error: any) {
+    console.error("Error adding leave type (action):", error);
+    return { success: false, errors: [{ code: 'custom', path: ['name'], message: error.message || 'Failed to add leave type.' }] };
   }
 }
 
-// Update action for leave types - omitted schema definition for brevity
-export async function updateLeaveTypeAction(id: string, formData: Partial<Omit<LeaveType, 'id'>>): Promise<{ success: boolean; leaveType?: LeaveType; errors?: z.ZodIssue[] }> {
-   // Basic validation example
+export async function updateLeaveTypeAction(id: string, formData: Partial<Omit<LeaveType, 'id'>>): Promise<{ success: boolean; leaveType?: LeaveType; errors?: { code: string; path: string[]; message: string }[] }> {
+  // 'use server';
+   // Add Zod validation for partial updates
+
    if (formData.name !== undefined && !formData.name.trim()) {
      return { success: false, errors: [{ code: 'custom', path: ['name'], message: 'Leave type name cannot be empty' }] };
    }
+    if (formData.defaultBalance !== undefined && formData.defaultBalance < 0) {
+      return { success: false, errors: [{ code: 'custom', path: ['defaultBalance'], message: 'Default balance cannot be negative' }] };
+   }
+    if (formData.accrualRate !== undefined && formData.accrualRate < 0) {
+      return { success: false, errors: [{ code: 'custom', path: ['accrualRate'], message: 'Accrual rate cannot be negative' }] };
+   }
 
   try {
-    const updatedLeaveType = dbUpdateLeaveType(id, formData);
+    const updatedLeaveType = await dbUpdateLeaveType(id, formData);
     if (updatedLeaveType) {
-      // revalidatePath('/leave');
+      revalidatePath('/leave');
       return { success: true, leaveType: updatedLeaveType };
     } else {
       return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Leave type not found' }] };
     }
-  } catch (error) {
-    console.error("Error updating leave type:", error);
-    return { success: false }; // Consider adding error message detail here
+  } catch (error: any) {
+    console.error("Error updating leave type (action):", error);
+     return { success: false, errors: [{ code: 'custom', path: ['name'], message: error.message || 'Failed to update leave type.' }] };
   }
 }
 
-// Delete action for leave types
-export async function deleteLeaveTypeAction(id: string): Promise<{ success: boolean }> {
+export async function deleteLeaveTypeAction(id: string): Promise<{ success: boolean; error?: string }> {
+  // 'use server';
   try {
-    // Consider adding checks here: can't delete if requests use this type?
-    const deleted = dbDeleteLeaveType(id);
+    // dbDeleteLeaveType now includes usage checks
+    const deleted = await dbDeleteLeaveType(id);
     if (deleted) {
-      // revalidatePath('/leave');
+      revalidatePath('/leave');
       return { success: true };
     } else {
-      return { success: false }; // Not found or couldn't delete
+       // Should be caught by db function throwing error if in use
+      return { success: false, error: 'Leave type not found.' };
     }
-  } catch (error) {
-    console.error("Error deleting leave type:", error);
-    return { success: false }; // Consider adding error message detail here
+  } catch (error: any) {
+    console.error("Error deleting leave type (action):", error);
+    return { success: false, error: error.message || 'Failed to delete leave type.' };
   }
 }
 
 
 // --- Leave Balance Actions ---
-export async function getEmployeeLeaveBalances(employeeId: string) {
-    // Example action to fetch balances
+export async function getEmployeeLeaveBalances(employeeId: string): Promise<LeaveBalance[]> {
+    // This is mainly for reading data, often called via API routes from client
     return dbGetLeaveBalances(employeeId);
+}
+
+// --- Accrual Action ---
+export async function runAccrualProcess(): Promise<{ success: boolean; error?: string }> {
+    // 'use server'; // This might be triggered manually or by a scheduled task/cron job
+    console.log("Triggering accrual process via server action...");
+    try {
+        await dbRunMonthlyAccrual();
+        revalidatePath('/leave'); // Revalidate pages showing balances
+        // Consider revalidating individual employee balance endpoints if they exist
+        return { success: true };
+    } catch (error: any) {
+        console.error("Error running accrual process (action):", error);
+        return { success: false, error: error.message || 'Failed to run accrual process.' };
+    }
 }

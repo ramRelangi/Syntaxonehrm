@@ -36,6 +36,7 @@ import {
 import { ChevronDown, Search, Filter } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Employee } from "@/modules/employees/types";
+// ActionsCell is defined in columns file
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -51,18 +52,16 @@ export function EmployeeDataTable<TData extends Employee, TValue>({
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
-  const [rowSelection, setRowSelection] = React.useState({}); // If needed for bulk actions
+  const [rowSelection, setRowSelection] = React.useState({});
 
-  // Pass the onEmployeeDeleted callback down to the columns definition if needed,
-  // or handle it within the ActionsCell if actions are defined directly here.
-  // For this example, we'll assume the columns definition is updated separately
-  // or the ActionsCell component handles the API call and callback trigger.
+  // Inject the onEmployeeDeleted callback into the actions cell component's props
   const tableColumns = React.useMemo(() => columns.map(col => {
+      // Find the 'actions' column and modify its cell renderer
       if (col.id === 'actions' && col.cell) {
-          // Inject the callback into the actions cell component's props
-          const OriginalCell = col.cell;
+          const OriginalCell = col.cell as React.FC<any>; // Cast to access component props
           return {
               ...col,
+              // Replace the cell renderer with a new one that passes the callback
               cell: (props: any) => <OriginalCell {...props} onEmployeeDeleted={onEmployeeDeleted} />
           };
       }
@@ -72,7 +71,7 @@ export function EmployeeDataTable<TData extends Employee, TValue>({
 
   const table = useReactTable({
     data,
-    columns: tableColumns, // Use the potentially modified columns
+    columns: tableColumns, // Use the modified columns
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     onSortingChange: setSorting,
@@ -89,7 +88,7 @@ export function EmployeeDataTable<TData extends Employee, TValue>({
     },
      initialState: {
       pagination: {
-        pageSize: 10, // Set default page size
+        pageSize: 10,
       },
     },
   });
@@ -104,12 +103,11 @@ export function EmployeeDataTable<TData extends Employee, TValue>({
            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
            <Input
             placeholder="Filter by name or email..."
+            // Filter on the 'name' column (server-side filtering might be better for large datasets)
             value={(table.getColumn("name")?.getFilterValue() as string) ?? ""}
             onChange={(event) => {
-               // Apply filter to both name and email for broader search
-               table.getColumn("name")?.setFilterValue(event.target.value);
-               // Optionally filter email separately if needed, or combine logic
-               // table.getColumn("email")?.setFilterValue(event.target.value)
+               table.getColumn("name")?.setFilterValue(event.target.value)
+               // Consider also filtering email client-side or rely on backend search
             }}
             className="pl-8 w-full md:w-[300px]"
           />
@@ -135,7 +133,7 @@ export function EmployeeDataTable<TData extends Employee, TValue>({
                   const newFilter = value
                     ? [...currentFilter, status]
                     : currentFilter.filter(s => s !== status);
-                  table.getColumn("status")?.setFilterValue(newFilter.length > 0 ? newFilter : undefined); // Set to undefined if empty
+                  table.getColumn("status")?.setFilterValue(newFilter.length > 0 ? newFilter : undefined);
                 }}
               >
                 {status}
@@ -242,7 +240,7 @@ export function EmployeeDataTable<TData extends Employee, TValue>({
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={tableColumns.length} // Use tableColumns length
+                  colSpan={tableColumns.length}
                   className="h-24 text-center"
                 >
                   No results found.
@@ -256,8 +254,6 @@ export function EmployeeDataTable<TData extends Employee, TValue>({
       {/* Pagination Controls */}
        <div className="flex items-center justify-end space-x-2 py-4">
          <div className="flex-1 text-sm text-muted-foreground">
-           {/* Show selection count if needed */}
-           {/* {table.getFilteredSelectedRowModel().rows.length} of{" "} */}
            {table.getFilteredRowModel().rows.length} row(s) displayed.
          </div>
         <Button

@@ -1,5 +1,4 @@
-
-
+'use server';
 
 import type { Employee } from '@/modules/employees/types';
 import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types';
@@ -9,84 +8,86 @@ import {
   addEmployee as dbAddEmployee,
   updateEmployee as dbUpdateEmployee,
   deleteEmployee as dbDeleteEmployee,
-} from '@/modules/employees/lib/mock-db';
+} from '@/modules/employees/lib/db'; // Import from the new DB file
 import { z } from 'zod';
-// import { revalidatePath } from 'next/cache'; // No longer needed here
+import { revalidatePath } from 'next/cache'; // Keep revalidatePath for server actions
 
-// --- These functions are now intended to be called by API routes ---
+// --- Server Actions ---
+
+// These functions are intended to be called DIRECTLY from client components
+// using the 'use server' directive.
 
 export async function getEmployees(): Promise<Employee[]> {
-  // Simulate potential async delay
-  // await new Promise(resolve => setTimeout(resolve, 50));
+  // No 'use server' needed here if only called by other server actions/components
   return dbGetAllEmployees();
 }
 
 export async function getEmployeeById(id: string): Promise<Employee | undefined> {
-  // Simulate potential async delay
-  // await new Promise(resolve => setTimeout(resolve, 50));
+  // No 'use server' needed here if only called by other server actions/components
   return dbGetEmployeeById(id);
 }
 
 export async function addEmployee(formData: EmployeeFormData): Promise<{ success: boolean; employee?: Employee; errors?: z.ZodIssue[] }> {
+  // 'use server'; // This action will be called from the client form
+
   const validation = employeeSchema.safeParse(formData);
 
   if (!validation.success) {
+    console.error("Add Employee Validation Errors:", validation.error.flatten());
     return { success: false, errors: validation.error.errors };
   }
 
   try {
-    // Simulate potential async delay
-    // await new Promise(resolve => setTimeout(resolve, 100));
-    const newEmployee = dbAddEmployee(validation.data);
-    // revalidatePath('/employees'); // Revalidation handled by client-side cache invalidation
+    const newEmployee = await dbAddEmployee(validation.data);
+    revalidatePath('/employees'); // Revalidate the employee list page
     return { success: true, employee: newEmployee };
-  } catch (error) {
-    console.error("Error adding employee:", error);
-    // In a real app, you might return a more specific error message
-    return { success: false }; // Consider adding error message detail here
+  } catch (error: any) {
+    console.error("Error adding employee (action):", error);
+    // Return specific error message if available (e.g., duplicate email)
+     return { success: false, errors: [{ code: 'custom', path: ['email'], message: error.message || 'Failed to add employee.' }] };
   }
 }
 
 export async function updateEmployee(id: string, formData: EmployeeFormData): Promise<{ success: boolean; employee?: Employee; errors?: z.ZodIssue[] }> {
-   const validation = employeeSchema.safeParse(formData);
+ // 'use server'; // This action will be called from the client form
+
+  const validation = employeeSchema.safeParse(formData);
 
   if (!validation.success) {
+     console.error("Update Employee Validation Errors:", validation.error.flatten());
     return { success: false, errors: validation.error.errors };
   }
 
   try {
-    // Simulate potential async delay
-    // await new Promise(resolve => setTimeout(resolve, 100));
-    const updatedEmployee = dbUpdateEmployee(id, validation.data);
+    const updatedEmployee = await dbUpdateEmployee(id, validation.data);
     if (updatedEmployee) {
-      // revalidatePath('/employees'); // Invalidate list
-      // revalidatePath(`/employees/${id}`); // Invalidate detail page
-      // revalidatePath(`/employees/${id}/edit`); // Invalidate edit page
+      revalidatePath('/employees'); // Invalidate list
+      revalidatePath(`/employees/${id}`); // Invalidate detail page
+      revalidatePath(`/employees/${id}/edit`); // Invalidate edit page
       return { success: true, employee: updatedEmployee };
     } else {
-      // Handle case where employee might not be found during update
-       return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Employee not found' }] };
+      return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Employee not found' }] };
     }
-  } catch (error) {
-    console.error("Error updating employee:", error);
-    return { success: false }; // Consider adding error message detail here
+  } catch (error: any) {
+    console.error("Error updating employee (action):", error);
+     return { success: false, errors: [{ code: 'custom', path: ['email'], message: error.message || 'Failed to update employee.' }] };
   }
 }
 
-export async function deleteEmployeeAction(id: string): Promise<{ success: boolean }> {
+export async function deleteEmployeeAction(id: string): Promise<{ success: boolean; error?: string }> {
+  // 'use server'; // This action will be called from the client (e.g., data table)
+
   try {
-    // Simulate potential async delay
-    // await new Promise(resolve => setTimeout(resolve, 100));
-    const deleted = dbDeleteEmployee(id);
+    const deleted = await dbDeleteEmployee(id);
     if (deleted) {
-      // revalidatePath('/employees'); // Invalidate list
-      // No need to revalidate detail/edit pages that will now 404
+      revalidatePath('/employees'); // Invalidate list
       return { success: true };
     } else {
-      return { success: false }; // Employee not found
+      // Should not happen if called from UI where ID exists, but handle defensively
+      return { success: false, error: 'Employee not found.' };
     }
-  } catch (error) {
-    console.error("Error deleting employee:", error);
-    return { success: false }; // Consider adding error message detail here
+  } catch (error: any) {
+    console.error("Error deleting employee (action):", error);
+    return { success: false, error: error.message || 'Failed to delete employee.' };
   }
 }
