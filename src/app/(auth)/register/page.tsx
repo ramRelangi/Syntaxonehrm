@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { z } from 'zod';
+// import { z } from 'zod'; // Zod schema is now in auth/types
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Button } from "@/components/ui/button";
@@ -12,60 +12,68 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
-
-const registerSchema = z.object({
-  companyName: z.string().min(1, "Company name is required"),
-  companyDomain: z.string().min(1, "Company domain is required").regex(/^[a-zA-Z0-9-]+$/, "Domain can only contain letters, numbers, and hyphens"),
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-});
-
-type RegisterFormInputs = z.infer<typeof registerSchema>;
+import { registrationSchema, type RegistrationFormData } from '@/modules/auth/types'; // Import schema and type
+import { registerTenantAction } from '@/modules/auth/actions'; // Import server action
 
 export default function RegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
 
-  const form = useForm<RegisterFormInputs>({
-    resolver: zodResolver(registerSchema),
+  const form = useForm<RegistrationFormData>({
+    resolver: zodResolver(registrationSchema),
     defaultValues: {
       companyName: "",
       companyDomain: "",
-      email: "",
-      password: "",
+      adminName: "", // Added admin name
+      adminEmail: "",
+      adminPassword: "",
     },
   });
 
-  const onSubmit: SubmitHandler<RegisterFormInputs> = async (data) => {
+  const onSubmit: SubmitHandler<RegistrationFormData> = async (data) => {
     setIsLoading(true);
     console.log("Registration data:", data);
-    // --- Mock Registration Logic ---
-    // In a real app, you'd call your backend API here to register the company and user
-    // e.g., const response = await fetch('/api/auth/register', { method: 'POST', body: JSON.stringify(data) });
-    // Handle potential errors like duplicate domain/email
-    await new Promise(resolve => setTimeout(resolve, 1500));
 
-    // Simulate success or failure
-    if (data.companyDomain === 'fail-domain') {
-       toast({
-        title: "Registration Failed",
-        description: "Company domain is already taken.",
-        variant: "destructive",
-      });
-      setIsLoading(false);
-    } else {
-      toast({
-        title: "Registration Successful",
-        description: "Your company account has been created. Please login.",
-         // Use the green accent color for success
-        className: "bg-green-100 text-green-800 border-green-300 dark:bg-green-900 dark:text-green-100 dark:border-green-700", // Direct Tailwind for accent color example
-      });
-      // Redirect to login page after successful registration
-      router.push('/login');
-       // No need to setIsLoading(false) here as we are navigating away
+    try {
+        // Call the server action
+        const result = await registerTenantAction(data);
+
+        if (result.success && result.tenant) {
+             toast({
+                title: "Registration Successful",
+                description: `Company "${result.tenant.name}" created. Please login.`,
+                className: "bg-green-100 text-green-800 border-green-300 dark:bg-green-900 dark:text-green-100 dark:border-green-700",
+             });
+             router.push('/login'); // Redirect to login page
+             // No need to setIsLoading(false) as we navigate away
+        } else {
+            const errorMessage = result.errors?.[0]?.message || 'Registration failed. Please try again.';
+            toast({
+                title: "Registration Failed",
+                description: errorMessage,
+                variant: "destructive",
+            });
+            setIsLoading(false);
+            // Set specific field errors if available from action
+            if (result.errors?.some(e => e.path?.includes('companyDomain'))) {
+                form.setError("companyDomain", { type: 'server', message: errorMessage });
+            } else if (result.errors?.some(e => e.path?.includes('adminEmail'))) {
+                form.setError("adminEmail", { type: 'server', message: errorMessage });
+            } else {
+                 form.setError("root.serverError", { type: 'server', message: errorMessage });
+            }
+        }
+    } catch (error) {
+        console.error("Unexpected error during registration:", error);
+        toast({
+            title: "Registration Error",
+            description: "An unexpected error occurred. Please try again later.",
+            variant: "destructive",
+        });
+        setIsLoading(false);
+         form.setError("root.serverError", { type: 'unexpected', message: 'An unexpected error occurred.' });
     }
-    // --- End Mock Logic ---
   };
 
   return (
@@ -73,11 +81,16 @@ export default function RegisterPage() {
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold">Register for StreamlineHR</CardTitle>
-          <CardDescription>Create your company account</CardDescription>
+          <CardDescription>Create your company account and admin user</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+             {form.formState.errors.root?.serverError && (
+                <FormMessage className="text-destructive text-center">
+                    {form.formState.errors.root.serverError.message}
+                </FormMessage>
+            )}
               <FormField
                 control={form.control}
                 name="companyName"
@@ -99,7 +112,7 @@ export default function RegisterPage() {
                     <FormLabel>Choose Your Domain</FormLabel>
                     <FormControl>
                       <div className="flex items-center">
-                         <Input placeholder="your-company" {...field} className="rounded-r-none" />
+                         <Input placeholder="your-company" {...field} className="rounded-r-none lowercase" />
                          <span className="inline-flex items-center rounded-r-md border border-l-0 border-input bg-secondary px-3 text-sm text-muted-foreground">
                             .streamlinehr.app
                          </span>
@@ -109,14 +122,27 @@ export default function RegisterPage() {
                   </FormItem>
                 )}
               />
+               <FormField
+                control={form.control}
+                name="adminName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Your Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Your Full Name" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
-                name="email"
+                name="adminEmail"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Your Email (Admin)</FormLabel>
                     <FormControl>
-                      <Input placeholder="admin@example.com" {...field} type="email" />
+                      <Input placeholder="admin@yourcompany.com" {...field} type="email" />
                     </FormControl>
                      <FormMessage />
                   </FormItem>
@@ -124,7 +150,7 @@ export default function RegisterPage() {
               />
               <FormField
                 control={form.control}
-                name="password"
+                name="adminPassword"
                 render={({ field }) => (
                   <FormItem>
                      <FormLabel>Password</FormLabel>
