@@ -55,6 +55,7 @@ const TableRow = React.forwardRef<
   HTMLTableRowElement,
   React.HTMLAttributes<HTMLTableRowElement>
 >(({ className, children, ...props }, ref) => { // Add children prop
+  // Place opening tag, children, and closing tag carefully to avoid whitespace issues
   return (
     <tr
       ref={ref}
@@ -63,9 +64,7 @@ const TableRow = React.forwardRef<
         className
       )}
       {...props}
-    >{/* Ensure no whitespace between opening tag and children */}
-      {children}
-    {/* Ensure no whitespace between children and closing tag */}</tr>
+    >{children}</tr> // Ensure no whitespace between tags and children
   );
 });
 TableRow.displayName = "TableRow"
