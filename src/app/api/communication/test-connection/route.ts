@@ -1,9 +1,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
-import { emailSettingsSchema } from '@/modules/communication/types';
+import { emailSettingsSchema, type EmailSettings } from '@/modules/communication/types';
 
 export async function POST(request: NextRequest) {
+  let settings: EmailSettings | null = null; // Define settings outside try for use in catch
   try {
     const body = await request.json();
     console.log('[Test Connection] Received request with body:', body); // Log received data
@@ -13,10 +14,10 @@ export async function POST(request: NextRequest) {
 
     if (!validation.success) {
       console.error('[Test Connection] Invalid input:', validation.error.errors);
-      return NextResponse.json({ error: 'Invalid input', details: validation.error.errors }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid input', message: 'SMTP settings are incomplete or invalid.', details: validation.error.errors }, { status: 400 });
     }
 
-    const settings = validation.data;
+    settings = validation.data; // Assign validated data
     console.log(`[Test Connection] Using validated settings: host=${settings.smtpHost}, port=${settings.smtpPort}, user=${settings.smtpUser}, secure=${settings.smtpSecure}`);
 
     // Create a Nodemailer transporter object using the validated settings
@@ -52,14 +53,18 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('[Test Connection] Error:', error); // Log the full error object
 
+    // Determine host/port for error message, using fallbacks
+    const host = settings?.smtpHost ?? 'the specified host';
+    const port = settings?.smtpPort ?? 'the specified port';
+
     // Provide more specific error messages based on common nodemailer error codes
-    let errorMessage = `Failed to connect to SMTP server (${settings.smtpHost}:${settings.smtpPort}).`;
+    let errorMessage = `Failed to connect to SMTP server (${host}:${port}).`;
     let statusCode = 500; // Default to Internal Server Error
 
     if (error.code) {
        switch (error.code) {
            case 'ECONNREFUSED':
-               errorMessage = `Connection refused by ${error.address || settings.smtpHost}:${error.port || settings.smtpPort}. Check host, port, and firewall settings.`;
+               errorMessage = `Connection refused by ${error.address || host}:${error.port || port}. Check host, port, and firewall settings.`;
                statusCode = 400; // Bad request (likely wrong host/port)
                break;
            case 'ETIMEDOUT':
@@ -72,11 +77,11 @@ export async function POST(request: NextRequest) {
                statusCode = 401; // Unauthorized
                break;
            case 'ENOTFOUND':
-               errorMessage = `Could not resolve hostname '${settings.smtpHost}'. Check the SMTP host address.`;
+               errorMessage = `Could not resolve hostname '${host}'. Check the SMTP host address.`;
                statusCode = 400; // Bad request
                break;
            case 'EHOSTUNREACH':
-               errorMessage = `Host unreachable '${settings.smtpHost}'. Check network or host address.`;
+               errorMessage = `Host unreachable '${host}'. Check network or host address.`;
                statusCode = 400;
                break;
            default:
@@ -101,13 +106,18 @@ export async function POST(request: NextRequest) {
              default:
                  errorMessage += ` SMTP Response Code: ${error.responseCode}.`;
          }
+    } else if (error instanceof SyntaxError) {
+        // Handle potential JSON parsing errors if the request body was invalid
+        errorMessage = 'Invalid request format received.';
+        statusCode = 400;
     }
 
-    // Include the original error message for debugging
-    errorMessage += ` (Details: ${error.message || 'Unknown error'})`;
+    // Include the original error message for debugging if available
+    const details = error.message || 'Unknown error during connection test.';
+    errorMessage += ` (Details: ${details})`;
 
     console.error(`[Test Connection] Responding with status ${statusCode}: ${errorMessage}`);
-    // Return status code based on error type
+    // Return status code based on error type, ensuring JSON format
     return NextResponse.json({ error: 'Connection failed', message: errorMessage, details: error.toString() }, { status: statusCode });
   }
 }

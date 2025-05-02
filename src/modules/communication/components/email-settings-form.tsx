@@ -51,18 +51,22 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
         // Check response status and content type before parsing JSON
         if (!response.ok) {
             let errorPayload = { message: `Failed to save settings. Status: ${response.status}` };
+            let errorText = '';
             try {
-                const errorText = await response.text();
+                errorText = await response.text();
                 console.error("Save Settings - Server Error Response Text:", errorText);
-                // Try to parse, fallback to raw text or status code
-                errorPayload = JSON.parse(errorText);
-                if (!errorPayload.message && errorText) {
-                  errorPayload.message = errorText; // Use raw text if JSON has no message
+                if (errorText) {
+                    errorPayload = JSON.parse(errorText);
+                     if (!errorPayload.message) {
+                      errorPayload.message = errorText; // Use raw text if JSON parsing worked but no message field
+                    }
                 }
             } catch (parseError) {
                 console.error("Save Settings - Failed to parse error response:", parseError);
+                 // Use raw text if available and parsing failed, otherwise use status
+                errorPayload.message = errorText || `Failed to save settings. Status: ${response.status}`;
             }
-            throw new Error(errorPayload.message || `Failed to save settings. Status: ${response.status}`);
+            throw new Error(errorPayload.message);
         }
 
          const contentType = response.headers.get("content-type");
@@ -126,20 +130,26 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
       // Check response status and content type before parsing
       if (!response.ok) {
           let errorPayload = { message: `Test failed. Status: ${response.status}` };
+          let errorText = '';
           try {
               // Try to parse error JSON, but handle non-JSON responses
-              const errorText = await response.text();
-              console.error("Test Connection - Server Error Response Text:", errorText);
-               // Try to parse, fallback to raw text or status code
-              errorPayload = JSON.parse(errorText);
-               if (!errorPayload.message && errorText) {
-                   errorPayload.message = errorText; // Use raw text if JSON has no message
-               }
+              errorText = await response.text();
+              console.error("Test Connection - Server Error Response Text:", errorText); // Log raw text
+               // Try to parse only if errorText is not empty
+              if (errorText) {
+                   errorPayload = JSON.parse(errorText);
+                   // If JSON parsed but no message, use the raw text or default
+                   if (!errorPayload.message) {
+                       errorPayload.message = errorText || `Test failed. Status: ${response.status}`;
+                   }
+              }
           } catch (parseError) {
-              // If JSON parsing fails, use the status code
+              // If JSON parsing fails, use the raw text if available, otherwise the status
               console.error("Test Connection - Failed to parse error response:", parseError);
+              errorPayload.message = errorText || `Test failed. Status: ${response.status}`;
           }
-          throw new Error(errorPayload.message || `Test failed. Status: ${response.status}`);
+          // Throw the derived error message
+          throw new Error(errorPayload.message);
       }
 
       // If response is OK, check content type
@@ -164,7 +174,7 @@ export function EmailSettingsForm({ initialSettings, onSuccess }: EmailSettingsF
       }
 
     } catch (error: any) {
-      console.error("Test connection error:", error);
+      console.error("Test connection error object:", error); // Log the full error object
       toast({
         title: "Connection Failed",
         // Display the detailed error message from the API or the caught error
