@@ -55,7 +55,6 @@ const TableRow = React.forwardRef<
   HTMLTableRowElement,
   React.HTMLAttributes<HTMLTableRowElement>
 >(({ className, children, ...props }, ref) => { // Add children prop
-  // Return the standard multi-line JSX for TableRow
   return (
     <tr
       ref={ref}
