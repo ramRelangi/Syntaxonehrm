@@ -118,7 +118,7 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
             <FormItem>
               <FormLabel>Email Body</FormLabel>
                <div className="text-xs text-muted-foreground mb-2">
-                  Use Handlebars syntax for placeholders, e.g., `{{employeeName}}`, `{{startDate}}`.
+                  Use Handlebars syntax for placeholders, e.g., {'`{{employeeName}}`'}, {'`{{startDate}}`'}.
                </div>
               <FormControl>
                 <Textarea
