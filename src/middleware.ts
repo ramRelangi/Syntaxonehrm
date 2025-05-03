@@ -42,10 +42,10 @@ export async function middleware(request: NextRequest) {
   if (isRootDomainRequest) {
      console.log(`[Middleware] Handling root domain request for: ${url.pathname}`);
 
-     // Redirect root '/' to '/register' (Start page)
+     // Redirect root '/' to '/login' (Start page)
      if (url.pathname === '/') {
-         console.log('[Middleware] Root / requested. Redirecting to /register.');
-         url.pathname = '/register';
+         console.log('[Middleware] Root / requested. Redirecting to /login.');
+         url.pathname = '/login';
          return NextResponse.redirect(url);
      }
 
@@ -59,9 +59,9 @@ export async function middleware(request: NextRequest) {
         return NextResponse.next();
      }
 
-     // For any other path on the root domain, redirect to register
-     console.log(`[Middleware] Path "${url.pathname}" on root domain is not public. Redirecting to /register.`);
-     url.pathname = '/register';
+     // For any other path on the root domain, redirect to login
+     console.log(`[Middleware] Path "${url.pathname}" on root domain is not public. Redirecting to /login.`);
+     url.pathname = '/login';
      return NextResponse.redirect(url);
   }
 
@@ -77,33 +77,42 @@ export async function middleware(request: NextRequest) {
     requestHeaders.set('X-Tenant-Domain', subdomain); // Set header for API routes and page props
 
     const originalPath = url.pathname;
+    const domainSegment = `/${subdomain}`;
 
-    // If the root path '/' is requested on a subdomain, rewrite to the tenant's dashboard
-    if (originalPath === '/') {
-        url.pathname = `/${subdomain}/dashboard`;
+    // Check if the path already starts with the domain segment
+    if (originalPath.startsWith(domainSegment + '/') || originalPath === domainSegment) {
+        console.log(`[Middleware] Path ${originalPath} already contains domain segment. Passing through with header.`);
+        // If it already starts with /<domain>/, just pass it through but with the header set
+        return NextResponse.next({
+            request: { headers: requestHeaders },
+        });
+    } else if (originalPath === '/') {
+        // If the root path '/' is requested on a subdomain, rewrite to the tenant's dashboard
+        url.pathname = `${domainSegment}/dashboard`;
         console.log(`[Middleware] Rewriting subdomain root path ${hostname}${originalPath} to internal dashboard path ${url.pathname}`);
+        return NextResponse.rewrite(url, {
+            request: { headers: requestHeaders },
+        });
     } else {
         // Otherwise, rewrite other paths to the internal /[domain]/... structure
-        url.pathname = `/${subdomain}${originalPath}`;
+        url.pathname = `${domainSegment}${originalPath}`;
         console.log(`[Middleware] Rewriting subdomain path ${hostname}${originalPath} to internal path ${url.pathname}`);
+        return NextResponse.rewrite(url, {
+            request: { headers: requestHeaders },
+        });
     }
-
-
-    return NextResponse.rewrite(url, {
-      request: { headers: requestHeaders },
-    });
   }
 
   // --- Fallback for Unknown Hostnames ---
-  // If hostname doesn't match root, known dev IPs, or a valid subdomain structure, redirect to root register page.
-  console.log(`[Middleware] Unknown hostname or structure: ${hostname}. Redirecting to root /register.`);
-  const registerUrlRedirect = request.nextUrl.clone();
-  const port = registerUrlRedirect.port ? `:${registerUrlRedirect.port}` : '';
-  registerUrlRedirect.protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http:'; // Ensure correct protocol
-  registerUrlRedirect.host = `${ROOT_DOMAIN}${port}`; // Ensure redirect goes to ROOT_DOMAIN
-  registerUrlRedirect.pathname = '/register';
-  registerUrlRedirect.search = ''; // Clear query params
-  return NextResponse.redirect(registerUrlRedirect);
+  // If hostname doesn't match root, known dev IPs, or a valid subdomain structure, redirect to root login page.
+  console.log(`[Middleware] Unknown hostname or structure: ${hostname}. Redirecting to root /login.`);
+  const loginUrlRedirect = request.nextUrl.clone();
+  const port = loginUrlRedirect.port ? `:${loginUrlRedirect.port}` : '';
+  loginUrlRedirect.protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http:'; // Ensure correct protocol
+  loginUrlRedirect.host = `${ROOT_DOMAIN}${port}`; // Ensure redirect goes to ROOT_DOMAIN
+  loginUrlRedirect.pathname = '/login';
+  loginUrlRedirect.search = ''; // Clear query params
+  return NextResponse.redirect(loginUrlRedirect);
 }
 
 export const config = {
