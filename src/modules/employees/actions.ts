@@ -1,4 +1,3 @@
-
 'use server';
 
 import type { Employee } from '@/modules/employees/types';
@@ -11,27 +10,49 @@ import {
   deleteEmployee as dbDeleteEmployee,
 } from '@/modules/employees/lib/db'; // Import from the new DB file
 import { z } from 'zod';
-import { revalidatePath } from 'next/cache'; // Keep revalidatePath for server actions
+import { revalidatePath } from 'next/cache';
 import { getTenantIdFromAuth, isUserAdmin } from '@/lib/auth'; // Import auth helpers
 
 // --- Server Actions ---
 
-// These functions now require tenantId
-
 export async function getEmployees(): Promise<Employee[]> {
-  // TODO: Add authorization check: Ensure user has permission to view employees for this tenant
+  // Get tenant ID and handle potential errors immediately
   const tenantId = await getTenantIdFromAuth();
-  if (!tenantId) throw new Error("Tenant ID is required.");
+  if (!tenantId) {
+      console.error("[Action getEmployees] Tenant ID could not be determined from auth.");
+      throw new Error("Tenant ID is required."); // Throw error if tenant ID is missing
+  }
   console.log(`[Action getEmployees] Fetching employees for tenant: ${tenantId}`);
-  return dbGetAllEmployees(tenantId);
+
+  // TODO: Add authorization check: Ensure user has permission to view employees
+  // Example:
+  // const canView = await checkUserPermission(userId, tenantId, 'view_employees');
+  // if (!canView) throw new Error("Unauthorized to view employees.");
+
+  try {
+     return dbGetAllEmployees(tenantId);
+  } catch (dbError: any) {
+      console.error(`[Action getEmployees] Database error for tenant ${tenantId}:`, dbError);
+       // Re-throw a potentially more generic error or the original one
+       throw new Error(`Failed to fetch employees: ${dbError.message}`);
+  }
 }
 
+
 export async function getEmployeeById(id: string): Promise<Employee | undefined> {
-  // TODO: Add authorization check
    const tenantId = await getTenantIdFromAuth();
-   if (!tenantId) throw new Error("Tenant ID is required.");
+   if (!tenantId) {
+      console.error("[Action getEmployeeById] Tenant ID could not be determined from auth.");
+      throw new Error("Tenant ID is required.");
+   }
    console.log(`[Action getEmployeeById] Fetching employee ${id} for tenant: ${tenantId}`);
-  return dbGetEmployeeById(id, tenantId);
+   // TODO: Add authorization check
+   try {
+      return dbGetEmployeeById(id, tenantId);
+   } catch (dbError: any) {
+        console.error(`[Action getEmployeeById] Database error for employee ${id}, tenant ${tenantId}:`, dbError);
+        throw new Error(`Failed to fetch employee details: ${dbError.message}`);
+   }
 }
 
 export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId'>): Promise<{ success: boolean; employee?: Employee; errors?: z.ZodIssue[] | { code: string; path: (string|number)[]; message: string }[] }> {
@@ -40,7 +61,7 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId'>):
        console.error("[Action addEmployee] Tenant ID could not be determined from auth.");
        return { success: false, errors: [{ code: 'custom', path: ['tenantId'], message: 'Tenant ID is missing or authentication failed.' }] };
    }
-  // TODO: Add authorization check: Ensure user has permission to add employees for this tenantId
+   // TODO: Add authorization check: Ensure user has permission to add employees for this tenantId
    const isAdmin = await isUserAdmin(); // Example check
    if (!isAdmin) {
         console.warn(`[Action addEmployee] Unauthorized attempt to add employee for tenant ${tenantId}`);
@@ -62,12 +83,11 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId'>):
     const newEmployee = await dbAddEmployee(validation.data);
     console.log(`[Action addEmployee] Employee added successfully (ID: ${newEmployee.id}). Revalidating paths...`);
     // Revalidate tenant-specific paths using the actual tenantId
-    revalidatePath(`/${tenantId}/employees`);
+    revalidatePath(`/${tenantId}/employees`); // Adjust path based on tenant routing if needed
     revalidatePath('/dashboard'); // Revalidate dashboard as employee count might change
     return { success: true, employee: newEmployee };
   } catch (error: any) {
     console.error("[Action addEmployee] Error calling dbAddEmployee:", error);
-    // Return specific error message if available (e.g., duplicate email)
      return { success: false, errors: [{ code: 'custom', path: ['email'], message: error.message || 'Failed to add employee due to a database error.' }] };
   }
 }
@@ -78,7 +98,7 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
        console.error("[Action updateEmployee] Tenant ID could not be determined from auth.");
        return { success: false, errors: [{ code: 'custom', path: ['tenantId'], message: 'Tenant ID is missing or authentication failed.' }] };
    }
-  // TODO: Add authorization check
+   // TODO: Add authorization check
    const isAdmin = await isUserAdmin();
    if (!isAdmin) {
        console.warn(`[Action updateEmployee] Unauthorized attempt to update employee ${id} for tenant ${tenantId}`);
@@ -87,8 +107,6 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
 
    console.log(`[Action updateEmployee] Attempting to update employee ${id} for tenant: ${tenantId}`);
 
-  // Validate the partial update data along with the correct tenantId
-  // We don't need to add tenantId here if the schema doesn't require it for partial validation
   const validation = employeeSchema.partial().omit({ tenantId: true }).safeParse(formData); // Omit tenantId for validation
 
   if (!validation.success) {
@@ -103,7 +121,7 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
     if (updatedEmployee) {
        console.log(`[Action updateEmployee] Employee ${id} updated successfully. Revalidating paths...`);
       // Revalidate tenant-specific paths
-      revalidatePath(`/${tenantId}/employees`);
+      revalidatePath(`/${tenantId}/employees`); // Adjust path based on tenant routing if needed
       revalidatePath(`/${tenantId}/employees/${id}`);
       revalidatePath(`/${tenantId}/employees/${id}/edit`);
       revalidatePath('/dashboard'); // Revalidate dashboard
@@ -139,7 +157,7 @@ export async function deleteEmployeeAction(id: string): Promise<{ success: boole
     if (deleted) {
        console.log(`[Action deleteEmployeeAction] Employee ${id} deleted successfully. Revalidating paths...`);
       // Revalidate tenant-specific paths
-      revalidatePath(`/${tenantId}/employees`);
+      revalidatePath(`/${tenantId}/employees`); // Adjust path based on tenant routing if needed
       revalidatePath('/dashboard'); // Revalidate dashboard
       return { success: true };
     } else {

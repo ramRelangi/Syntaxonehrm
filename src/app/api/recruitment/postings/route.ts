@@ -2,18 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getJobPostings as getJobPostingsAction, addJobPostingAction } from '@/modules/recruitment/actions';
 import { jobPostingSchema, type JobPostingFormData } from '@/modules/recruitment/types';
 import type { JobPostingStatus } from '@/modules/recruitment/types';
-// Removed import of getTenantId util
-import { getTenantIdFromAuth } from '@/lib/auth'; // Import auth helper directly
+// No need for getTenantIdFromAuth here, action handles it
 
 export async function GET(request: NextRequest) {
-  let tenantIdForContext: string | null = null;
   try {
-    // Get tenantId for context. Action will re-verify auth.
-    // Public job board access might not have tenant context initially, action needs to handle this.
-    tenantIdForContext = await getTenantIdFromAuth();
-    // We don't strictly need to block here if tenantIdForContext is null,
-    // as the action might handle fetching 'Open' postings publicly.
-    console.log(`GET /api/recruitment/postings - Tenant context: ${tenantIdForContext || 'None (Public?)'}`);
+    console.log(`GET /api/recruitment/postings - Fetching...`);
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status') as JobPostingStatus | undefined;
@@ -23,7 +16,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(postings);
 
   } catch (error: any) {
-    console.error(`Error fetching job postings (API) for tenant ${tenantIdForContext || 'unknown'}:`, error);
+    console.error(`Error fetching job postings (API):`, error);
     let message = 'Failed to fetch job postings';
     let status = 500;
 
@@ -44,13 +37,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-    let tenantIdForContext: string | null = null;
   try {
-    // Get tenant context for logging, action verifies auth and adds tenantId
-    tenantIdForContext = await getTenantIdFromAuth();
-    if (!tenantIdForContext) {
-        return NextResponse.json({ error: 'Unauthorized or tenant context missing.' }, { status: 401 });
-    }
+    console.log(`POST /api/recruitment/postings - Adding...`);
 
     const body = await request.json();
     // Action handles validation and adding tenantId
@@ -62,7 +50,7 @@ export async function POST(request: NextRequest) {
     if (result.success && result.jobPosting) {
       return NextResponse.json(result.jobPosting, { status: 201 });
     } else {
-      console.error(`POST /api/recruitment/postings Action Error for tenant ${tenantIdForContext}:`, result.errors);
+      console.error(`POST /api/recruitment/postings Action Error:`, result.errors);
       let errorMessage = result.errors?.[0]?.message || 'Failed to add job posting';
       let statusCode = 400; // Default bad request
 
@@ -77,7 +65,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: errorMessage, details: result.errors }, { status: statusCode });
     }
   } catch (error: any) {
-    console.error(`Error adding job posting (API) for tenant ${tenantIdForContext || 'unknown'}:`, error);
+    console.error(`Error adding job posting (API):`, error);
     let message = 'Internal server error';
     let status = 500;
     if (error instanceof SyntaxError) {

@@ -1,4 +1,3 @@
-
 'use server';
 
 import type { JobPosting, Candidate, JobPostingFormData, CandidateFormData, CandidateStatus } from '@/modules/recruitment/types';
@@ -33,17 +32,35 @@ async function checkRecruitmentPermission(): Promise<string> {
 
 export async function getJobPostings(filters?: { status?: JobPosting['status'] }): Promise<JobPosting[]> {
     const tenantId = await getTenantIdFromAuth();
-    if (!tenantId) throw new Error("Tenant context not found.");
+    if (!tenantId) {
+        console.error("[Action getJobPostings] Tenant ID could not be determined from auth.");
+        throw new Error("Tenant context not found.");
+    }
+    console.log(`[Action getJobPostings] Fetching for tenant ${tenantId}, filters:`, filters);
     // Public job board might fetch 'Open' without auth, internal needs auth
     // Let the API route handle this distinction based on request origin/authentication
-    return dbGetAllJobPostings(tenantId, filters);
+    try {
+        return dbGetAllJobPostings(tenantId, filters);
+    } catch (dbError: any) {
+        console.error(`[Action getJobPostings] Database error for tenant ${tenantId}:`, dbError);
+        throw new Error(`Failed to fetch job postings: ${dbError.message}`);
+    }
 }
 
 export async function getJobPostingById(id: string): Promise<JobPosting | undefined> {
     const tenantId = await getTenantIdFromAuth();
-    if (!tenantId) throw new Error("Tenant context not found.");
+    if (!tenantId) {
+        console.error("[Action getJobPostingById] Tenant ID could not be determined from auth.");
+        throw new Error("Tenant context not found.");
+    }
+     console.log(`[Action getJobPostingById] Fetching posting ${id} for tenant ${tenantId}`);
     // TODO: Auth check - Can the user view this posting?
-    return dbGetJobPostingById(id, tenantId);
+    try {
+        return dbGetJobPostingById(id, tenantId);
+    } catch (dbError: any) {
+         console.error(`[Action getJobPostingById] Database error for posting ${id}, tenant ${tenantId}:`, dbError);
+         throw new Error(`Failed to fetch job posting details: ${dbError.message}`);
+     }
 }
 
 export async function addJobPostingAction(formData: Omit<JobPostingFormData, 'tenantId'>): Promise<{ success: boolean; jobPosting?: JobPosting; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
@@ -138,9 +155,14 @@ export async function getCandidates(filters?: { jobPostingId?: string, status?: 
         tenantId = await checkRecruitmentPermission();
     } catch (authError: any) {
          console.error("Auth error in getCandidates:", authError);
-        return []; // Return empty array if unauthorized
+         throw new Error(`Failed to fetch candidates: ${authError.message}`);
     }
-    return dbGetAllCandidates(tenantId, filters);
+    try {
+        return dbGetAllCandidates(tenantId, filters);
+    } catch (dbError: any) {
+         console.error(`[Action getCandidates] Database error for tenant ${tenantId}:`, dbError);
+         throw new Error(`Failed to fetch candidates: ${dbError.message}`);
+    }
 }
 
 export async function getCandidateById(id: string): Promise<Candidate | undefined> {
@@ -149,9 +171,15 @@ export async function getCandidateById(id: string): Promise<Candidate | undefine
         tenantId = await checkRecruitmentPermission();
     } catch (authError: any) {
         console.error("Auth error in getCandidateById:", authError);
-        return undefined;
+        throw new Error(`Failed to fetch candidate: ${authError.message}`);
     }
-    return dbGetCandidateById(id, tenantId);
+     console.log(`[Action getCandidateById] Fetching candidate ${id} for tenant ${tenantId}`);
+    try {
+        return dbGetCandidateById(id, tenantId);
+    } catch (dbError: any) {
+         console.error(`[Action getCandidateById] Database error for candidate ${id}, tenant ${tenantId}:`, dbError);
+         throw new Error(`Failed to fetch candidate details: ${dbError.message}`);
+    }
 }
 
 export async function addCandidateAction(formData: Omit<CandidateFormData, 'tenantId'>): Promise<{ success: boolean; candidate?: Candidate; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {

@@ -1,4 +1,3 @@
-
 'use server';
 
 import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus, LeaveBalance } from '@/modules/leave/types';
@@ -25,16 +24,34 @@ import { getTenantIdFromAuth, getUserIdFromAuth, isUserAdmin } from '@/lib/auth'
 
 export async function getLeaveRequests(filters?: { employeeId?: string, status?: LeaveRequestStatus }): Promise<LeaveRequest[]> {
   const tenantId = await getTenantIdFromAuth();
-  if (!tenantId) throw new Error("Tenant context not found.");
+  if (!tenantId) {
+     console.error("[Action getLeaveRequests] Tenant ID could not be determined from auth.");
+     throw new Error("Tenant context not found.");
+  }
+  console.log(`[Action getLeaveRequests] Fetching for tenant ${tenantId}, filters:`, filters);
   // TODO: Authorization - Check if user can view these requests (e.g., only own requests unless admin/manager)
-  return dbGetAllLeaveRequests(tenantId, filters);
+  try {
+      return dbGetAllLeaveRequests(tenantId, filters);
+  } catch (dbError: any) {
+      console.error(`[Action getLeaveRequests] Database error for tenant ${tenantId}:`, dbError);
+      throw new Error(`Failed to fetch leave requests: ${dbError.message}`);
+  }
 }
 
 export async function getLeaveRequestById(id: string): Promise<LeaveRequest | undefined> {
   const tenantId = await getTenantIdFromAuth();
-  if (!tenantId) throw new Error("Tenant context not found.");
+  if (!tenantId) {
+      console.error("[Action getLeaveRequestById] Tenant ID could not be determined from auth.");
+      throw new Error("Tenant context not found.");
+  }
+  console.log(`[Action getLeaveRequestById] Fetching request ${id} for tenant ${tenantId}`);
   // TODO: Authorization - Check if user can view this specific request
-  return dbGetLeaveRequestById(id, tenantId);
+  try {
+      return dbGetLeaveRequestById(id, tenantId);
+  } catch (dbError: any) {
+       console.error(`[Action getLeaveRequestById] Database error for request ${id}, tenant ${tenantId}:`, dbError);
+       throw new Error(`Failed to fetch leave request details: ${dbError.message}`);
+   }
 }
 
 export async function addLeaveRequest(formData: Omit<LeaveRequestFormData, 'tenantId'>): Promise<{ success: boolean; request?: LeaveRequest; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
@@ -135,9 +152,17 @@ export async function cancelLeaveRequest(id: string): Promise<{ success: boolean
 
 export async function getLeaveTypes(): Promise<LeaveType[]> {
   const tenantId = await getTenantIdFromAuth();
-  if (!tenantId) throw new Error("Tenant context not found.");
+  if (!tenantId) {
+      console.error("[Action getLeaveTypes] Tenant ID could not be determined from auth.");
+      throw new Error("Tenant context not found.");
+   }
   // TODO: Authorization check if needed
-  return dbGetAllLeaveTypes(tenantId);
+  try {
+      return dbGetAllLeaveTypes(tenantId);
+  } catch (dbError: any) {
+        console.error(`[Action getLeaveTypes] Database error for tenant ${tenantId}:`, dbError);
+        throw new Error(`Failed to fetch leave types: ${dbError.message}`);
+  }
 }
 
 export async function addLeaveTypeAction(formData: Omit<LeaveType, 'id' | 'tenantId'>): Promise<{ success: boolean; leaveType?: LeaveType; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
@@ -234,9 +259,18 @@ export async function deleteLeaveTypeAction(id: string): Promise<{ success: bool
 // --- Leave Balance Actions ---
 export async function getEmployeeLeaveBalances(employeeId: string): Promise<LeaveBalance[]> {
     const tenantId = await getTenantIdFromAuth();
-    if (!tenantId) throw new Error("Tenant context not found.");
+    if (!tenantId) {
+       console.error("[Action getEmployeeLeaveBalances] Tenant ID could not be determined from auth.");
+       throw new Error("Tenant context not found.");
+    }
+    console.log(`[Action getEmployeeLeaveBalances] Fetching balances for employee ${employeeId}, tenant ${tenantId}`);
     // TODO: Authorization - Check if user can view this employee's balances
-    return dbGetLeaveBalances(tenantId, employeeId);
+    try {
+        return dbGetLeaveBalances(tenantId, employeeId);
+    } catch (dbError: any) {
+         console.error(`[Action getEmployeeLeaveBalances] Database error for employee ${employeeId}, tenant ${tenantId}:`, dbError);
+         throw new Error(`Failed to fetch leave balances: ${dbError.message}`);
+    }
 }
 
 // --- Accrual Action ---
@@ -249,7 +283,6 @@ export async function runAccrualProcess(): Promise<{ success: boolean; error?: s
     try {
         // The DB function should handle iterating through tenants if needed,
         // or it operates on all tenants if designed that way.
-        // For a multi-tenant app, it's safer to accrue tenant by tenant.
         // Let's assume dbRunMonthlyAccrual handles this logic.
         await dbRunMonthlyAccrual();
         revalidatePath('/leave', 'layout'); // Revalidate all leave pages across tenants

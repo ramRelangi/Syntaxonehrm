@@ -1,17 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEmployees as getEmployeesAction, addEmployee } from '@/modules/employees/actions';
-import { employeeSchema, EmployeeFormData } from '@/modules/employees/types'; // Ensure EmployeeFormData is imported if used in POST
-// Removed import of auth helper. Action handles auth.
-// import { getTenantIdFromAuth } from '@/lib/auth';
+import { employeeSchema, EmployeeFormData } from '@/modules/employees/types';
+// No need to import getTenantIdFromAuth here, the action handles it.
 
 export async function GET(request: NextRequest) {
-  // let tenantIdForContext: string | null = null; // Removed context variable
   try {
-    // tenantIdForContext = await getTenantIdFromAuth(); // Removed auth check here
-    // if (!tenantIdForContext) { // Removed auth check here
-    //      console.error('GET /api/employees - Tenant context could not be determined from request.');
-    //      return NextResponse.json({ error: 'Unauthorized or tenant context missing.' }, { status: 401 });
-    // }
     console.log(`GET /api/employees - Fetching employees...`); // Simplified log
 
     // Call the server action which handles its own tenant resolution and data fetching
@@ -25,13 +18,13 @@ export async function GET(request: NextRequest) {
     let status = 500;
 
     // Handle specific errors (like auth errors from action or DB connection issues)
-    if (error.message?.includes('Tenant context not found') || error.message?.includes('Unauthorized')) {
+    // Check the error message from the action
+    if (error.message?.includes('Tenant context not found') || error.message?.includes('Unauthorized') || error.message?.includes('Tenant ID is required')) {
         message = 'Unauthorized or tenant context missing.';
         status = 401;
     } else if (error.message?.includes('invalid input syntax for type uuid')) {
-        // This indicates the tenantId passed to the DB was invalid (shouldn't happen if auth works)
         message = 'Internal server error: Invalid tenant identifier.';
-        status = 500; // Keep as 500, client shouldn't see UUID details
+        status = 500;
         console.error("UUID Syntax Error - Check how tenantId is being passed to DB query.");
     }
     // Add DB connection error checks if needed (though action/db layer might handle)
@@ -51,21 +44,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  // let tenantIdForContext: string | null = null; // Removed context variable
   try {
-    // Get tenant context for validation if needed, but action derives it for insertion
-    // tenantIdForContext = await getTenantIdFromAuth(); // Removed auth check here
-    // if (!tenantIdForContext) { // Removed auth check here
-    //     return NextResponse.json({ error: 'Unauthorized or tenant context missing.' }, { status: 401 });
-    // }
     console.log(`POST /api/employees - Adding employee...`); // Simplified log
 
     const body = await request.json();
 
-    // Validation should happen within the action using tenantId from auth.
-    // We don't need to validate tenantId here.
-    // const validation = employeeSchema.safeParse(body); // This schema requires tenantId
-    // Instead, pass the raw form data (without tenantId) to the action.
+    // Pass the raw form data (without tenantId) to the action.
     const formData = body as Omit<EmployeeFormData, 'tenantId'>;
 
     // Call the server action to add the employee (action handles tenantId and validation)
@@ -74,7 +58,6 @@ export async function POST(request: NextRequest) {
     if (result.success && result.employee) {
       return NextResponse.json(result.employee, { status: 201 });
     } else {
-      // Use the errors from the action if available
        console.error(`POST /api/employees Action Error:`, result.errors);
        let errorMessage = result.errors?.[0]?.message || 'Failed to add employee';
        let statusCode = 400; // Default bad request for validation errors
@@ -86,7 +69,6 @@ export async function POST(request: NextRequest) {
            statusCode = 401; // Unauthorized / Bad Context
            errorMessage = 'Unauthorized or missing tenant context.';
        } else if (result.errors?.some((e: any) => ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(e.code || ''))) {
-            // Handle DB errors passed from the action
             const dbError = result.errors.find((e: any) => ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(e.code || ''));
             if (dbError) {
                 if (dbError.code === 'ECONNREFUSED') errorMessage = `Database connection refused.`;
