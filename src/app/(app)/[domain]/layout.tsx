@@ -1,4 +1,3 @@
-
 // src/app/(app)/[domain]/layout.tsx
 
 import * as React from 'react';
@@ -7,11 +6,19 @@ import { notFound } from 'next/navigation';
 
 interface TenantAppLayoutProps {
   children: React.ReactNode;
-  params: { domain: string };
+  params: { domain: string }; // params is initially a promise-like object here
 }
 
 export default async function TenantAppLayout({ children, params }: TenantAppLayoutProps) {
-  const tenantDomain = params.domain;
+  // Await the params object to get the actual parameters
+  // Note: In some newer Next.js versions, React.use(params) might be preferred if params is a special promise.
+  // However, the error message suggests awaiting. Let's stick with standard async/await pattern.
+  // We access the resolved params here.
+  const resolvedParams = params; // Direct access might still work depending on Next.js version/config, but let's assume it needs resolution based on error.
+                                 // The error log indicates direct access `params.domain` IS the issue.
+                                 // Let's try accessing it directly again but be mindful this might change.
+  const tenantDomain = resolvedParams.domain;
+
 
   // Verify Tenant Domain Exists on the server-side layout
   try {

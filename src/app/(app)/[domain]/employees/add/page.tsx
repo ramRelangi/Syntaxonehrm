@@ -1,4 +1,3 @@
-
 // src/app/(app)/[domain]/employees/add/page.tsx
 "use client"; // AddEmployeePage needs to be a client component to use the form
 
@@ -8,12 +7,11 @@ import { EmployeeForm } from '@/modules/employees/components/employee-form';
 import { UserPlus } from "lucide-react";
 import { useParams } from 'next/navigation'; // Import useParams
 
-// Remove the interface and params prop, as we'll use the hook
-// interface AddEmployeePageProps {
-//   params: { domain: string };
-// }
+interface AddEmployeePageProps {
+   // params removed, using hook instead
+}
 
-export default function TenantAddEmployeePage() {
+export default function TenantAddEmployeePage({ }: AddEmployeePageProps) { // Removed params prop
   // Use the useParams hook to get route parameters
   const params = useParams();
   const tenantDomain = params.domain as string; // Cast to string as needed
