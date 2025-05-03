@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
 import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types';
 import type { Employee } from '@/modules/employees/types';
+import { addEmployee, updateEmployee } from '@/modules/employees/actions'; // Import server actions
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,21 +19,25 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, CalendarIcon, Save, UserPlus } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { getTenantIdFromAuth } from '@/lib/auth'; // Import auth helper
 
 interface EmployeeFormProps {
   employee?: Employee; // Optional employee data for editing (includes tenantId)
   submitButtonText?: string;
   formTitle: string;
   formDescription: string;
-  tenantId: string; // Make tenantId a required prop
+  tenantDomain: string; // Accept tenantDomain instead of tenantId
 }
+
+// Exclude tenantId from the form data type itself, as it's derived contextually
+type EmployeeFormSubmitData = Omit<EmployeeFormData, 'tenantId'>;
 
 export function EmployeeForm({
   employee,
   submitButtonText,
   formTitle,
   formDescription,
-  tenantId, // Receive tenantId as a prop
+  tenantDomain, // Receive tenantDomain
 }: EmployeeFormProps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -41,16 +46,6 @@ export function EmployeeForm({
 
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
-
-  // Use the tenantId passed via props
-  const tenantIdForForm = tenantId;
-
-   if (!tenantIdForForm) {
-       console.error("Tenant ID is missing in EmployeeForm props.");
-       // Render an error message or disable the form
-        return <p className="text-destructive p-4 text-center">Error: Tenant information is missing. Cannot load form.</p>;
-   }
-
 
   const getFormattedHireDate = (hireDate?: string): string => {
     if (!hireDate) return "";
@@ -63,10 +58,13 @@ export function EmployeeForm({
     }
   };
 
-  const form = useForm<EmployeeFormData>({
-    resolver: zodResolver(employeeSchema),
+  // Schema for validation doesn't need tenantId, action will add it.
+  const formSchema = employeeSchema.omit({ tenantId: true });
+
+  const form = useForm<EmployeeFormSubmitData>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
-      tenantId: tenantIdForForm, // Set tenantId from prop
+      // tenantId removed from form data
       name: employee?.name ?? "",
       email: employee?.email ?? "",
       phone: employee?.phone ?? "",
@@ -79,81 +77,57 @@ export function EmployeeForm({
 
   const hireDateValue = form.watch('hireDate');
 
-  const onSubmit = async (data: EmployeeFormData) => {
+  const onSubmit = async (data: EmployeeFormSubmitData) => {
     setIsLoading(true);
-    console.log("[Employee Form] Submitting data (tenantId included):", data);
-
-    const apiUrl = isEditMode ? `/api/employees/${employee.id}` : '/api/employees';
-    const method = isEditMode ? 'PUT' : 'POST';
-
-    // Ensure tenantId is included in the payload
-    // The form data already includes tenantId from defaultValues
-    const payload = data;
+    console.log("[Employee Form] Submitting data (tenantId will be added by action):", data);
 
     try {
-        const response = await fetch(apiUrl, {
-            method: method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload), // Send data including tenantId
-        });
+        let result;
+        if (isEditMode && employee?.id) {
+            result = await updateEmployee(employee.id, data); // Action derives tenantId
+        } else {
+            result = await addEmployee(data); // Action derives tenantId
+        }
 
-        // Try to parse JSON regardless of status code first
-        let result: any;
-        let responseText: string | null = null;
-        try {
-            responseText = await response.text();
-            if (responseText) {
-                result = JSON.parse(responseText);
-            }
-        } catch (jsonError) {
-             console.warn("[Employee Form] Failed to parse response as JSON:", jsonError);
-             if (!response.ok) {
-                 throw new Error(responseText || `HTTP error! status: ${response.status}`);
+        if (!result.success) {
+             console.error("[Employee Form] Action Error:", result.errors);
+             let errorMessage = result.errors?.[0]?.message || `Failed to ${isEditMode ? 'update' : 'add'} employee.`;
+             // Handle specific errors
+             if (errorMessage.includes('Email address already exists')) {
+                  errorMessage = 'This email address is already in use for this tenant.';
+                  form.setError("email", { type: "manual", message: errorMessage });
+             } else if (errorMessage.includes('Tenant ID is missing') || errorMessage.includes('Unauthorized')) {
+                 errorMessage = 'Authorization failed or tenant context missing.';
+                 form.setError("root.serverError", { message: errorMessage });
+             } else {
+                  form.setError("root.serverError", { message: errorMessage });
              }
-             console.warn("[Employee Form] Received OK response but non-JSON content:", responseText);
-             // Adjust success check if necessary based on non-JSON OK responses
-             result = { name: data.name, id: employee?.id || 'new' }; // Simulate success payload
+             throw new Error(errorMessage); // Throw to prevent success toast
         }
 
-
-        if (!response.ok) {
-             console.error("[Employee Form] API Error Response:", result);
-             // Handle 401/403 error for unauthorized access (tenant context issue in API)
-              if (response.status === 401 || response.status === 403) {
-                  throw new Error(result?.error || 'Unauthorized or tenant context missing. Unable to save data.');
-              } else if (response.status === 409) { // Conflict for duplicate email
-                   throw new Error(result?.error || 'Email address already exists for this tenant.');
-              }
-            throw new Error(result?.error || result?.message || `HTTP error! status: ${response.status}`);
-        }
-
-        console.log("[Employee Form] API Success Response:", result);
+        console.log("[Employee Form] Action Success:", result);
 
         toast({
             title: `Employee ${isEditMode ? 'Updated' : 'Added'}`,
-            description: `${result?.name || data.name} has been successfully ${isEditMode ? 'updated' : 'added'}.`,
+            description: `${result.employee?.name || data.name} has been successfully ${isEditMode ? 'updated' : 'added'}.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
-        // Redirect to tenant-specific employee list using the tenantId prop
-        router.push(`/${tenantIdForForm}/employees`);
-        // No explicit router.refresh() needed here usually, list page should refetch on mount/focus
+        // Use tenantDomain for redirection
+        router.push(`/${tenantDomain}/employees`);
 
     } catch (error: any) {
         console.error("[Employee Form] Submission error:", error);
-        let errorMessage = error.message || "An unexpected error occurred.";
-        // Use specific error message for duplicate email
-        if (error.message?.includes('Email address already exists')) {
-            errorMessage = 'This email address is already in use for this tenant. Please use a different email.';
-            form.setError("email", { type: "manual", message: errorMessage });
-        } else {
-             form.setError("root.serverError", { message: errorMessage });
+        // Errors are mostly handled inside the if (!result.success) block now
+        // Only toast if no specific field error was set
+         if (!form.formState.errors.email && !form.formState.errors.root?.serverError) {
+            toast({
+                title: `Error ${isEditMode ? 'Updating' : 'Adding'} Employee`,
+                description: error.message || "An unexpected error occurred.",
+                variant: "destructive",
+            });
+             form.setError("root.serverError", { message: error.message || "An unexpected error occurred." });
         }
-        toast({
-            title: `Error ${isEditMode ? 'Updating' : 'Adding'} Employee`,
-            description: errorMessage,
-            variant: "destructive",
-        });
     } finally {
         setIsLoading(false);
     }
@@ -163,10 +137,9 @@ export function EmployeeForm({
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-         {/* Hidden field for tenantId - useful for debugging, ensure it's correct */}
-         <input type="hidden" {...form.register("tenantId")} value={tenantIdForForm} />
+         {/* No hidden tenantId field needed */}
 
-         {form.formState.errors.root?.serverError && !form.formState.errors.email && ( // Show root error only if not showing email specific error
+         {form.formState.errors.root?.serverError && !form.formState.errors.email && (
           <FormMessage className="text-destructive text-center">
             {form.formState.errors.root.serverError.message}
           </FormMessage>
