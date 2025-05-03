@@ -42,10 +42,10 @@ export async function middleware(request: NextRequest) {
   if (isRootDomainRequest) {
      console.log(`[Middleware] Handling root domain request for: ${url.pathname}`);
 
-     // Redirect root '/' to '/login' (Start page)
+     // Redirect root '/' to '/register' (Start page)
      if (url.pathname === '/') {
-         console.log('[Middleware] Root / requested. Redirecting to /login.');
-         url.pathname = '/login';
+         console.log('[Middleware] Root / requested. Redirecting to /register.');
+         url.pathname = '/register'; // CHANGED: Redirect root to register
          return NextResponse.redirect(url);
      }
 
@@ -56,12 +56,15 @@ export async function middleware(request: NextRequest) {
 
      if (isPublicRootPath) {
         console.log(`[Middleware] Allowing public root path access: ${url.pathname}`);
+        // Rewrite public root paths to /app/(auth) or /app/jobs routes
+        // Example: /login -> /login, /jobs -> /jobs, /jobs/123 -> /jobs/123
+        // No explicit rewrite needed if the file structure matches
         return NextResponse.next();
      }
 
-     // For any other path on the root domain, redirect to login
-     console.log(`[Middleware] Path "${url.pathname}" on root domain is not public. Redirecting to /login.`);
-     url.pathname = '/login';
+     // For any other path on the root domain, redirect to register (as it's the root entry)
+     console.log(`[Middleware] Path "${url.pathname}" on root domain is not public. Redirecting to /register.`);
+     url.pathname = '/register';
      return NextResponse.redirect(url);
   }
 
@@ -79,7 +82,7 @@ export async function middleware(request: NextRequest) {
     const originalPath = url.pathname;
     const domainSegment = `/${subdomain}`;
 
-    // Check if the path already starts with the domain segment
+    // Check if the path already starts with the domain segment (internal rewrite already happened?)
     if (originalPath.startsWith(domainSegment + '/') || originalPath === domainSegment) {
         console.log(`[Middleware] Path ${originalPath} already contains domain segment. Passing through with header.`);
         // If it already starts with /<domain>/, just pass it through but with the header set
@@ -87,9 +90,9 @@ export async function middleware(request: NextRequest) {
             request: { headers: requestHeaders },
         });
     } else if (originalPath === '/') {
-        // If the root path '/' is requested on a subdomain, rewrite to the tenant's dashboard
-        url.pathname = `${domainSegment}/dashboard`;
-        console.log(`[Middleware] Rewriting subdomain root path ${hostname}${originalPath} to internal dashboard path ${url.pathname}`);
+        // If the root path '/' is requested on a subdomain, rewrite to the tenant's LOGIN page
+        url.pathname = `${domainSegment}/login`; // CHANGED: Rewrite subdomain root to login
+        console.log(`[Middleware] Rewriting subdomain root path ${hostname}${originalPath} to internal login path ${url.pathname}`);
         return NextResponse.rewrite(url, {
             request: { headers: requestHeaders },
         });
@@ -104,15 +107,15 @@ export async function middleware(request: NextRequest) {
   }
 
   // --- Fallback for Unknown Hostnames ---
-  // If hostname doesn't match root, known dev IPs, or a valid subdomain structure, redirect to root login page.
-  console.log(`[Middleware] Unknown hostname or structure: ${hostname}. Redirecting to root /login.`);
-  const loginUrlRedirect = request.nextUrl.clone();
-  const port = loginUrlRedirect.port ? `:${loginUrlRedirect.port}` : '';
-  loginUrlRedirect.protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http:'; // Ensure correct protocol
-  loginUrlRedirect.host = `${ROOT_DOMAIN}${port}`; // Ensure redirect goes to ROOT_DOMAIN
-  loginUrlRedirect.pathname = '/login';
-  loginUrlRedirect.search = ''; // Clear query params
-  return NextResponse.redirect(loginUrlRedirect);
+  // If hostname doesn't match root, known dev IPs, or a valid subdomain structure, redirect to root register page.
+  console.log(`[Middleware] Unknown hostname or structure: ${hostname}. Redirecting to root /register.`);
+  const registerUrlRedirect = request.nextUrl.clone();
+  const port = registerUrlRedirect.port ? `:${registerUrlRedirect.port}` : '';
+  registerUrlRedirect.protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http:'; // Ensure correct protocol
+  registerUrlRedirect.host = `${ROOT_DOMAIN}${port}`; // Ensure redirect goes to ROOT_DOMAIN
+  registerUrlRedirect.pathname = '/register'; // Redirect to register
+  registerUrlRedirect.search = ''; // Clear query params
+  return NextResponse.redirect(registerUrlRedirect);
 }
 
 export const config = {
