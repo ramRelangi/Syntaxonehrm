@@ -65,7 +65,6 @@ export async function getJobPostingById(id: string, tenantId: string): Promise<J
 
 // Add job posting for a specific tenant
 export async function addJobPosting(jobData: JobPostingFormData): Promise<JobPosting> {
-    const client = await pool.connect();
     if (!jobData.tenantId) {
         throw new Error("Tenant ID is required to add a job posting.");
     }
@@ -86,10 +85,9 @@ export async function addJobPosting(jobData: JobPostingFormData): Promise<JobPos
         }
     }
 
-
     const query = `
-        INSERT INTO job_postings (tenant_id, title, description, department, location, salary_range, status, date_posted, closing_date)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO job_postings (tenant_id, title, description, department, location, salary_range, status, date_posted, closing_date, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
         RETURNING *;
     `;
     const values = [
@@ -103,17 +101,46 @@ export async function addJobPosting(jobData: JobPostingFormData): Promise<JobPos
         datePosted,
         closingDateValue, // Pass the validated/formatted string or null
     ];
+
+    let client;
     try {
-        console.log('[DB addJobPosting] Executing query with values:', values);
+        console.log('[DB addJobPosting] Connecting to database...');
+        client = await pool.connect();
+        console.log('[DB addJobPosting] Connected. Executing query with values:', values);
         const res = await client.query(query, values);
-        return mapRowToJobPosting(res.rows[0]);
+        console.log('[DB addJobPosting] Query executed successfully. Rows returned:', res.rowCount);
+        if (res.rows.length === 0) {
+            throw new Error("Database did not return the created job posting.");
+        }
+        const newPosting = mapRowToJobPosting(res.rows[0]);
+        console.log('[DB addJobPosting] Job posting added successfully:', newPosting.id);
+        return newPosting;
     } catch (err) {
         console.error('[DB addJobPosting] Error adding job posting:', err);
-        throw err;
+        // Log detailed error information
+        if (err instanceof Error) {
+            console.error('[DB addJobPosting] Error details:', {
+                message: err.message,
+                stack: err.stack,
+                // @ts-ignore - Check for common PG error properties
+                code: err.code,
+                // @ts-ignore
+                constraint: err.constraint,
+                // @ts-ignore
+                detail: err.detail,
+            });
+        }
+        throw err; // Re-throw the error after logging
     } finally {
-        client.release();
+        if (client) {
+            client.release();
+            console.log('[DB addJobPosting] Client released.');
+        } else {
+            console.log('[DB addJobPosting] Client was not acquired.');
+        }
     }
 }
+
 
 // Update job posting (ensure it belongs to the tenant)
 export async function updateJobPosting(id: string, tenantId: string, updates: Partial<JobPostingFormData>): Promise<JobPosting | undefined> {
@@ -175,6 +202,9 @@ export async function updateJobPosting(id: string, tenantId: string, updates: Pa
     }
 
     if (setClauses.length === 0) return currentPosting;
+
+    // Add updated_at timestamp
+    setClauses.push(`updated_at = NOW()`);
 
     values.push(id); // Add the ID for the WHERE clause
     values.push(tenantId); // Add tenantId for WHERE clause
@@ -290,8 +320,8 @@ export async function addCandidate(candidateData: CandidateFormData): Promise<Ca
         throw new Error("Tenant ID and Job Posting ID are required to add a candidate.");
     }
     const query = `
-        INSERT INTO candidates (tenant_id, name, email, phone, job_posting_id, application_date, status, resume_url, cover_letter, notes)
-        VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9)
+        INSERT INTO candidates (tenant_id, name, email, phone, job_posting_id, application_date, status, resume_url, cover_letter, notes, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, NOW(), NOW())
         RETURNING *;
     `;
     const values = [
@@ -352,6 +382,10 @@ export async function updateCandidate(id: string, tenantId: string, updates: Par
     }
 
     if (setClauses.length === 0) return getCandidateById(id, tenantId);
+
+    // Add updated_at timestamp
+    setClauses.push(`updated_at = NOW()`);
+
 
     values.push(id); // ID for WHERE clause
     values.push(tenantId); // tenantId for WHERE clause
