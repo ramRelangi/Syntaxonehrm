@@ -8,7 +8,8 @@ const IGNORED_SUBDOMAINS = ['www', 'api'];
 const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
 
 // Paths that are public on the root domain
-const PUBLIC_ROOT_PATHS = ['/login', '/register', '/forgot-password', '/jobs'];
+// /login is now handled conditionally
+const PUBLIC_ROOT_PATHS = ['/register', '/forgot-password', '/jobs'];
 
 export async function middleware(request: NextRequest) {
   const url = request.nextUrl.clone();
@@ -54,10 +55,9 @@ export async function middleware(request: NextRequest) {
         return url.pathname === path || url.pathname.startsWith(path + '/');
      });
 
-     if (isPublicRootPath) {
+     // Allow /login on root as well
+     if (isPublicRootPath || url.pathname === '/login') {
         console.log(`[Middleware] Allowing public root path access: ${url.pathname}`);
-        // Rewrite public root paths to /app/(auth) or /app/jobs routes
-        // Example: /login -> /login, /jobs -> /jobs, /jobs/123 -> /jobs/123
         // No explicit rewrite needed if the file structure matches
         return NextResponse.next();
      }
@@ -82,22 +82,34 @@ export async function middleware(request: NextRequest) {
     const originalPath = url.pathname;
     const domainSegment = `/${subdomain}`;
 
-    // Check if the path already starts with the domain segment (internal rewrite already happened?)
-    if (originalPath.startsWith(domainSegment + '/') || originalPath === domainSegment) {
-        console.log(`[Middleware] Path ${originalPath} already contains domain segment. Passing through with header.`);
-        // If it already starts with /<domain>/, just pass it through but with the header set
-        return NextResponse.next({
-            request: { headers: requestHeaders },
+    // Rewrite subdomain /login to the internal auth/login page (without domain segment)
+    // This assumes the login page under (auth) doesn't need the [domain] segment.
+    // If the login page IS under /[domain]/login, keep the previous rewrite logic.
+    if (originalPath === '/login') {
+        console.log(`[Middleware] Rewriting subdomain login path ${hostname}${originalPath} to internal path /login`);
+        url.pathname = `/login`; // Rewrite to the root login page
+        return NextResponse.rewrite(url, {
+             request: { headers: requestHeaders },
         });
-    } else if (originalPath === '/') {
-        // If the root path '/' is requested on a subdomain, rewrite to the tenant's LOGIN page
-        url.pathname = `${domainSegment}/login`; // CHANGED: Rewrite subdomain root to login
-        console.log(`[Middleware] Rewriting subdomain root path ${hostname}${originalPath} to internal login path ${url.pathname}`);
+    }
+    // Handle tenant-specific forgot password
+    else if (originalPath.startsWith('/forgot-password')) {
+        url.pathname = `/forgot-password${domainSegment}`;
+        console.log(`[Middleware] Rewriting subdomain forgot password path ${hostname}${originalPath} to internal path ${url.pathname}`);
+        return NextResponse.rewrite(url, {
+             request: { headers: requestHeaders },
+        });
+    }
+     // Rewrite root for subdomain to /dashboard
+    else if (originalPath === '/') {
+        url.pathname = `${domainSegment}/dashboard`; // Rewrite subdomain root to its dashboard
+        console.log(`[Middleware] Rewriting subdomain root path ${hostname}${originalPath} to internal dashboard path ${url.pathname}`);
         return NextResponse.rewrite(url, {
             request: { headers: requestHeaders },
         });
-    } else {
-        // Otherwise, rewrite other paths to the internal /[domain]/... structure
+    }
+    // Rewrite other paths to the internal /[domain]/... structure
+    else {
         url.pathname = `${domainSegment}${originalPath}`;
         console.log(`[Middleware] Rewriting subdomain path ${hostname}${originalPath} to internal path ${url.pathname}`);
         return NextResponse.rewrite(url, {
