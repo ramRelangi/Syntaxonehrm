@@ -1,145 +1,180 @@
 // src/lib/auth.ts
-// Authentication logic, including tenant and user identification
+// Placeholder for actual Authentication logic, including tenant and user identification
 
 import { headers } from 'next/headers';
 import { getTenantByDomain } from '@/modules/auth/lib/db'; // Import DB function to resolve domain
 import type { User } from '@/modules/auth/types';
 
+// --- Placeholder for Session Data Structure ---
+// Replace this with the actual structure provided by your session library
+interface SessionData {
+    userId: string;
+    tenantId: string;
+    tenantDomain: string;
+    userRole: string; // e.g., 'Admin', 'Employee'
+    // Add other relevant session fields
+}
+
 /**
- * Gets the tenant ID UUID from the current request context by resolving the domain
- * found in the 'X-Tenant-Domain' header (set by middleware).
+ * Placeholder function to get session data.
+ * **REPLACE THIS WITH YOUR ACTUAL SESSION MANAGEMENT LOGIC.**
+ * (e.g., using next-auth, lucia-auth, iron-session cookies, etc.)
  *
- * @returns {Promise<string | null>} The tenant ID UUID or null if not found or identifiable.
+ * @returns {Promise<SessionData | null>} The session data or null if not authenticated.
+ */
+async function getSession(): Promise<SessionData | null> {
+    console.warn("[getSession] Using MOCK session data. REPLACE with actual session logic.");
+    // --- Mock Implementation ---
+    // 1. Try to get tenant domain from header (set by middleware)
+    const headersList = headers();
+    const tenantDomainHeader = headersList.get('X-Tenant-Domain');
+
+    if (tenantDomainHeader) {
+         // 2. Look up tenant by domain
+         const tenant = await getTenantByDomain(tenantDomainHeader);
+         if (tenant) {
+             // 3. Simulate getting the *first* user of that tenant as the logged-in user
+             //    In a real app, you'd verify a session token/cookie and get the user ID from there.
+             const client = await (await import('@/lib/db')).default.connect();
+             try {
+                const userRes = await client.query('SELECT id, role FROM users WHERE tenant_id = $1 LIMIT 1', [tenant.id]);
+                if (userRes.rows.length > 0) {
+                    const mockSession: SessionData = {
+                        userId: userRes.rows[0].id,
+                        tenantId: tenant.id,
+                        tenantDomain: tenant.domain,
+                        userRole: userRes.rows[0].role,
+                    };
+                    console.log("[getSession] Returning MOCK session:", mockSession);
+                    return mockSession;
+                }
+             } finally {
+                 client.release();
+             }
+         }
+    }
+     // --- End Mock Implementation ---
+
+    console.log("[getSession] No valid session or tenant found based on mock logic.");
+    return null; // Return null if no session exists
+}
+
+
+/**
+ * Gets the tenant ID UUID from the current authenticated session.
+ *
+ * @returns {Promise<string | null>} The tenant ID UUID or null if not authenticated.
  */
 export async function getTenantIdFromAuth(): Promise<string | null> {
-    console.log("[getTenantIdFromAuth] Attempting to resolve tenant ID from request context...");
+    console.log("[getTenantIdFromAuth] Attempting to resolve tenant ID from session...");
     try {
-        const headersList = headers();
-        const tenantDomainHeader = headersList.get('X-Tenant-Domain'); // Header set by middleware
-
-        if (tenantDomainHeader) {
-            console.log(`[getTenantIdFromAuth] Found X-Tenant-Domain header: ${tenantDomainHeader}`);
-            const tenant = await getTenantByDomain(tenantDomainHeader);
-            if (tenant) {
-                console.log(`[getTenantIdFromAuth] Resolved tenant ID: ${tenant.id}`);
-                return tenant.id; // Return the actual UUID
-            } else {
-                console.warn(`[getTenantIdFromAuth] Tenant not found in DB for domain: ${tenantDomainHeader}`);
-                return null;
-            }
+        const session = await getSession();
+        if (session) {
+            console.log(`[getTenantIdFromAuth] Resolved tenant ID from session: ${session.tenantId}`);
+            return session.tenantId;
         }
-
-        // Fallback: Try inferring from host if header is missing (less reliable, middleware should set header)
-        const host = headersList.get('host') || '';
-        const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-        const normalizedHost = host.split(':')[0]; // Remove port if present
-        console.log(`[getTenantIdFromAuth] Attempting fallback inference from host: ${normalizedHost}`);
-
-        // Ensure rootDomain itself is not treated as a subdomain part
-        if (normalizedHost === rootDomain || normalizedHost === 'localhost' || normalizedHost === '127.0.0.1') {
-            console.warn("[getTenantIdFromAuth] Host is root domain or equivalent, no tenant context.");
-            return null;
-        }
-
-        // Match subdomains like 'demo.localhost' or 'demo.syntaxhivehrm.app'
-        const match = normalizedHost.match(`^(.*)\\.${rootDomain}$`);
-        const subdomain = match ? match[1] : null;
-
-        if (subdomain && !['www', 'api'].includes(subdomain)) { // Ignore common non-tenant subdomains
-             console.log(`[getTenantIdFromAuth] Inferred subdomain from host: ${subdomain}`);
-             const tenant = await getTenantByDomain(subdomain);
-             if (tenant) {
-                 console.log(`[getTenantIdFromAuth] Resolved tenant ID from host: ${tenant.id}`);
-                 return tenant.id; // Return the actual UUID
-             } else {
-                 console.warn(`[getTenantIdFromAuth] Tenant not found in DB for inferred domain: ${subdomain}`);
-                return null;
-            }
-        }
-
-        console.warn("[getTenantIdFromAuth] Could not determine tenant context from headers or host.");
+        console.warn("[getTenantIdFromAuth] No active session found.");
         return null;
-
     } catch (error) {
-        console.error("[getTenantIdFromAuth] Error resolving tenant ID:", error);
+        console.error("[getTenantIdFromAuth] Error resolving tenant ID from session:", error);
         return null; // Return null on error
     }
 }
 
 /**
- * Simulates getting the current user's ID from the session.
- * Replace with actual implementation.
- * **NOTE:** This is still a mock. Replace with real session logic.
- * @returns {Promise<string | null>} User ID (mocked UUID) or null.
+ * Gets the current user's ID from the session.
+ *
+ * @returns {Promise<string | null>} User ID or null if not authenticated.
  */
 export async function getUserIdFromAuth(): Promise<string | null> {
-     console.warn("[getUserIdFromAuth] Using MOCK user ID. Replace with actual auth logic.");
-     // Try to find the user associated with the tenant (e.g., the first admin user)
-     const tenantId = await getTenantIdFromAuth();
-     if (tenantId) {
-        // Placeholder: Fetch the first user of the tenant as the mock user
-        // In real app: Get user ID from session
-        // Example using DB (needs getUsersForTenant function):
-        // const users = await getUsersForTenant(tenantId); // Need a db function for this
-        // if (users && users.length > 0) {
-        //    console.log(`[getUserIdFromAuth] Returning first user ID for tenant ${tenantId}: ${users[0].id}`);
-        //    return users[0].id;
-        // }
-     }
-     // Return a placeholder UUID if no tenant context or no users found in mock logic
-     const mockUserId = "00000000-0000-0000-0000-000000000001"; // Placeholder UUID
-     console.log(`[getUserIdFromAuth] Returning mock user ID: ${mockUserId}`);
-     return mockUserId;
+     console.log("[getUserIdFromAuth] Attempting to resolve user ID from session...");
+    try {
+        const session = await getSession();
+        if (session) {
+            console.log(`[getUserIdFromAuth] Resolved user ID from session: ${session.userId}`);
+            return session.userId;
+        }
+        console.warn("[getUserIdFromAuth] No active session found.");
+        return null;
+    } catch (error) {
+        console.error("[getUserIdFromAuth] Error resolving user ID from session:", error);
+        return null; // Return null on error
+    }
 }
 
 
 /**
- * Simulates checking if the current user is an admin for their tenant.
- * Replace with actual implementation.
- * **NOTE:** This is still a mock. Replace with real role checking.
- * @returns {Promise<boolean>} True if admin (mocked), false otherwise.
+ * Checks if the current user has an 'Admin' role based on the session.
+ *
+ * @returns {Promise<boolean>} True if admin, false otherwise or if not authenticated.
  */
 export async function isUserAdmin(): Promise<boolean> {
-    console.warn("[isUserAdmin] Using MOCK admin status (true). Replace with actual auth logic.");
-    // In real app: Get user from session, check their role against the tenant context
-    // const userId = await getUserIdFromAuth();
-    // const tenantId = await getTenantIdFromAuth();
-    // if (!userId || !tenantId) return false;
-    // const user = await getUserById(userId, tenantId); // Fetch user details including tenant check
-    // return user?.role === 'Admin';
-    const mockIsAdmin = true; // Keep mock as true for now
-    return mockIsAdmin;
+    console.log("[isUserAdmin] Checking admin status from session...");
+     try {
+        const session = await getSession();
+        const isAdmin = session?.userRole === 'Admin';
+        console.log(`[isUserAdmin] Admin status determined from session: ${isAdmin}`);
+        return isAdmin;
+    } catch (error) {
+        console.error("[isUserAdmin] Error checking admin status from session:", error);
+        return false; // Return false on error
+    }
 }
 
 /**
- * Simulates getting the full User object from the session.
- * Replace with actual implementation.
- * **NOTE:** This is still a mock. Replace with real session logic.
- * @returns {Promise<User | null>} User object or null.
+ * Simulates getting the full User object based on the current session.
+ * **Note:** Fetching the full user object on every request might be inefficient.
+ * Usually, the session contains the necessary IDs and roles.
+ * Consider if this function is truly needed or if session data suffices.
+ *
+ * @returns {Promise<User | null>} User object or null if not authenticated.
  */
 export async function getUserFromAuth(): Promise<User | null> {
-    console.warn("[getUserFromAuth] Using MOCK user data. Replace with actual auth logic.");
-    const tenantId = await getTenantIdFromAuth();
-    const userId = await getUserIdFromAuth(); // Gets mock ID
-    const isAdmin = await isUserAdmin(); // Gets mock status
+    console.log("[getUserFromAuth] Attempting to fetch full user object from session...");
+    try {
+        const session = await getSession();
+        if (!session?.userId || !session?.tenantId) {
+            console.warn("[getUserFromAuth] No active session found to fetch user.");
+            return null;
+        }
 
-    if (!tenantId || !userId) {
-        console.warn("[getUserFromAuth] Could not get tenantId or userId, returning null.");
+        // Fetch user from DB using session info
+        const client = await (await import('@/lib/db')).default.connect();
+        try {
+             const query = 'SELECT * FROM users WHERE id = $1 AND tenant_id = $2';
+             const res = await client.query(query, [session.userId, session.tenantId]);
+             if (res.rows.length > 0) {
+                 // Map row to User object (ensure mapRowToUser is defined/imported)
+                  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+                 const user = mapRowToUser(res.rows[0]);
+                  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                 const { passwordHash, ...safeUser } = user; // Omit hash
+                 console.log("[getUserFromAuth] Fetched user from DB based on session:", safeUser);
+                 return safeUser;
+             } else {
+                 console.warn(`[getUserFromAuth] User ID ${session.userId} not found in DB for tenant ${session.tenantId}. Session might be stale.`);
+                 return null;
+             }
+        } finally {
+            client.release();
+        }
+    } catch (error) {
+        console.error("[getUserFromAuth] Error fetching user based on session:", error);
         return null;
     }
+}
 
-    // Return mock user data consistent with other mocks
-     const mockUser: User = {
-        id: userId,
-        tenantId: tenantId,
-        email: isAdmin ? "admin@mock.com" : "employee@mock.com", // Mock email
-        passwordHash: "mock_hash", // Never use this in real app
-        name: isAdmin ? "Mock Admin" : "Mock Employee",
-        role: isAdmin ? "Admin" : "Employee",
-        isActive: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+// Helper function (move to appropriate DB file if preferred)
+function mapRowToUser(row: any): User {
+    return {
+        id: row.id,
+        tenantId: row.tenant_id,
+        email: row.email,
+        passwordHash: row.password_hash, // Included, but should be omitted before returning
+        name: row.name,
+        role: row.role,
+        isActive: row.is_active,
+        createdAt: new Date(row.created_at).toISOString(),
+        updatedAt: new Date(row.updated_at).toISOString(),
     };
-    console.log("[getUserFromAuth] Returning mock user data:", JSON.stringify(mockUser));
-    return mockUser;
 }
