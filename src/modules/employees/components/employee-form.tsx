@@ -10,7 +10,6 @@ import type { Employee } from '@/modules/employees/types';
 import { addEmployee, updateEmployee } from '@/modules/employees/actions'; // Import server actions
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -19,14 +18,13 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, CalendarIcon, Save, UserPlus } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { getTenantIdFromAuth } from '@/lib/auth'; // Import auth helper
 
 interface EmployeeFormProps {
   employee?: Employee; // Optional employee data for editing (includes tenantId)
   submitButtonText?: string;
   formTitle: string;
   formDescription: string;
-  tenantDomain: string; // Accept tenantDomain instead of tenantId
+  // tenantDomain is no longer explicitly needed if redirecting relatively
 }
 
 // Exclude tenantId from the form data type itself, as it's derived contextually
@@ -37,7 +35,6 @@ export function EmployeeForm({
   submitButtonText,
   formTitle,
   formDescription,
-  tenantDomain, // Receive tenantDomain
 }: EmployeeFormProps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -113,8 +110,8 @@ export function EmployeeForm({
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
-        // Use tenantDomain for redirection
-        router.push(`/${tenantDomain}/employees`);
+        // Redirect to the tenant-relative /employees path. Middleware handles the rest.
+        router.push('/employees');
 
     } catch (error: any) {
         console.error("[Employee Form] Submission error:", error);
