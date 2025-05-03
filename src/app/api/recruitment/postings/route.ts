@@ -1,18 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getJobPostings as getJobPostingsAction, addJobPostingAction } from '@/modules/recruitment/actions';
+// Import DB function directly for GET
+import { addJobPostingAction, dbGetAllJobPostings } from '@/modules/recruitment/lib/db'; // Renamed import
 import { jobPostingSchema, type JobPostingFormData } from '@/modules/recruitment/types';
 import type { JobPostingStatus } from '@/modules/recruitment/types';
-// No need for getTenantIdFromAuth here, action handles it
+import { getTenantIdFromAuth } from '@/lib/auth'; // Use auth helper to get tenant ID
+// Removed server action import for GET
+// import { getJobPostings as getJobPostingsAction, addJobPostingAction } from '@/modules/recruitment/actions';
+import { addJobPosting as addPostingAction } from '@/modules/recruitment/actions'; // Keep add action import
+
 
 export async function GET(request: NextRequest) {
   try {
     console.log(`GET /api/recruitment/postings - Fetching...`);
 
+    // Resolve tenantId directly within the API route handler
+    const tenantId = await getTenantIdFromAuth();
+    if (!tenantId) {
+        // Public job board might hit this without tenant context.
+        // Let's assume for now that internal API access requires a tenant context.
+        console.error(`[API GET /api/recruitment/postings] Failed to resolve tenant ID from auth context.`);
+        // Return 401 Unauthorized as the context is missing
+        return NextResponse.json({ error: "Unauthorized or missing tenant context." }, { status: 401 });
+    }
+     console.log(`[API GET /api/recruitment/postings] Resolved tenant ID: ${tenantId}`);
+
+
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status') as JobPostingStatus | undefined;
 
-    // Call server action (action derives tenantId internally for filtering/auth)
-    const postings = await getJobPostingsAction({ status }); // Pass status filter
+    // Call DB function directly with resolved tenantId and status filter
+    const postings = await dbGetAllJobPostings(tenantId, { status });
     return NextResponse.json(postings);
 
   } catch (error: any) {
@@ -20,14 +37,14 @@ export async function GET(request: NextRequest) {
     let message = 'Failed to fetch job postings';
     let status = 500;
 
-    // Distinguish between auth errors and general errors
-    if (error.message?.includes('Tenant context not found') || error.message?.includes('Unauthorized')) {
+     // Distinguish between auth errors and general errors caught here
+    if (error.message?.includes('Unauthorized') || error.message?.includes('Tenant context not found')) {
         message = 'Unauthorized or tenant context missing.';
         status = 401; // Or 403 Forbidden if appropriate
-    } else if (error.message?.includes('invalid input syntax for type uuid')) {
-        message = 'Internal server error: Invalid identifier.';
-        status = 500;
-        console.error("UUID Syntax Error in GET /api/recruitment/postings - Check tenantId handling.");
+    } else if (error.code === '22P02' && error.message?.includes('uuid')) { // Invalid UUID format
+         message = 'Internal server error: Invalid identifier format.';
+         console.error("UUID Syntax Error in GET /api/recruitment/postings - Check tenantId handling.");
+         status = 500; // Internal error
     } else {
         message = error.message || message;
     }
@@ -40,12 +57,11 @@ export async function POST(request: NextRequest) {
   try {
     console.log(`POST /api/recruitment/postings - Adding...`);
 
+    // Action handles tenantId derivation and validation internally
     const body = await request.json();
-    // Action handles validation and adding tenantId
-
     // Pass raw form data (without tenantId) to the action
     const formData = body as Omit<JobPostingFormData, 'tenantId'>;
-    const result = await addJobPostingAction(formData);
+    const result = await addPostingAction(formData); // Use the imported server action
 
     if (result.success && result.jobPosting) {
       return NextResponse.json(result.jobPosting, { status: 201 });
