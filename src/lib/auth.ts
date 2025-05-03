@@ -1,9 +1,10 @@
 // src/lib/auth.ts
 // Placeholder for actual Authentication logic, including tenant and user identification
 
-import { headers } from 'next/headers';
+import { headers, cookies } from 'next/headers'; // Import cookies
 import { getTenantByDomain } from '@/modules/auth/lib/db'; // Import DB function to resolve domain
 import type { User } from '@/modules/auth/types';
+import pool from '@/lib/db'; // Import pool for direct DB access in mock
 
 // --- Placeholder for Session Data Structure ---
 // Replace this with the actual structure provided by your session library
@@ -15,48 +16,52 @@ interface SessionData {
     // Add other relevant session fields
 }
 
+// --- Mock Session Cookie Name ---
+const MOCK_SESSION_COOKIE = 'mockSession';
+
 /**
  * Placeholder function to get session data.
  * **REPLACE THIS WITH YOUR ACTUAL SESSION MANAGEMENT LOGIC.**
  * (e.g., using next-auth, lucia-auth, iron-session cookies, etc.)
  *
+ * Simulates reading a simple cookie containing basic session info.
+ *
  * @returns {Promise<SessionData | null>} The session data or null if not authenticated.
  */
 async function getSession(): Promise<SessionData | null> {
-    console.warn("[getSession] Using MOCK session data. REPLACE with actual session logic.");
-    // --- Mock Implementation ---
-    // 1. Try to get tenant domain from header (set by middleware)
-    const headersList = headers();
-    const tenantDomainHeader = headersList.get('X-Tenant-Domain');
+    console.warn("[getSession] Using MOCK session data from cookie. REPLACE with actual session logic.");
 
-    if (tenantDomainHeader) {
-         // 2. Look up tenant by domain
-         const tenant = await getTenantByDomain(tenantDomainHeader);
-         if (tenant) {
-             // 3. Simulate getting the *first* user of that tenant as the logged-in user
-             //    In a real app, you'd verify a session token/cookie and get the user ID from there.
-             const client = await (await import('@/lib/db')).default.connect();
-             try {
-                const userRes = await client.query('SELECT id, role FROM users WHERE tenant_id = $1 LIMIT 1', [tenant.id]);
-                if (userRes.rows.length > 0) {
-                    const mockSession: SessionData = {
-                        userId: userRes.rows[0].id,
-                        tenantId: tenant.id,
-                        tenantDomain: tenant.domain,
-                        userRole: userRes.rows[0].role,
-                    };
-                    console.log("[getSession] Returning MOCK session:", mockSession);
-                    return mockSession;
-                }
-             } finally {
-                 client.release();
-             }
-         }
+    const cookieStore = cookies();
+    const sessionCookie = cookieStore.get(MOCK_SESSION_COOKIE);
+
+    if (!sessionCookie?.value) {
+        console.log("[getSession] Mock session cookie not found.");
+        // Fallback: Try resolving based on header/domain for initial login context?
+        // Or just return null if no cookie. Let's return null for now.
+        return null;
     }
-     // --- End Mock Implementation ---
 
-    console.log("[getSession] No valid session or tenant found based on mock logic.");
-    return null; // Return null if no session exists
+    try {
+        const sessionData: SessionData = JSON.parse(sessionCookie.value);
+        console.log("[getSession] Parsed mock session data from cookie:", sessionData);
+        // Basic validation
+        if (sessionData && sessionData.userId && sessionData.tenantId && sessionData.tenantDomain && sessionData.userRole) {
+            // Optionally re-verify tenant and user existence in DB here for added safety
+            // const tenant = await getTenantByDomain(sessionData.tenantDomain);
+            // const user = await getUserById(sessionData.userId); // Need getUserById in auth/lib/db
+            // if (tenant && user && user.tenantId === tenant.id) {
+            return sessionData;
+            // }
+        }
+        console.warn("[getSession] Invalid session data found in cookie.");
+        // Clear the invalid cookie
+        cookieStore.delete(MOCK_SESSION_COOKIE);
+        return null;
+    } catch (error) {
+        console.error("[getSession] Error parsing mock session cookie:", error);
+        cookieStore.delete(MOCK_SESSION_COOKIE); // Clear potentially corrupted cookie
+        return null;
+    }
 }
 
 
@@ -139,7 +144,7 @@ export async function getUserFromAuth(): Promise<User | null> {
         }
 
         // Fetch user from DB using session info
-        const client = await (await import('@/lib/db')).default.connect();
+        const client = await pool.connect();
         try {
              const query = 'SELECT * FROM users WHERE id = $1 AND tenant_id = $2';
              const res = await client.query(query, [session.userId, session.tenantId]);
@@ -153,6 +158,8 @@ export async function getUserFromAuth(): Promise<User | null> {
                  return safeUser;
              } else {
                  console.warn(`[getUserFromAuth] User ID ${session.userId} not found in DB for tenant ${session.tenantId}. Session might be stale.`);
+                  // Clear invalid cookie if user/tenant mismatch
+                 cookies().delete(MOCK_SESSION_COOKIE);
                  return null;
              }
         } finally {
@@ -177,4 +184,31 @@ function mapRowToUser(row: any): User {
         createdAt: new Date(row.created_at).toISOString(),
         updatedAt: new Date(row.updated_at).toISOString(),
     };
+}
+
+
+/**
+ * **MOCK FUNCTION:** Sets a simple session cookie.
+ * **REPLACE WITH ACTUAL SESSION MANAGEMENT.**
+ */
+export async function setMockSession(sessionData: SessionData) {
+    console.warn("[setMockSession] Setting MOCK session cookie. REPLACE with actual session logic.");
+    cookies().set(MOCK_SESSION_COOKIE, JSON.stringify(sessionData), {
+        httpOnly: true, // Basic security
+        secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
+        path: '/',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 7, // Example: 1 week
+    });
+     console.log("[setMockSession] Mock session cookie set:", sessionData);
+}
+
+/**
+ * **MOCK FUNCTION:** Clears the simple session cookie.
+ * **REPLACE WITH ACTUAL SESSION MANAGEMENT.**
+ */
+export async function clearMockSession() {
+    console.warn("[clearMockSession] Clearing MOCK session cookie. REPLACE with actual session logic.");
+    cookies().delete(MOCK_SESSION_COOKIE);
+     console.log("[clearMockSession] Mock session cookie cleared.");
 }

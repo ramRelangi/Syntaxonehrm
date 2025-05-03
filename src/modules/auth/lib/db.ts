@@ -125,13 +125,9 @@ export async function addUser(userData: Omit<User, 'id' | 'createdAt' | 'updated
     } catch (err: any) {
         console.error('[DB addUser] Error adding user:', err);
          if (err.code === '23505') { // Handle unique constraint violations
-            if (err.constraint === 'idx_users_tenant_id_email') { // Use the correct constraint name
+            if (err.constraint === 'users_tenant_id_email_key') { // Adjusted constraint name
                  throw new Error('User email already exists for this tenant.');
             }
-            // Could potentially handle global email uniqueness here if needed
-             if (err.constraint === 'users_email_key') { // Assuming a global unique constraint still exists (might be removed)
-                 throw new Error('User email already exists globally.');
-             }
         }
         if (err.code === '42P01') { // undefined_table
             throw new Error('Database schema not initialized. Relation "users" does not exist.');

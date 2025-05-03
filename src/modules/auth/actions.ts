@@ -1,15 +1,29 @@
-// src/modules/auth/actions.ts
 'use server';
+
+
+// Removed runtime export as it causes issues with 'use server'
 
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import nodemailer from 'nodemailer';
-import { registrationSchema, type RegistrationFormData, type Tenant, type User, type TenantLoginFormInputs, tenantLoginSchema } from '@/modules/auth/types'; // Ensure tenantLoginSchema is imported
+import {
+    registrationSchema,
+    type RegistrationFormData,
+    type Tenant,
+    type User,
+    type TenantLoginFormInputs,
+    tenantLoginSchema,
+    type TenantForgotPasswordFormInputs,
+    tenantForgotPasswordSchema,
+    rootForgotPasswordSchema,
+    type RootForgotPasswordFormInputs
+} from '@/modules/auth/types'; // Ensure all schemas are imported
 import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db';
-import pool, { testDbConnection } from '@/lib/db';
-import { redirect } from 'next/navigation';
+import pool, { testDbConnection } from '@/lib/db'; // Import pool and test function
+import { redirect } from 'next/navigation'; // Import redirect
 import { headers } from 'next/headers';
 import { initializeDatabase } from '@/lib/init-db';
+import { setMockSession, clearMockSession } from '@/lib/auth'; // Import mock session helpers
 
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
 
@@ -75,7 +89,20 @@ function createInternalTransporter(): nodemailer.Transporter | null {
 function constructLoginUrl(tenantDomain: string): string {
     const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
     const protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http:'; // Determine protocol
-    const port = process.env.NODE_ENV === 'production' ? '' : `:${process.env.PORT || '9002'}`; // Use PORT env var or default
+    // Read port from NEXT_PUBLIC_BASE_URL or default, handle potential missing port
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `http://localhost:9002`;
+    let port = '';
+     try {
+         const url = new URL(baseUrl);
+         if (url.port && url.port !== '80' && url.port !== '443') {
+             port = `:${url.port}`;
+         }
+     } catch (e) {
+         console.warn("Could not parse NEXT_PUBLIC_BASE_URL to extract port, using default behavior.");
+         if (process.env.NODE_ENV !== 'production') {
+              port = ':9002'; // Default dev port
+         }
+     }
     // Construct URL like http://subdomain.domain:port/login
     const loginUrl = `${protocol}//${tenantDomain}.${rootDomain}${port}/login`;
     console.log(`[constructLoginUrl] Constructed: ${loginUrl}`);
@@ -187,6 +214,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.log(`[registerTenantAction] Scheduling welcome email to ${adminEmail}...`);
         sendWelcomeEmail(newTenant.name, adminName, adminEmail, newTenant.domain).catch(err => {
             console.error("[registerTenantAction] Async welcome email sending failed:", err);
+            // Consider logging this more permanently or alerting admin
         });
 
         // 9. Construct Login URL
@@ -281,11 +309,15 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
         //    - Store session token in DB (linked to user ID, tenant ID, expiry)
         //    - Set secure, HTTP-only cookie with session token
         console.log(`[loginAction] Login successful for user: ${user.id}, tenant: ${tenant.id}`);
-        // Placeholder: Simulate setting a session cookie (REPLACE WITH ACTUAL IMPLEMENTATION)
-        // For Next.js, consider using next-auth, lucia-auth, iron-session, or similar libraries.
-        // Example using a simple header (NOT FOR PRODUCTION):
-        // const sessionToken = `mock-session-${Date.now()}`; // NEVER DO THIS IN PROD
-        // headers().set('Set-Cookie', `sessionToken=${sessionToken}; HttpOnly; Path=/; SameSite=Lax; Max-Age=3600`); // Max-Age=1 hour
+
+        // Use mock session helper
+        await setMockSession({
+            userId: user.id,
+            tenantId: user.tenantId,
+            tenantDomain: tenant.domain,
+            userRole: user.role,
+        });
+
 
         // Return safe user data (omit password hash)
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -302,13 +334,8 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
 // --- Logout Action ---
 export async function logoutAction() {
     console.log("[logoutAction] Logging out user...");
-    // **TODO: Implement Session Clearing**
-    //    - Get session token from cookie/header
-    //    - Delete session token from DB
-    //    - Clear the session cookie
-
-    // Placeholder: Simulate clearing cookie (REPLACE WITH ACTUAL IMPLEMENTATION)
-    // headers().set('Set-Cookie', 'sessionToken=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0'); // Expire cookie
+    // Clear mock session helper
+    await clearMockSession();
 
     let tenantDomain: string | null = null;
     let redirectUrl = '/login'; // Default to root login page
@@ -334,58 +361,94 @@ export async function logoutAction() {
 }
 
 
-// --- Forgot Password Action ---
-export async function forgotPasswordAction(email: string, domain?: string): Promise<{ success: boolean; message: string }> {
-    console.log(`[forgotPasswordAction] Received request for email: ${email}, domain: ${domain || 'N/A'}`);
-    if (!domain) {
-         console.warn("[forgotPasswordAction] Domain not provided.");
-         return { success: false, message: 'Company domain is required for password reset.' };
+// --- Forgot Password Action (Tenant Specific) ---
+export async function tenantForgotPasswordAction(formData: TenantForgotPasswordFormInputs): Promise<{ success: boolean; message: string }> {
+    // Get tenant domain from headers
+    const headersList = headers();
+    const host = headersList.get('host') || '';
+    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
+    const normalizedHost = host.split(':')[0];
+    const match = normalizedHost.match(`^(.*)\\.${rootDomain}$`);
+    const tenantDomain = match ? match[1] : null;
+
+     if (!tenantDomain) {
+         console.error("[tenantForgotPasswordAction] Could not determine tenant domain from host:", host);
+         return { success: false, message: "Could not identify company domain from the URL." };
+     }
+     console.log(`[tenantForgotPasswordAction] Processing request for tenant: ${tenantDomain}`);
+
+
+    const validation = tenantForgotPasswordSchema.safeParse(formData);
+    if (!validation.success) {
+        return { success: false, message: validation.error.errors[0]?.message || "Invalid email format." };
     }
+    const { email } = validation.data;
+    return forgotPasswordLogic(email, tenantDomain);
+}
+
+// --- Forgot Password Action (Root) ---
+export async function rootForgotPasswordAction(formData: RootForgotPasswordFormInputs): Promise<{ success: boolean; message: string }> {
+    const validation = rootForgotPasswordSchema.safeParse(formData);
+    if (!validation.success) {
+        return { success: false, message: validation.error.errors[0]?.message || "Invalid input format." };
+    }
+    const { companyDomain, email } = validation.data;
+    return forgotPasswordLogic(email, companyDomain.toLowerCase());
+}
+
+
+// --- Shared Forgot Password Logic ---
+async function forgotPasswordLogic(email: string, tenantDomain: string): Promise<{ success: boolean; message: string }> {
+    console.log(`[forgotPasswordLogic] Request for email: ${email}, domain: ${tenantDomain}`);
 
     let tenantId: string | null = null;
     try {
-        const tenant = await getTenantByDomain(domain);
+        const tenant = await getTenantByDomain(tenantDomain);
         if (!tenant) {
-             console.warn(`[forgotPasswordAction] Tenant not found for domain: ${domain}`);
-             return { success: true, message: `If an account exists for ${email} at ${domain}, you will receive reset instructions.` };
+             console.warn(`[forgotPasswordLogic] Tenant not found for domain: ${tenantDomain}`);
+             // Still return success to prevent user enumeration
+             return { success: true, message: `If an account exists for ${email} at ${tenantDomain}, you will receive reset instructions.` };
         }
         tenantId = tenant.id;
+        console.log(`[forgotPasswordLogic] Found tenant: ${tenantId}`);
 
         const user = await getUserByEmail(email, tenantId);
         if (!user) {
-            console.warn(`[forgotPasswordAction] User not found for email: ${email} in tenant: ${tenantId}`);
-            return { success: true, message: `If an account exists for ${email} at ${domain}, you will receive reset instructions.` };
+            console.warn(`[forgotPasswordLogic] User not found for email: ${email} in tenant: ${tenantId}`);
+            return { success: true, message: `If an account exists for ${email} at ${tenantDomain}, you will receive reset instructions.` };
         }
+         console.log(`[forgotPasswordLogic] Found user: ${user.id}`);
 
         // --- TODO: Generate & Store Secure Token ---
         const resetToken = `fake-reset-token-${Date.now()}`; // Replace with secure token generation
-        console.log(`[forgotPasswordAction] Generated reset token for user ${user.id}`);
+        console.log(`[forgotPasswordLogic] Generated reset token for user ${user.id}`);
         // await storeResetTokenHash(user.id, resetToken); // Store hash in DB with expiry
 
         // --- Send Reset Email ---
         const transporter = createInternalTransporter();
         if (!transporter) {
-             console.error('[forgotPasswordAction] Failed to create internal transporter for reset email.');
+             console.error('[forgotPasswordLogic] Failed to create internal transporter for reset email.');
             return { success: false, message: 'Failed to send reset email due to server configuration.' };
         }
         // Construct reset URL using the tenant's domain
-        const resetUrlBase = constructLoginUrl(domain).replace('/login', '/reset-password');
+        const resetUrlBase = constructLoginUrl(tenantDomain).replace('/login', '/reset-password'); // Use correct base URL construction
         const resetUrl = `${resetUrlBase}?token=${resetToken}`;
+        console.log(`[forgotPasswordLogic] Reset URL: ${resetUrl}`);
 
         const config = getInternalSmtpConfig();
         const mailOptions = {
             from: `"${config?.fromName || INTERNAL_FROM_NAME}" <${config?.fromEmail || INTERNAL_FROM_EMAIL}>`,
             to: user.email,
-            subject: `Password Reset Request for SyntaxHive Hrm (${domain})`,
+            subject: `Password Reset Request for SyntaxHive Hrm (${tenant.name})`,
             text: `Hello ${user.name},\n\nYou requested a password reset for your SyntaxHive Hrm account associated with ${tenant.name}.\n\nClick the link below to reset your password:\n${resetUrl}\n\nIf you did not request this, please ignore this email.\n\nBest regards,\nThe SyntaxHive Hrm Team`,
             html: `<p>Hello ${user.name},</p><p>You requested a password reset for your <strong>SyntaxHive Hrm</strong> account associated with <strong>${tenant.name}</strong>.</p><p>Click the link below to reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>If you did not request this, please ignore this email.</p><p>Best regards,<br>The SyntaxHive Hrm Team</p>`,
         };
         await transporter.sendMail(mailOptions);
-        console.log(`[forgotPasswordAction] Password reset email sent to ${user.email}`);
-        return { success: true, message: `If an account exists for ${email} at ${domain}, you will receive reset instructions.` };
+        console.log(`[forgotPasswordLogic] Password reset email sent to ${user.email}`);
+        return { success: true, message: `If an account exists for ${email} at ${tenantDomain}, you will receive reset instructions.` };
 
     } catch (error: any) {
-        console.error('[forgotPasswordAction] Error:', error);
+        console.error('[forgotPasswordLogic] Error:', error);
         // Don't reveal specific errors in the message
         return { success: false, message: 'An error occurred while processing the password reset request.' };
     }
