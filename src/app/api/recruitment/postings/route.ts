@@ -1,12 +1,13 @@
+
 import { NextRequest, NextResponse } from 'next/server';
 // Import DB function directly for GET
-import { addJobPostingAction, dbGetAllJobPostings } from '@/modules/recruitment/lib/db'; // Renamed import
+import { getAllJobPostings as dbGetAllJobPostings, addJobPosting as dbAddJobPosting } from '@/modules/recruitment/lib/db'; // Use correct names from db file
 import { jobPostingSchema, type JobPostingFormData } from '@/modules/recruitment/types';
 import type { JobPostingStatus } from '@/modules/recruitment/types';
 import { getTenantIdFromAuth } from '@/lib/auth'; // Use auth helper to get tenant ID
 // Removed server action import for GET
 // import { getJobPostings as getJobPostingsAction, addJobPostingAction } from '@/modules/recruitment/actions';
-import { addJobPosting as addPostingAction } from '@/modules/recruitment/actions'; // Keep add action import
+import { addJobPostingAction } from '@/modules/recruitment/actions'; // Correctly import addJobPostingAction
 
 
 export async function GET(request: NextRequest) {
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     // Pass raw form data (without tenantId) to the action
     const formData = body as Omit<JobPostingFormData, 'tenantId'>;
-    const result = await addPostingAction(formData); // Use the imported server action
+    const result = await addJobPostingAction(formData); // Use the imported server action
 
     if (result.success && result.jobPosting) {
       return NextResponse.json(result.jobPosting, { status: 201 });
