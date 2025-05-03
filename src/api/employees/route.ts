@@ -1,17 +1,21 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getEmployees as getEmployeesAction, addEmployee as addEmployeeAction } from '@/modules/employees/actions';
+import { getEmployees, addEmployee } from '@/modules/employees/actions';
 import { employeeSchema, EmployeeFormData } from '@/modules/employees/types'; // Ensure EmployeeFormData is imported if used in POST
 import { getTenantId } from '../utils/get-tenant-id'; // Import utility
 
 export async function GET(request: NextRequest) {
-  const tenantId = await getTenantId(request);
+  const tenantId = await getTenantId(request); // Use utility to get tenantId
   if (!tenantId) {
       return NextResponse.json({ error: 'Tenant context is required.' }, { status: 400 });
   }
 
   try {
-    const employees = await getEmployeesAction(tenantId); // Call the server action with tenantId
+    // The action now derives tenantId itself, but we might need it for logging/context
+    // For consistency, let's pass it to the action if it accepts it, otherwise remove.
+    // Assuming getEmployees action now uses getTenantIdFromAuth(), remove tenantId parameter here.
+    // const employees = await getEmployees(tenantId);
+    const employees = await getEmployees(); // Call the server action (derives tenant internally)
     return NextResponse.json(employees);
   } catch (error: any) { // Catch as any to access error properties
     console.error(`Error fetching employees for tenant ${tenantId} (API):`, error);
@@ -53,32 +57,35 @@ export async function GET(request: NextRequest) {
          message = error.message || message;
     }
 
-
     return NextResponse.json({ error: message }, { status: status });
   }
 }
 
 export async function POST(request: NextRequest) {
-   const tenantId = await getTenantId(request);
-   if (!tenantId) {
-       return NextResponse.json({ error: 'Tenant context is required.' }, { status: 400 });
-   }
+  const tenantId = await getTenantId(request); // Use utility to get tenantId
+  if (!tenantId) {
+      return NextResponse.json({ error: 'Tenant context is required.' }, { status: 400 });
+  }
 
   try {
     const body = await request.json();
 
-    // Add tenantId to the data before validation/adding
-    const employeeDataWithTenant = { ...body, tenantId };
+    // Prepare data for validation (action will add tenantId from auth context)
+    const employeeData = { ...body };
 
-    // Server-side validation before calling the action
-    const validation = employeeSchema.safeParse(employeeDataWithTenant);
+    // Server-side validation before calling the action (schema expects tenantId, add it here)
+    // Although action derives it, validation needs it for the schema check.
+    const validationData = { ...employeeData, tenantId }; // Add tenantId for validation step
+    const validation = employeeSchema.safeParse(validationData);
+
     if (!validation.success) {
         console.error("POST /api/employees Validation Error:", validation.error.flatten());
         return NextResponse.json({ error: 'Invalid input', details: validation.error.flatten().fieldErrors }, { status: 400 });
     }
 
-    // Call the server action to add the employee (action should handle tenantId)
-    const result = await addEmployeeAction(validation.data as EmployeeFormData); // Cast if necessary
+    // Call the server action to add the employee (action derives tenantId internally)
+    // Pass data *without* tenantId, as action gets it from auth context.
+    const result = await addEmployee(employeeData as Omit<EmployeeFormData, 'tenantId'>);
 
     if (result.success && result.employee) {
       return NextResponse.json(result.employee, { status: 201 });
@@ -90,7 +97,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Email address already exists for this tenant.' }, { status: 409 }); // 409 Conflict
        }
        // Handle potential DB connection errors during POST as well
-       const dbError = result.errors?.find(e => ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(e.code || ''));
+       const dbError = result.errors?.find((e:any) => ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(e.code || ''));
        if (dbError) {
            let message = dbError.message;
            let status = 503;

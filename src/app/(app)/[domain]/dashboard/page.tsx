@@ -9,53 +9,69 @@ import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Employee } from "@/modules/employees/types"; // Keep type import
 import type { LeaveRequest } from "@/modules/leave/types"; // Keep type import
+import type { JobPosting } from "@/modules/recruitment/types"; // Keep type import
 import { getTenantByDomain } from '@/modules/auth/lib/db'; // Function to verify tenant
 import { notFound } from 'next/navigation';
+import { headers } from 'next/headers'; // To read headers for API calls
 
 interface DashboardPageProps {
   params: { domain: string };
 }
 
-// Helper to fetch data from API routes - SERVER SIDE VERSION (Needs tenant context)
-async function fetchData<T>(tenantId: string, url: string, options?: RequestInit): Promise<T> {
+// Helper to fetch data from API routes - SERVER SIDE VERSION
+// API routes will resolve tenant context based on the X-Tenant-Domain header
+async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     // Construct the full URL relative to the application's base URL
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002';
     const formattedUrl = url.startsWith('/') ? url.substring(1) : url;
     const fullUrl = `${baseUrl.replace(/\/$/, '')}/${formattedUrl}`;
 
-    console.log(`Fetching server-side data for tenant ${tenantId} from: ${fullUrl}`); // Log the URL
+    const headersList = headers(); // Get current headers from incoming request
+    const tenantDomain = headersList.get('X-Tenant-Domain'); // Get domain set by middleware
+
+    console.log(`[Dashboard Fetch] Fetching server-side data from: ${fullUrl} for domain: ${tenantDomain}`);
 
     try {
-        // Add tenant context to headers or query params for API routes
-        const headers = new Headers(options?.headers);
-        headers.set('X-Tenant-Id', tenantId); // Example: Pass tenantId via header
+        // Pass the X-Tenant-Domain header to the API route
+        const fetchHeaders = new Headers(options?.headers);
+        if (tenantDomain) {
+             fetchHeaders.set('X-Tenant-Domain', tenantDomain);
+        } else {
+            // This shouldn't happen if middleware is correct, but handle defensively
+            console.error(`[Dashboard Fetch] Critical: X-Tenant-Domain header missing for API call to ${fullUrl}`);
+             throw new Error('Tenant context is missing for API call.');
+        }
 
         const response = await fetch(fullUrl, {
-            cache: 'no-store',
+            cache: 'no-store', // Ensure fresh data
             ...options,
-            headers: headers, // Include modified headers
+            headers: fetchHeaders, // Include the tenant domain header
          });
-        console.log(`Server-side fetch response status for ${fullUrl}: ${response.status}`);
+        console.log(`[Dashboard Fetch] Server-side fetch response status for ${fullUrl}: ${response.status}`);
 
         if (!response.ok) {
             const errorText = await response.text();
-            console.error(`Server-side fetch error for ${fullUrl} (Tenant: ${tenantId}): Status ${response.status}, Body: ${errorText}`);
+            // Log the raw error text first for debugging
+            console.error(`[Dashboard Fetch] Server-side fetch error for ${fullUrl}: Status ${response.status}, Body: ${errorText}`);
+            // Try to parse JSON to get a more specific error message from the API
             let errorMessage = `HTTP error! status: ${response.status}`;
             try {
                 const errorData = JSON.parse(errorText);
                 errorMessage = errorData.error || errorData.message || errorMessage;
             } catch (parseError) {
+                // Fallback to raw text if not JSON
                 errorMessage = errorText || errorMessage;
             }
              throw new Error(errorMessage);
         }
         return await response.json() as T;
     } catch (error) {
-        console.error(`Error fetching ${fullUrl} for tenant ${tenantId}:`, error);
+        console.error(`[Dashboard Fetch] Error fetching ${fullUrl} for domain ${tenantDomain}:`, error);
         if (error instanceof Error) {
-           throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
+           // Prepend context to the error message
+           throw new Error(`Failed to fetch ${url}: ${error.message}`);
         } else {
-            throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
+            throw new Error(`Failed to fetch ${url}: An unknown error occurred.`);
         }
     }
 }
@@ -69,7 +85,7 @@ async function MetricCard({ title, icon: Icon, valuePromise, link, linkText, cha
     try {
          value = await valuePromise;
     } catch (error) {
-         console.error(`Error fetching metric for ${title}:`, error);
+         console.error(`[Dashboard MetricCard - ${title}] Error fetching metric:`, error);
          value = "Error";
          displayError = true;
     }
@@ -92,27 +108,27 @@ async function MetricCard({ title, icon: Icon, valuePromise, link, linkText, cha
     );
 }
 
-// --- Async Data Fetching Functions via API (with tenantId) ---
-async function getTotalEmployees(tenantId: string) {
-    const employees = await fetchData<Employee[]>(tenantId, '/api/employees');
+// --- Async Data Fetching Functions via API (API routes handle tenant context) ---
+async function getTotalEmployees() {
+    const employees = await fetchData<Employee[]>('/api/employees');
     return employees.length;
 }
 
-async function getUpcomingLeavesCount(tenantId: string) {
+async function getUpcomingLeavesCount() {
     const today = new Date();
     // API route needs to filter by tenantId based on header/context
-    const upcomingRequests = await fetchData<LeaveRequest[]>(tenantId, '/api/leave/requests?status=Approved');
+    const upcomingRequests = await fetchData<LeaveRequest[]>('/api/leave/requests?status=Approved');
     const count = upcomingRequests.filter(req => new Date(req.startDate) >= today).length;
     return count;
 }
 
-async function getOpenPositionsCount(tenantId: string) {
+async function getOpenPositionsCount() {
      // API route needs to filter by tenantId
-     const openPositions = await fetchData<any[]>(tenantId, '/api/recruitment/postings?status=Open');
+     const openPositions = await fetchData<JobPosting[]>('/api/recruitment/postings?status=Open');
      return openPositions.length;
  }
 
-async function getPendingTasksCount(tenantId: string) {
+async function getPendingTasksCount() {
     // Mock - Replace later with real data fetching for the tenant
     await new Promise(res => setTimeout(res, 50));
     return 3;
@@ -123,39 +139,50 @@ async function getPendingTasksCount(tenantId: string) {
 export default async function TenantDashboardPage({ params }: DashboardPageProps) {
     const tenantDomain = params.domain;
 
-    // 1. Verify Tenant Domain Exists
-    const tenant = await getTenantByDomain(tenantDomain);
-    if (!tenant) {
-        console.error(`[Dashboard] Tenant domain "${tenantDomain}" not found.`);
-        notFound(); // Or redirect to an error page / root login
-    }
-    const tenantId = tenant.id;
+    // 1. Verify Tenant Domain Exists - Handled by Layout
+
+    // 2. Fetch tenant details for name display (optional, could pass from layout)
+     let tenantName = tenantDomain; // Fallback to domain name
+     try {
+        const tenantDetails = await getTenantByDomain(tenantDomain);
+        if(tenantDetails) tenantName = tenantDetails.name;
+        else {
+            // Tenant valid in middleware/layout but not found here? Should not happen.
+            console.warn(`[Dashboard Page] Tenant details not found for domain "${tenantDomain}" after layout validation.`);
+            notFound(); // Consider this an error state
+        }
+     } catch (dbError){
+         console.error(`[Dashboard Page] Error fetching tenant details for name display:`, dbError);
+         // Continue with domain name, but log error
+     }
+
 
     // Define quick links - these are tenant-relative now
     const quickLinks = [
     { href: `/${tenantDomain}/employees/add`, label: 'Add New Employee', icon: Users },
     { href: `/${tenantDomain}/recruitment`, label: 'Manage Job Postings', icon: Briefcase },
-    { href: `/${tenantDomain}/leave#request`, label: 'Request Leave', icon: Calendar }, // Assumes leave page handles tenant context
-    { href: `/${tenantDomain}/smart-resume-parser`, label: 'Parse Resume', icon: UploadCloud }, // Assumes parser handles tenant context
+    { href: `/${tenantDomain}/leave#leave-tabs`, label: 'Request Leave', icon: Calendar }, // Link to leave page, potentially specific tab
+    { href: `/${tenantDomain}/smart-resume-parser`, label: 'Parse Resume', icon: UploadCloud },
     ];
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Dashboard - {tenant.name}</h1>
+      <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Dashboard - {tenantName}</h1>
 
       {/* Key Metrics Section with Suspense */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
          <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
-            <MetricCard title="Total Employees" icon={Users} valuePromise={getTotalEmployees(tenantId)} changeText="+2 since last month" />
+            {/* Pass the promise directly */}
+            <MetricCard title="Total Employees" icon={Users} valuePromise={getTotalEmployees()} changeText="+2 since last month" />
          </Suspense>
           <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
-             <MetricCard title="Open Positions" icon={Briefcase} valuePromise={getOpenPositionsCount(tenantId)} link={`/${tenantDomain}/recruitment`} linkText="View jobs" />
+             <MetricCard title="Open Positions" icon={Briefcase} valuePromise={getOpenPositionsCount()} link={`/${tenantDomain}/recruitment`} linkText="View jobs" />
           </Suspense>
          <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
-             <MetricCard title="Upcoming Leaves" icon={Calendar} valuePromise={getUpcomingLeavesCount(tenantId)} link={`/${tenantDomain}/leave`} linkText="View calendar" />
+             <MetricCard title="Upcoming Leaves" icon={Calendar} valuePromise={getUpcomingLeavesCount()} link={`/${tenantDomain}/leave`} linkText="View calendar" />
          </Suspense>
           <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
-            <MetricCard title="Pending Tasks" icon={FileText} valuePromise={getPendingTasksCount(tenantId)} changeText="Requires attention"/>
+            <MetricCard title="Pending Tasks" icon={FileText} valuePromise={getPendingTasksCount()} changeText="Requires attention"/>
           </Suspense>
       </div>
 
