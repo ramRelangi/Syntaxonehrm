@@ -9,7 +9,6 @@ import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getTenantByDomain } from '@/modules/auth/lib/db';
 import { notFound } from 'next/navigation';
-import { headers } from 'next/headers'; // Keep for reading headers if needed elsewhere, though not for API calls now
 
 // Import Server Actions directly
 import { getEmployees } from '@/modules/employees/actions';
@@ -34,7 +33,7 @@ async function MetricCard({ title, icon: Icon, valuePromise, link, linkText, cha
          console.error(`[Dashboard MetricCard - ${title}] Error fetching metric:`, error);
           // Try to extract a more specific message if available
          let errorMessage = "Error";
-         if (error.message?.includes('Tenant context not found') || error.message?.includes('Unauthorized')) {
+         if (error.message?.includes('Tenant context not found') || error.message?.includes('Unauthorized') || error.message?.includes('Tenant ID is required')) {
              errorMessage = "Auth Error";
          } else if (error.message?.includes('invalid input syntax for type uuid')) {
               errorMessage = "DB Error";
