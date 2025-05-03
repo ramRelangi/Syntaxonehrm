@@ -1,13 +1,13 @@
 // src/lib/auth.ts
-// Placeholder for authentication logic
+// Authentication logic, including tenant and user identification
 
 import { headers } from 'next/headers';
 import { getTenantByDomain } from '@/modules/auth/lib/db'; // Import DB function to resolve domain
 import type { User } from '@/modules/auth/types';
 
 /**
- * Gets the tenant ID from the current request context (e.g., subdomain or header).
- * In a real app with sessions, this might fetch the tenant ID associated with the user's session.
+ * Gets the tenant ID UUID from the current request context by resolving the domain
+ * found in the 'X-Tenant-Domain' header (set by middleware).
  *
  * @returns {Promise<string | null>} The tenant ID UUID or null if not found or identifiable.
  */
@@ -29,14 +29,23 @@ export async function getTenantIdFromAuth(): Promise<string | null> {
             }
         }
 
-        // Fallback: Try inferring from host if header is missing (might happen in some direct calls)
+        // Fallback: Try inferring from host if header is missing (less reliable, middleware should set header)
         const host = headersList.get('host') || '';
         const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-        const normalizedHost = host.split(':')[0];
+        const normalizedHost = host.split(':')[0]; // Remove port if present
+        console.log(`[getTenantIdFromAuth] Attempting fallback inference from host: ${normalizedHost}`);
+
+        // Ensure rootDomain itself is not treated as a subdomain part
+        if (normalizedHost === rootDomain || normalizedHost === 'localhost' || normalizedHost === '127.0.0.1') {
+            console.warn("[getTenantIdFromAuth] Host is root domain or equivalent, no tenant context.");
+            return null;
+        }
+
+        // Match subdomains like 'demo.localhost' or 'demo.syntaxhivehrm.app'
         const match = normalizedHost.match(`^(.*)\\.${rootDomain}$`);
         const subdomain = match ? match[1] : null;
 
-        if (subdomain && !['www', 'api'].includes(subdomain)) {
+        if (subdomain && !['www', 'api'].includes(subdomain)) { // Ignore common non-tenant subdomains
              console.log(`[getTenantIdFromAuth] Inferred subdomain from host: ${subdomain}`);
              const tenant = await getTenantByDomain(subdomain);
              if (tenant) {
@@ -70,11 +79,17 @@ export async function getUserIdFromAuth(): Promise<string | null> {
      if (tenantId) {
         // Placeholder: Fetch the first user of the tenant as the mock user
         // In real app: Get user ID from session
+        // Example using DB (needs getUsersForTenant function):
         // const users = await getUsersForTenant(tenantId); // Need a db function for this
-        // if (users && users.length > 0) return users[0].id;
+        // if (users && users.length > 0) {
+        //    console.log(`[getUserIdFromAuth] Returning first user ID for tenant ${tenantId}: ${users[0].id}`);
+        //    return users[0].id;
+        // }
      }
      // Return a placeholder UUID if no tenant context or no users found in mock logic
-     return "00000000-0000-0000-0000-000000000001"; // Placeholder UUID
+     const mockUserId = "00000000-0000-0000-0000-000000000001"; // Placeholder UUID
+     console.log(`[getUserIdFromAuth] Returning mock user ID: ${mockUserId}`);
+     return mockUserId;
 }
 
 
@@ -90,7 +105,7 @@ export async function isUserAdmin(): Promise<boolean> {
     // const userId = await getUserIdFromAuth();
     // const tenantId = await getTenantIdFromAuth();
     // if (!userId || !tenantId) return false;
-    // const user = await getUserById(userId); // Fetch user details
+    // const user = await getUserById(userId, tenantId); // Fetch user details including tenant check
     // return user?.role === 'Admin';
     const mockIsAdmin = true; // Keep mock as true for now
     return mockIsAdmin;
@@ -108,10 +123,13 @@ export async function getUserFromAuth(): Promise<User | null> {
     const userId = await getUserIdFromAuth(); // Gets mock ID
     const isAdmin = await isUserAdmin(); // Gets mock status
 
-    if (!tenantId || !userId) return null;
+    if (!tenantId || !userId) {
+        console.warn("[getUserFromAuth] Could not get tenantId or userId, returning null.");
+        return null;
+    }
 
     // Return mock user data consistent with other mocks
-    return {
+     const mockUser: User = {
         id: userId,
         tenantId: tenantId,
         email: isAdmin ? "admin@mock.com" : "employee@mock.com", // Mock email
@@ -122,4 +140,6 @@ export async function getUserFromAuth(): Promise<User | null> {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
     };
+    console.log("[getUserFromAuth] Returning mock user data:", JSON.stringify(mockUser));
+    return mockUser;
 }

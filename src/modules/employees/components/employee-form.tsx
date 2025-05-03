@@ -18,13 +18,15 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, CalendarIcon, Save, UserPlus } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
+// Removed direct call to server action from client component hook
+// import { getTenantIdFromAuth } from '@/lib/auth';
 
 interface EmployeeFormProps {
   employee?: Employee; // Optional employee data for editing (includes tenantId)
   submitButtonText?: string;
   formTitle: string;
   formDescription: string;
-  // tenantId?: string; // Alternative: Pass tenantId explicitly if not in employee object
+  tenantId: string; // Make tenantId a required prop
 }
 
 export function EmployeeForm({
@@ -32,6 +34,7 @@ export function EmployeeForm({
   submitButtonText,
   formTitle,
   formDescription,
+  tenantId, // Receive tenantId as a prop
 }: EmployeeFormProps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -41,15 +44,13 @@ export function EmployeeForm({
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
 
-  // TODO: Derive tenantId from session/context or ensure it's passed correctly
-  // For now, rely on `employee.tenantId` in edit mode. For add mode, it needs to be provided.
-  // This is a placeholder - replace with actual tenant context retrieval.
-  const tenantIdForForm = employee?.tenantId || "MOCK_TENANT_ID"; // Replace MOCK_TENANT_ID
+  // Use the tenantId passed via props
+  const tenantIdForForm = tenantId;
 
-   if (!tenantIdForForm && !isEditMode) {
-       // Handle missing tenantId in add mode - potentially show error or disable form
-       console.error("Tenant ID is missing in EmployeeForm (add mode).");
-       // return <p className="text-destructive">Cannot add employee without tenant context.</p>;
+   if (!tenantIdForForm) {
+       console.error("Tenant ID is missing in EmployeeForm props.");
+       // Render an error message or disable the form
+        return <p className="text-destructive p-4 text-center">Error: Tenant information is missing. Cannot load form.</p>;
    }
 
 
@@ -67,7 +68,7 @@ export function EmployeeForm({
   const form = useForm<EmployeeFormData>({
     resolver: zodResolver(employeeSchema),
     defaultValues: {
-      tenantId: tenantIdForForm, // Set tenantId from context or employee prop
+      tenantId: tenantIdForForm, // Set tenantId from prop
       name: employee?.name ?? "",
       email: employee?.email ?? "",
       phone: employee?.phone ?? "",
@@ -82,13 +83,14 @@ export function EmployeeForm({
 
   const onSubmit = async (data: EmployeeFormData) => {
     setIsLoading(true);
-    console.log("[Employee Form] Submitting data:", data);
+    console.log("[Employee Form] Submitting data (tenantId included):", data);
 
     const apiUrl = isEditMode ? `/api/employees/${employee.id}` : '/api/employees';
     const method = isEditMode ? 'PUT' : 'POST';
 
     // Ensure tenantId is included in the payload
-    const payload = { ...data, tenantId: tenantIdForForm }; // Use derived tenantId
+    // The form data already includes tenantId from defaultValues
+    const payload = data;
 
     try {
         const response = await fetch(apiUrl, {
@@ -111,15 +113,18 @@ export function EmployeeForm({
                  throw new Error(responseText || `HTTP error! status: ${response.status}`);
              }
              console.warn("[Employee Form] Received OK response but non-JSON content:", responseText);
-             result = { name: data.name }; // Assume success based on status
+             // Adjust success check if necessary based on non-JSON OK responses
+             result = { name: data.name, id: employee?.id || 'new' }; // Simulate success payload
         }
 
 
         if (!response.ok) {
              console.error("[Employee Form] API Error Response:", result);
-             // Handle 400 error for missing tenant context in API
-              if (response.status === 400 && result?.error?.includes('Tenant context')) {
-                  throw new Error('Tenant information is missing. Unable to save data.');
+             // Handle 401/403 error for unauthorized access (tenant context issue in API)
+              if (response.status === 401 || response.status === 403) {
+                  throw new Error(result?.error || 'Unauthorized or tenant context missing. Unable to save data.');
+              } else if (response.status === 409) { // Conflict for duplicate email
+                   throw new Error(result?.error || 'Email address already exists for this tenant.');
               }
             throw new Error(result?.error || result?.message || `HTTP error! status: ${response.status}`);
         }
@@ -132,7 +137,7 @@ export function EmployeeForm({
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
-        // Redirect to tenant-specific employee list
+        // Redirect to tenant-specific employee list using the tenantId prop
         router.push(`/${tenantIdForForm}/employees`);
         // No explicit router.refresh() needed here usually, list page should refetch on mount/focus
 
@@ -160,8 +165,8 @@ export function EmployeeForm({
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-         {/* Hidden field for tenantId - might not be necessary if derived correctly */}
-         {/* <input type="hidden" {...form.register("tenantId")} /> */}
+         {/* Hidden field for tenantId - useful for debugging, ensure it's correct */}
+         <input type="hidden" {...form.register("tenantId")} value={tenantIdForForm} />
 
          {form.formState.errors.root?.serverError && !form.formState.errors.email && ( // Show root error only if not showing email specific error
           <FormMessage className="text-destructive text-center">
@@ -274,11 +279,7 @@ export function EmployeeForm({
                              !field.value && "text-muted-foreground"
                            )}
                          >
-                           {field.value ? (
-                             isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : "Invalid date"
-                           ) : (
-                             <span>Pick a date</span>
-                           )}
+                           {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                          </Button>
                        </FormControl>
