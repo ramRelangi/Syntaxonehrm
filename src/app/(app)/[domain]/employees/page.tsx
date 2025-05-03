@@ -6,13 +6,14 @@ import * as React from "react";
 import { useParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Users, UserPlus } from "lucide-react";
+import { Users, UserPlus, AlertTriangle, Loader2 } from "lucide-react"; // Added AlertTriangle, Loader2
 import { EmployeeDataTable } from '@/modules/employees/components/employee-data-table';
 import { columns } from '@/modules/employees/components/employee-table-columns';
 import Link from "next/link";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Employee } from '@/modules/employees/types';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Added Alert components
 
 interface EmployeesPageProps {
   params: { domain: string };
@@ -20,7 +21,6 @@ interface EmployeesPageProps {
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION (API handles tenant context)
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
-    // API routes are called directly, middleware ensures tenant context via header
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
     console.log(`[Employees Page - fetchData] Fetching data from: ${fullUrl}`);
 
@@ -30,23 +30,27 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
 
         if (!response.ok) {
             let errorPayload = { message: `HTTP error! status: ${response.status}` };
+             let errorText = '';
              try {
-                const errorText = await response.text();
+                errorText = await response.text();
                  if (errorText) {
                     errorPayload = JSON.parse(errorText);
                  }
              } catch (e) {
-                 // Ignore JSON parsing error if response is not JSON
+                 console.warn(`[Employees Page - fetchData] Failed to parse error response as JSON for ${fullUrl}:`, errorText);
+                 errorPayload.message = errorText || errorPayload.message;
              }
-             console.error(`[Employees Page - fetchData] Fetch error for ${fullUrl}:`, errorPayload.message);
-             // Handle specific 400 error for missing tenant
-             if (response.status === 400 && errorPayload.message.includes('Tenant context')) {
-                 throw new Error('Tenant information is missing. Unable to load data.');
+             console.error(`[Employees Page - fetchData] Fetch error for ${fullUrl}:`, errorPayload);
+             // Handle specific 401/403 error for missing tenant or auth issues
+             if (response.status === 401 || response.status === 403) {
+                 throw new Error(errorPayload.message || 'Unauthorized. Unable to load data.');
+             } else if (response.status === 400 && errorPayload.message.includes('Tenant context')) {
+                 throw new Error(errorPayload.message || 'Tenant information is missing. Unable to load data.');
              }
              throw new Error(errorPayload.message);
         }
         const data = await response.json();
-        console.log(`[Employees Page - fetchData] Successfully fetched data for ${fullUrl}`);
+        console.log(`[Employees Page - fetchData] Successfully fetched data for ${fullUrl}, record count: ${Array.isArray(data) ? data.length : 'N/A'}`);
         return data as T;
     } catch (error) {
         console.error(`[Employees Page - fetchData] Error in fetchData for ${fullUrl}:`, error);
@@ -78,10 +82,11 @@ export default function TenantEmployeesPage({ params }: EmployeesPageProps) {
        console.log(`[Employees Page - ${tenantDomain}] Successfully fetched ${data.length} employees.`);
     } catch (err: any) {
       console.error(`[Employees Page - ${tenantDomain}] Error fetching employees:`, err);
-      setError(err.message || "Failed to load employees. Please try refreshing the page.");
+      const errorMessage = err.message || "Failed to load employees. Please try refreshing the page.";
+      setError(errorMessage);
       toast({
         title: "Error Loading Employees",
-        description: err.message || "Could not fetch employee data.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -102,6 +107,38 @@ export default function TenantEmployeesPage({ params }: EmployeesPageProps) {
     fetchEmployees();
   };
 
+  const renderContent = () => {
+     if (isLoading) {
+       return (
+           <div className="space-y-4">
+               <Skeleton className="h-10 w-1/3" /> {/* Filter skeleton */}
+               <Skeleton className="h-96 w-full" /> {/* Table skeleton */}
+               <Skeleton className="h-10 w-1/4 ml-auto" /> {/* Pagination skeleton */}
+           </div>
+       );
+     }
+     if (error) {
+       return (
+           <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Error Loading Employees</AlertTitle>
+              <AlertDescription>
+                 {error} <Button variant="link" onClick={fetchEmployees} className="p-0 h-auto">Try again</Button>
+              </AlertDescription>
+           </Alert>
+       );
+     }
+     return (
+       <EmployeeDataTable
+         columns={columns}
+         data={employees}
+         onEmployeeDeleted={handleEmployeeDeleted}
+         tenantDomain={tenantDomain}
+       />
+     );
+   };
+
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -121,22 +158,7 @@ export default function TenantEmployeesPage({ params }: EmployeesPageProps) {
             <CardDescription>View, search, and manage employee records for {tenantDomain}.</CardDescription>
          </CardHeader>
          <CardContent>
-            {isLoading && (
-                <div className="space-y-4">
-                    <Skeleton className="h-10 w-1/3" /> {/* Filter skeleton */}
-                    <Skeleton className="h-96 w-full" /> {/* Table skeleton */}
-                    <Skeleton className="h-10 w-1/4 ml-auto" /> {/* Pagination skeleton */}
-                </div>
-            )}
-            {error && <p className="text-center text-destructive py-10">{error}</p>}
-            {!isLoading && !error && (
-              <EmployeeDataTable
-                columns={columns} // Columns need to be adapted for tenant-relative links
-                data={employees}
-                onEmployeeDeleted={handleEmployeeDeleted} // Pass callback
-                tenantDomain={tenantDomain} // Pass domain for link generation in columns
-              />
-            )}
+            {renderContent()}
          </CardContent>
       </Card>
     </div>

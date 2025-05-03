@@ -18,8 +18,6 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, CalendarIcon, Save, UserPlus } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
-// Removed direct call to server action from client component hook
-// import { getTenantIdFromAuth } from '@/lib/auth';
 
 interface EmployeeFormProps {
   employee?: Employee; // Optional employee data for editing (includes tenantId)

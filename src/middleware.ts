@@ -9,8 +9,21 @@ const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
 
 // Paths that are public on the root domain
 const PUBLIC_ROOT_PATHS = ['/login', '/register', '/forgot-password', '/jobs'];
+
 // Paths within the tenant application context (used for rewriting)
-const TENANT_APP_PATHS = ['/dashboard', '/employees', '/recruitment', '/payroll', '/leave', '/documents', '/reports', '/communication', '/smart-resume-parser', '/settings'];
+// Ensure ALL tenant-specific modules are listed here.
+const TENANT_APP_PATHS = [
+    '/dashboard',
+    '/employees',
+    '/recruitment',
+    '/payroll',
+    '/leave',
+    '/documents',
+    '/reports',
+    '/communication',
+    '/smart-resume-parser',
+    '/settings'
+];
 
 
 export async function middleware(request: NextRequest) {
@@ -25,7 +38,7 @@ export async function middleware(request: NextRequest) {
   if (
      url.pathname.startsWith('/_next') ||
      url.pathname.startsWith('/api/') || // Allow all API routes
-     url.pathname.match(/\.(js|css|map|ico|png|jpg|jpeg|gif|svg|woff2)$/) // Allow common static file extensions
+     url.pathname.match(/\.(js|css|map|ico|png|jpg|jpeg|gif|svg|woff2|ttf)$/) // Allow common static file extensions, added ttf
     ) {
      console.log(`[Middleware] Allowing internal/static/API access to: ${url.pathname}`);
      return NextResponse.next();
@@ -56,12 +69,15 @@ export async function middleware(request: NextRequest) {
 
      // Allow access to defined public paths on the root domain/IP
      const isPublicRootPath = PUBLIC_ROOT_PATHS.some(path => {
+        // Allow exact match or path starting with the public path + '/' (e.g., /jobs/123)
         return url.pathname === path || url.pathname.startsWith(path + '/');
      });
 
      if (isPublicRootPath) {
         console.log(`[Middleware] Allowing public root path access: ${url.pathname}`);
-        return NextResponse.next(); // Allow access to /register, /login, /jobs/* etc.
+        // Allow access to /register, /login, /jobs/* etc.
+        // Ensure the /login and /forgot-password requests are not rewritten
+        return NextResponse.next();
      }
 
      // For any other path on the root domain/IP, redirect to register
@@ -81,11 +97,20 @@ export async function middleware(request: NextRequest) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set('X-Tenant-Domain', subdomain); // Set header for API routes and page props
 
-    // Check if the path is an application path that needs rewriting
-    // Root path '/' on subdomain should also be rewritten (usually to dashboard)
+    // Check if the path is an application path that needs rewriting OR the root path for the subdomain
     const isAppPath = url.pathname === '/' || TENANT_APP_PATHS.some(p => url.pathname.startsWith(p));
 
-    if (isAppPath) {
+    // Handle special case for /login and /forgot-password on subdomains - pass through WITHOUT rewrite
+    const isTenantAuthPath = url.pathname === '/login' || url.pathname.startsWith('/forgot-password');
+
+    if (isTenantAuthPath) {
+        console.log(`[Middleware] Passing through subdomain auth path ${url.pathname} with header`);
+         return NextResponse.next({
+            request: { headers: requestHeaders },
+        });
+    }
+    // Rewrite app paths
+    else if (isAppPath) {
          // Rewrite to include subdomain context: demo.domain.com/dashboard -> domain.com/demo/dashboard
          const originalPath = url.pathname;
          // The root '/' for the subdomain is handled by '/[domain]/page.tsx' which redirects to dashboard
@@ -95,10 +120,10 @@ export async function middleware(request: NextRequest) {
              request: { headers: requestHeaders },
          });
     } else {
-        // It's a subdomain request, but NOT for an app path (e.g., /login, /forgot-password)
-        // Pass the request through WITHOUT rewriting the path, but WITH the header.
-        // The page itself (e.g., /login) can use the hostname or header if needed.
-        console.log(`[Middleware] Passing through subdomain request for non-app path ${url.pathname} with header`);
+        // It's a subdomain request, but NOT for an app path or auth path (e.g., /some/other/path)
+        // This might indicate a 404 within the tenant context. Let Next.js handle it by passing through.
+        // The pages/[domain]/[...slug] route or similar should handle 404s.
+        console.log(`[Middleware] Passing through unknown subdomain path ${url.pathname} with header`);
         return NextResponse.next({
             request: { headers: requestHeaders },
         });
