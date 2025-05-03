@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react';
@@ -64,9 +65,10 @@ interface JobPostingListProps {
   jobPostings: JobPosting[];
   onEdit: (posting: JobPosting) => void;
   onDeleteSuccess: () => void;
+  tenantDomain: string; // Add tenantDomain prop
 }
 
-export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess }: JobPostingListProps) {
+export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess, tenantDomain }: JobPostingListProps) {
     const { toast } = useToast();
     const [deletingId, setDeletingId] = React.useState<string | null>(null);
 
@@ -74,6 +76,7 @@ export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess }: JobPost
         setDeletingId(id);
         console.log(`[Job Posting List] Deleting posting ${id} via API...`);
         try {
+            // API handles tenant context via header
             const response = await fetch(`/api/recruitment/postings/${id}`, { method: 'DELETE' });
 
              let result: any;
@@ -158,8 +161,9 @@ export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess }: JobPost
               </div>
             </CardContent>
             <div className="flex items-center justify-between p-4 border-t">
+                {/* Link uses tenantDomain */}
                 <Button variant="outline" size="sm" asChild>
-                    <Link href={`/recruitment/${job.id}`}>
+                    <Link href={`/${tenantDomain}/recruitment/${job.id}`}>
                         <Users className="mr-2 h-4 w-4" /> View Candidates {/* TODO: Add count */}
                     </Link>
                 </Button>

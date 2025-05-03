@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react';
@@ -38,6 +39,7 @@ interface CandidateListProps {
   candidates: Candidate[];
   jobPostingId: string;
   onUpdate: () => void;
+  tenantDomain: string; // Add tenantDomain prop
 }
 
 const candidateStatuses: CandidateStatus[] = [
@@ -54,7 +56,7 @@ const getStatusVariant = (status: CandidateStatus): "default" | "secondary" | "o
   }
 };
 
-export function CandidateList({ candidates, jobPostingId, onUpdate }: CandidateListProps) {
+export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain }: CandidateListProps) {
   const { toast } = useToast();
   const [actionLoading, setActionLoading] = React.useState<Record<string, boolean>>({});
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
@@ -64,8 +66,8 @@ export function CandidateList({ candidates, jobPostingId, onUpdate }: CandidateL
     setActionLoading(prev => ({ ...prev, [loadingKey]: true }));
     console.log(`[Candidate List] Updating status for ${candidateId} to ${newStatus} via API...`);
     try {
-      // Use the specific API endpoint for status update if available, otherwise use PUT on candidate
-      const response = await fetch(`/api/recruitment/candidates/${candidateId}`, { // Assuming PUT updates status
+      // API route handles tenant context via header
+      const response = await fetch(`/api/recruitment/candidates/${candidateId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
@@ -101,6 +103,7 @@ export function CandidateList({ candidates, jobPostingId, onUpdate }: CandidateL
     setDeletingId(candidateId);
     console.log(`[Candidate List] Deleting candidate ${candidateId} via API...`);
     try {
+      // API route handles tenant context via header
       const response = await fetch(`/api/recruitment/candidates/${candidateId}`, { method: 'DELETE' });
 
        let result: any;

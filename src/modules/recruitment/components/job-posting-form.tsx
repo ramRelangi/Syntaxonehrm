@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react';
@@ -21,9 +22,10 @@ import { DialogClose } from '@/components/ui/dialog';
 interface JobPostingFormProps {
   jobPosting?: JobPosting;
   onSuccess: () => void;
+  tenantDomain: string; // Add tenantDomain prop
 }
 
-export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
+export function JobPostingForm({ jobPosting, onSuccess, tenantDomain }: JobPostingFormProps) {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
   const [closingDatePickerOpen, setClosingDatePickerOpen] = React.useState(false);
