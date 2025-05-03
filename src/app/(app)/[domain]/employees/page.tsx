@@ -25,6 +25,7 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     console.log(`[Employees Page - fetchData] Fetching data from: ${fullUrl}`);
 
     try {
+        // API route handles tenant context via header
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
         console.log(`[Employees Page - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
 
@@ -42,7 +43,7 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
              }
              console.error(`[Employees Page - fetchData] Fetch error for ${fullUrl}:`, errorPayload);
              // Handle specific 401/403 error for missing tenant or auth issues
-             if (response.status === 401 || response.status === 403) {
+             if (response.status === 401 || response.status === 403 || (errorPayload.message && errorPayload.message.includes('Unauthorized'))) {
                  throw new Error(errorPayload.message || 'Unauthorized. Unable to load data.');
              } else if (response.status === 400 && errorPayload.message.includes('Tenant context')) {
                  throw new Error(errorPayload.message || 'Tenant information is missing. Unable to load data.');
@@ -64,7 +65,8 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
 
 
 export default function TenantEmployeesPage({ params }: EmployeesPageProps) {
-  const tenantDomain = params.domain;
+  const safeParams = React.use(params);
+  const tenantDomain = safeParams?.domain;
   const [employees, setEmployees] = React.useState<Employee[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -72,6 +74,11 @@ export default function TenantEmployeesPage({ params }: EmployeesPageProps) {
 
   // Function to refetch employees via API (API route uses tenant header)
   const fetchEmployees = React.useCallback(async () => {
+    if (!tenantDomain) { // Check if tenantDomain is available
+      setError("Could not determine tenant context.");
+      setIsLoading(false);
+      return;
+    }
     console.log(`[Employees Page - ${tenantDomain}] Starting fetchEmployees...`);
     setIsLoading(true);
     setError(null);
@@ -93,12 +100,17 @@ export default function TenantEmployeesPage({ params }: EmployeesPageProps) {
       setIsLoading(false);
       console.log(`[Employees Page - ${tenantDomain}] Finished fetchEmployees.`);
     }
-  }, [toast, tenantDomain]);
+  }, [toast, tenantDomain]); // Add tenantDomain to dependencies
 
   // Fetch data on component mount
   React.useEffect(() => {
     fetchEmployees();
-  }, [fetchEmployees]);
+  }, [fetchEmployees]); // Dependency array includes fetchEmployees
+
+   if (!tenantDomain) {
+       // Handle case where domain isn't available yet or is invalid
+       return <div>Error: Could not determine tenant context.</div>;
+   }
 
   // Function to handle successful deletion (passed to DataTable)
   const handleEmployeeDeleted = () => {
@@ -133,7 +145,7 @@ export default function TenantEmployeesPage({ params }: EmployeesPageProps) {
          columns={columns}
          data={employees}
          onEmployeeDeleted={handleEmployeeDeleted}
-         tenantDomain={tenantDomain}
+         // tenantDomain={tenantDomain} // No longer needed here
        />
      );
    };
@@ -147,7 +159,7 @@ export default function TenantEmployeesPage({ params }: EmployeesPageProps) {
          </h1>
          {/* Link uses tenant-relative path */}
          <Button asChild>
-             <Link href={`/${tenantDomain}/employees/add`}>
+             <Link href={`/employees/add`}>
                 <UserPlus className="mr-2 h-4 w-4"/> Add New Employee
              </Link>
          </Button>

@@ -7,19 +7,95 @@ import { Users, Briefcase, FileText, Calendar, BarChart2, UploadCloud } from "lu
 import Link from "next/link";
 import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getTenantByDomain } from '@/modules/auth/lib/db';
+import { getTenantByDomain } from '@/modules/auth/lib/db'; // Used for initial verification in layout/page, but API needs ID
+import { getTenantId } from '@/api/utils/get-tenant-id'; // Import the updated utility to get ID for API calls
 import { notFound } from 'next/navigation';
+import { headers } from 'next/headers'; // To create a mock request for getTenantId
+import type { NextRequest } from "next/server"; // Import type for mock request
 
-// Import Server Actions directly
+// Import Server Actions directly - Actions derive context implicitly
 import { getEmployees } from '@/modules/employees/actions';
 import { getLeaveRequests } from '@/modules/leave/actions';
 import { getJobPostings } from '@/modules/recruitment/actions';
+
 
 interface DashboardPageProps {
   params: { domain: string };
 }
 
-// Removed server-side fetchData helper as we'll call actions directly
+
+// Helper to construct mock request for getTenantId
+function createMockRequest(): NextRequest {
+    const headersList = headers(); // Get headers from the incoming server request
+    // Construct a more realistic mock URL using host and protocol
+    const host = headersList.get('host') || 'localhost';
+    const protocol = headersList.get('x-forwarded-proto') || 'http';
+    const mockUrl = `${protocol}://${host}`;
+    console.log(`[Dashboard - createMockRequest] Mock URL: ${mockUrl}`);
+    // Create a new Request object with headers. Cast to NextRequest if needed or use as Request.
+    const request = new Request(mockUrl, { headers: headersList });
+    return request as NextRequest; // Cast to NextRequest
+}
+
+
+// Helper to fetch data from API routes - SERVER SIDE VERSION (Needs tenant context)
+async function fetchData<T>(tenantId: string, url: string, options?: RequestInit): Promise<T> {
+    // Construct the full URL relative to the application's base URL
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002';
+    const formattedUrl = url.startsWith('/') ? url.substring(1) : url;
+    const fullUrl = `${baseUrl.replace(/\/$/, '')}/${formattedUrl}`;
+
+    console.log(`[Dashboard Fetch] Fetching server-side data for tenant ${tenantId} from: ${fullUrl}`); // Log the URL
+
+    try {
+        const headersList = headers(); // Get current headers
+        const tenantDomain = headersList.get('X-Tenant-Domain'); // Get domain from middleware header
+
+        const fetchHeaders = new Headers(options?.headers);
+        if (tenantDomain) {
+             fetchHeaders.set('X-Tenant-Domain', tenantDomain); // Pass tenant domain to API routes
+             console.log(`[Dashboard Fetch] Added X-Tenant-Domain header: ${tenantDomain}`);
+        } else {
+            console.error(`[Dashboard Fetch] Critical: X-Tenant-Domain header missing for API call to ${fullUrl}. Attempting with tenantId: ${tenantId}`);
+            // Fallback or alternative way to pass tenant context if header missing?
+            // For now, we rely on the header set by middleware. If it's missing, API calls will likely fail authorization.
+             throw new Error('Tenant context header is missing.');
+        }
+
+
+        const response = await fetch(fullUrl, {
+            cache: 'no-store',
+            ...options,
+            headers: fetchHeaders, // Include modified headers
+         });
+        console.log(`[Dashboard Fetch] Server-side fetch response status for ${fullUrl}: ${response.status}`);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            // Log the raw error text first for debugging
+            console.error(`[Dashboard Fetch] Server-side fetch error for ${fullUrl} (Tenant: ${tenantId}): Status ${response.status}, Body: ${errorText}`);
+            // Try to parse JSON to get a more specific error message from the API
+            let errorMessage = `HTTP error! status: ${response.status}`;
+            try {
+                const errorData = JSON.parse(errorText);
+                errorMessage = errorData.error || errorData.message || errorMessage;
+            } catch (parseError) {
+                // Fallback to raw text if not JSON
+                errorMessage = errorText || errorMessage;
+            }
+             throw new Error(errorMessage);
+        }
+        return await response.json() as T;
+    } catch (error) {
+        console.error(`[Dashboard Fetch] Error fetching ${fullUrl} for tenant ${tenantId}:`, error);
+        if (error instanceof Error) {
+           throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
+        } else {
+            throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
+        }
+    }
+}
+
 
 // Async component to fetch metrics
 async function MetricCard({ title, icon: Icon, valuePromise, link, linkText, changeText }: { title: string, icon: React.ElementType, valuePromise: Promise<any>, link?: string, linkText?: string, changeText?: string }) {
@@ -68,21 +144,18 @@ async function MetricCard({ title, icon: Icon, valuePromise, link, linkText, cha
 // --- Async Data Fetching Functions directly using Server Actions ---
 // Actions derive tenant context internally
 async function getTotalEmployees() {
-    // Directly call the action. It handles auth context.
     const employees = await getEmployees();
     return employees.length;
 }
 
 async function getUpcomingLeavesCount() {
     const today = new Date();
-    // Directly call the action with filters. It handles auth context.
     const upcomingRequests = await getLeaveRequests({ status: 'Approved' });
     const count = upcomingRequests.filter(req => new Date(req.startDate) >= today).length;
     return count;
 }
 
 async function getOpenPositionsCount() {
-     // Directly call the action with filters. It handles auth context.
      const openPositions = await getJobPostings({ status: 'Open' });
      return openPositions.length;
  }
@@ -114,13 +187,12 @@ export default async function TenantDashboardPage({ params }: DashboardPageProps
          // Continue with domain name, but log error
      }
 
-
-    // Define quick links - these are tenant-relative now
+    // Define quick links - use paths relative to the tenant root
     const quickLinks = [
-    { href: `/${tenantDomain}/employees/add`, label: 'Add New Employee', icon: Users },
-    { href: `/${tenantDomain}/recruitment`, label: 'Manage Job Postings', icon: Briefcase },
-    { href: `/${tenantDomain}/leave#leave-tabs`, label: 'Request Leave', icon: Calendar },
-    { href: `/${tenantDomain}/smart-resume-parser`, label: 'Parse Resume', icon: UploadCloud },
+        { href: `/employees/add`, label: 'Add New Employee', icon: Users },
+        { href: `/recruitment`, label: 'Manage Job Postings', icon: Briefcase },
+        { href: `/leave#leave-tabs`, label: 'Request Leave', icon: Calendar }, // Hash remains
+        { href: `/smart-resume-parser`, label: 'Parse Resume', icon: UploadCloud },
     ];
 
   return (
@@ -134,10 +206,10 @@ export default async function TenantDashboardPage({ params }: DashboardPageProps
             <MetricCard title="Total Employees" icon={Users} valuePromise={getTotalEmployees()} changeText="+2 since last month" />
          </Suspense>
           <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
-             <MetricCard title="Open Positions" icon={Briefcase} valuePromise={getOpenPositionsCount()} link={`/${tenantDomain}/recruitment`} linkText="View jobs" />
+             <MetricCard title="Open Positions" icon={Briefcase} valuePromise={getOpenPositionsCount()} link={`/recruitment`} linkText="View jobs" />
           </Suspense>
          <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
-             <MetricCard title="Upcoming Leaves" icon={Calendar} valuePromise={getUpcomingLeavesCount()} link={`/${tenantDomain}/leave`} linkText="View calendar" />
+             <MetricCard title="Upcoming Leaves" icon={Calendar} valuePromise={getUpcomingLeavesCount()} link={`/leave`} linkText="View calendar" />
          </Suspense>
           <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
             <MetricCard title="Pending Tasks" icon={FileText} valuePromise={getPendingTasksCount()} changeText="Requires attention"/>

@@ -1,4 +1,3 @@
-
 // src/app/(app)/[domain]/employees/[id]/edit/page.tsx
 "use client";
 
@@ -21,6 +20,7 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     console.log(`[Edit Employee Page - fetchData] Fetching data from: ${fullUrl}`);
 
     try {
+        // API route handles tenant context via header
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
         console.log(`[Edit Employee Page - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
 
@@ -49,7 +49,11 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
 
 
 export default function TenantEditEmployeePage({ params }: EditEmployeePageProps) {
-  const { domain: tenantDomain, id: employeeId } = params;
+  // Correct way to access params in Client Component
+  const safeParams = React.use(params);
+  const tenantDomain = safeParams?.domain;
+  const employeeId = safeParams?.id;
+
   const { toast } = useToast();
 
   const [employee, setEmployee] = React.useState<Employee | null>(null);
@@ -63,7 +67,7 @@ export default function TenantEditEmployeePage({ params }: EditEmployeePageProps
       setIsLoading(true);
       setError(null);
       try {
-        // API route implicitly uses tenantId from header
+        // API route implicitly uses tenantId from header, path is relative to root
         const data = await fetchData<Employee | undefined>(`/api/employees/${employeeId}`);
         if (!data) {
           notFound(); // Trigger 404 if API returns undefined/404 (or tenant mismatch)
@@ -84,6 +88,11 @@ export default function TenantEditEmployeePage({ params }: EditEmployeePageProps
 
     fetchEmployee();
   }, [employeeId, tenantDomain, toast]);
+
+  if (!tenantDomain || !employeeId) {
+       // Handle case where params aren't available yet
+       return <div>Loading context...</div>;
+   }
 
   if (isLoading) {
     return (
@@ -141,6 +150,7 @@ export default function TenantEditEmployeePage({ params }: EditEmployeePageProps
              formTitle="Edit Employee"
              formDescription="Update the employee's information."
              submitButtonText="Save Changes"
+             tenantDomain={tenantDomain} // Pass domain
            />
         </CardContent>
       </Card>

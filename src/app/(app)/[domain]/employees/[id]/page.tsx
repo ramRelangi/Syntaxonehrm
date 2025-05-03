@@ -1,4 +1,3 @@
-
 // src/app/(app)/[domain]/employees/[id]/page.tsx
 "use client";
 
@@ -24,6 +23,7 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     console.log(`[Employee Detail Page - fetchData] Fetching data from: ${fullUrl}`);
 
     try {
+        // API route handles tenant context via header
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
         console.log(`[Employee Detail Page - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
 
@@ -68,7 +68,10 @@ const getStatusVariant = (status?: Employee['status']): "default" | "secondary" 
 
 
 export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageProps) {
-  const { domain: tenantDomain, id: employeeId } = params;
+   // Correct way to access params in Client Component
+  const safeParams = React.use(params);
+  const tenantDomain = safeParams?.domain;
+  const employeeId = safeParams?.id;
   const { toast } = useToast();
 
   const [employee, setEmployee] = React.useState<Employee | null>(null);
@@ -82,7 +85,7 @@ export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageP
       setIsLoading(true);
       setError(null);
       try {
-        // API route implicitly uses tenantId from header
+        // API route implicitly uses tenantId from header, path is relative to root
         const data = await fetchData<Employee | undefined>(`/api/employees/${employeeId}`);
         if (!data) {
           notFound(); // Trigger 404 if API returns undefined/404 (or tenant mismatch)
@@ -117,6 +120,11 @@ export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageP
      }
      return "Invalid Date";
    };
+
+   if (!tenantDomain || !employeeId) {
+      // Handle case where params aren't available yet
+      return <div>Loading context...</div>;
+   }
 
 
    if (isLoading) {
@@ -162,8 +170,8 @@ export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageP
        <div className="flex items-center justify-between flex-wrap gap-4">
          <div className="flex items-center gap-2">
            <Button variant="outline" size="icon" asChild>
-             {/* Link back to tenant-specific employee list */}
-             <Link href={`/${tenantDomain}/employees`}>
+             {/* Link back to tenant-relative employee list */}
+             <Link href={`/employees`}>
                <ArrowLeft className="h-4 w-4" />
                <span className="sr-only">Back to Employees</span>
              </Link>
@@ -173,8 +181,8 @@ export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageP
            </h1>
          </div>
           <Button asChild variant="outline">
-             {/* Link to tenant-specific edit page */}
-             <Link href={`/${tenantDomain}/employees/${employee.id}/edit`}>
+             {/* Link to tenant-relative edit page */}
+             <Link href={`/employees/${employee.id}/edit`}>
                  <Pencil className="mr-2 h-4 w-4"/> Edit Employee
              </Link>
          </Button>
@@ -254,8 +262,8 @@ export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageP
              <Card className="shadow-sm">
                 <CardHeader>
                     <CardTitle>Leave History</CardTitle>
-                     {/* TODO: Link to tenant-specific leave page */}
-                     <CardDescription><Link href={`/${tenantDomain}/leave?employeeId=${employeeId}`} className='text-primary hover:underline'>View leave history</Link></CardDescription>
+                     {/* Link to tenant-relative leave page */}
+                     <CardDescription><Link href={`/leave?employeeId=${employeeId}`} className='text-primary hover:underline'>View leave history</Link></CardDescription>
                 </CardHeader>
                 <CardContent>
                     <p className="text-muted-foreground">Recent leave records will be displayed here.</p>

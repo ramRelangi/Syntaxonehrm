@@ -44,8 +44,7 @@ const getStatusVariant = (status: Employee['status']): "default" | "secondary" |
 };
 
 // Action Cell Component for Delete Confirmation
-// Now accepts tenantDomain prop
-const ActionsCell = ({ employeeId, employeeName, tenantDomain, onEmployeeDeleted }: { employeeId: string, employeeName: string, tenantDomain: string, onEmployeeDeleted: () => void }) => {
+const ActionsCell = ({ employeeId, employeeName, onEmployeeDeleted }: { employeeId: string, employeeName: string, onEmployeeDeleted: () => void }) => {
   const { toast } = useToast();
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -91,14 +90,14 @@ const ActionsCell = ({ employeeId, employeeName, tenantDomain, onEmployeeDeleted
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Actions</DropdownMenuLabel>
-          {/* Update links to be tenant-specific */}
+          {/* Update links to be relative to the tenant root */}
           <DropdownMenuItem asChild>
-             <Link href={`/${tenantDomain}/employees/${employeeId}/edit`} className="flex items-center">
+             <Link href={`/employees/${employeeId}/edit`} className="flex items-center">
                <Pencil className="mr-2 h-4 w-4" /> Edit
              </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-             <Link href={`/${tenantDomain}/employees/${employeeId}`} className="flex items-center">
+             <Link href={`/employees/${employeeId}`} className="flex items-center">
                  <Eye className="mr-2 h-4 w-4" /> View Details
              </Link>
           </DropdownMenuItem>
@@ -214,12 +213,13 @@ export const columns: ColumnDef<Employee>[] = [
   },
    {
     id: "actions",
-    // The cell function now implicitly receives `onEmployeeDeleted` and `tenantDomain` via the HOC in DataTable
+    // Pass props down to the custom ActionsCell component
     cell: ({ row, ...rest }) => {
       const employee = row.original;
-      // @ts-ignore - rest includes injected props, handle type more robustly if needed
-      const { onEmployeeDeleted, tenantDomain } = rest;
-      return <ActionsCell employeeId={employee.id} employeeName={employee.name} tenantDomain={tenantDomain} onEmployeeDeleted={onEmployeeDeleted} />;
+      // Extract the injected prop from the rest of the cell context
+      // @ts-ignore - `onEmployeeDeleted` is injected by EmployeeDataTable
+      const { onEmployeeDeleted } = rest;
+      return <ActionsCell employeeId={employee.id} employeeName={employee.name} onEmployeeDeleted={onEmployeeDeleted} />;
     },
   },
 ];
