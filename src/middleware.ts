@@ -76,11 +76,18 @@ export async function middleware(request: NextRequest) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set('X-Tenant-Domain', subdomain); // Set header for API routes and page props
 
-    // Rewrite the path to the internal /[domain]/... structure
     const originalPath = url.pathname;
-    // Rewrite path like /dashboard to /subdomain/dashboard
-    url.pathname = `/${subdomain}${originalPath}`;
-    console.log(`[Middleware] Rewriting subdomain path ${hostname}${originalPath} to internal path ${url.pathname}`);
+
+    // If the root path '/' is requested on a subdomain, rewrite to the tenant's dashboard
+    if (originalPath === '/') {
+        url.pathname = `/${subdomain}/dashboard`;
+        console.log(`[Middleware] Rewriting subdomain root path ${hostname}${originalPath} to internal dashboard path ${url.pathname}`);
+    } else {
+        // Otherwise, rewrite other paths to the internal /[domain]/... structure
+        url.pathname = `/${subdomain}${originalPath}`;
+        console.log(`[Middleware] Rewriting subdomain path ${hostname}${originalPath} to internal path ${url.pathname}`);
+    }
+
 
     return NextResponse.rewrite(url, {
       request: { headers: requestHeaders },
