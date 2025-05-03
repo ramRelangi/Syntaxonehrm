@@ -1,7 +1,8 @@
 
 import pool from '@/lib/db';
 import type { JobPosting, Candidate, JobPostingStatus, CandidateStatus, JobPostingFormData, CandidateFormData } from '@/modules/recruitment/types';
-import { formatISO } from 'date-fns';
+import { formatISO, isValid, parseISO } from 'date-fns'; // Import date-fns functions
+
 
 // --- Job Posting Operations ---
 
@@ -16,7 +17,8 @@ function mapRowToJobPosting(row: any): JobPosting {
         salaryRange: row.salary_range ?? undefined,
         status: row.status as JobPostingStatus,
         datePosted: row.date_posted ? new Date(row.date_posted).toISOString() : undefined,
-        closingDate: row.closing_date ? new Date(row.closing_date).toISOString() : undefined,
+        // Ensure closing date is formatted as YYYY-MM-DD string if it exists
+        closingDate: row.closing_date ? formatISO(new Date(row.closing_date), { representation: 'date' }) : undefined,
     };
 }
 
@@ -70,6 +72,21 @@ export async function addJobPosting(jobData: JobPostingFormData): Promise<JobPos
     const isDraft = (jobData.status || 'Draft') === 'Draft';
     const datePosted = isDraft ? null : new Date(); // Set post date only if not draft
 
+    // Ensure closingDate is null if empty or invalid, otherwise use the YYYY-MM-DD string
+    let closingDateValue: string | null = null;
+    if (jobData.closingDate) {
+        try {
+             // Validate and ensure it's in the correct format
+            const parsed = parseISO(jobData.closingDate);
+            if (isValid(parsed)) {
+                closingDateValue = formatISO(parsed, { representation: 'date' });
+            }
+        } catch (e) {
+            console.warn(`Invalid closing date format received: ${jobData.closingDate}. Storing as NULL.`);
+        }
+    }
+
+
     const query = `
         INSERT INTO job_postings (tenant_id, title, description, department, location, salary_range, status, date_posted, closing_date)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -84,13 +101,14 @@ export async function addJobPosting(jobData: JobPostingFormData): Promise<JobPos
         jobData.salaryRange || null,
         jobData.status || 'Draft',
         datePosted,
-        jobData.closingDate ? new Date(jobData.closingDate) : null, // Convert string date to Date object or null
+        closingDateValue, // Pass the validated/formatted string or null
     ];
     try {
+        console.log('[DB addJobPosting] Executing query with values:', values);
         const res = await client.query(query, values);
         return mapRowToJobPosting(res.rows[0]);
     } catch (err) {
-        console.error('Error adding job posting:', err);
+        console.error('[DB addJobPosting] Error adding job posting:', err);
         throw err;
     } finally {
         client.release();
@@ -136,7 +154,17 @@ export async function updateJobPosting(id: string, tenantId: string, updates: Pa
                 setClauses.push(`${dbKey} = $${valueIndex}`);
                  let value = updates[key as keyof JobPostingFormData];
                  if (key === 'closingDate') {
-                     value = value ? new Date(value as string) : null; // Convert date string
+                     // Format as 'YYYY-MM-DD' string or null
+                     let closingDateStr: string | null = null;
+                     if (value) {
+                         try {
+                             const parsed = parseISO(value as string);
+                             if (isValid(parsed)) {
+                                 closingDateStr = formatISO(parsed, { representation: 'date' });
+                             }
+                         } catch {}
+                     }
+                     value = closingDateStr;
                  } else if (key === 'salaryRange') {
                      value = value || null; // Ensure null for empty string
                  }
@@ -158,6 +186,7 @@ export async function updateJobPosting(id: string, tenantId: string, updates: Pa
     `;
 
     try {
+         console.log('[DB updateJobPosting] Executing query:', query, 'with values:', values);
         const res = await client.query(query, values);
         return res.rows.length > 0 ? mapRowToJobPosting(res.rows[0]) : undefined;
     } catch (err) {
