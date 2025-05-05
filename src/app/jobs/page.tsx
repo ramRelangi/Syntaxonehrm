@@ -1,4 +1,3 @@
-
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,31 +7,39 @@ import { format, parseISO } from 'date-fns';
 import type { JobPosting } from "@/modules/recruitment/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Suspense } from "react";
+import dynamic from "next/dynamic"; // Import dynamic
 
 // Helper to fetch data from API routes - SERVER SIDE VERSION
+// This function might need adjustment based on how the public API route handles tenant context
+// if it's serving postings from *multiple* tenants (unlikely for a root /jobs page).
+// If /jobs is meant to show only ONE tenant's jobs based on the domain (e.g. careers.company.com),
+// the middleware/API needs to handle that context. Assuming /jobs shows ALL open jobs for now.
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; // Ensure fallback for local
     const formattedUrl = url.startsWith('/') ? url.substring(1) : url;
     const fullUrl = `${baseUrl.replace(/\/$/, '')}/${formattedUrl}`;
-
+    console.log(`[Public Jobs Page Fetch] Fetching from ${fullUrl}`);
     try {
         const response = await fetch(fullUrl, {
-            cache: 'no-store', // Fetch fresh data for job board
-             next: { revalidate: 60 }, // Revalidate every 60 seconds
+            // cache: 'no-store', // Avoid no-store for potentially public, less frequently changing data
+             next: { revalidate: 300 }, // Revalidate every 5 minutes for public job board
             ...options
         });
+        console.log(`[Public Jobs Page Fetch] Response status: ${response.status}`);
         if (!response.ok) {
             const errorText = await response.text();
-            console.error(`Public fetch error for ${fullUrl}: ${errorText}`);
-            throw new Error(`Failed to fetch job postings. Status: ${response.status}`);
+            console.error(`[Public Jobs Page Fetch] Error for ${fullUrl}: ${errorText}`);
+            // Avoid throwing detailed errors on public pages
+            throw new Error(`Failed to load job postings.`);
         }
         return await response.json() as T;
     } catch (error) {
-        console.error(`Error fetching ${fullUrl}:`, error);
+        console.error(`[Public Jobs Page Fetch] Error fetching ${fullUrl}:`, error);
         if (error instanceof Error) {
-           throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
+           // Avoid throwing detailed errors
+           throw new Error(`Could not load job postings at this time.`);
         } else {
-            throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
+            throw new Error(`An unexpected error occurred.`);
         }
     }
 }
@@ -48,10 +55,29 @@ const formatDateSafe = (dateString?: string): string => {
 };
 
 // Async component to fetch and display job postings
-async function OpenJobPostings() {
-    // Fetch only 'Open' postings for the specific tenant (needs tenant context from middleware/domain)
-    // The API route /api/recruitment/postings should handle tenant filtering based on the request context (e.g., header)
-    const openPostings = await fetchData<JobPosting[]>('/api/recruitment/postings?status=Open');
+async function OpenJobPostingsComponent() {
+    // Fetch only 'Open' postings. The API route MUST handle how it determines
+    // *which* tenant's postings to show if accessed via the root domain.
+    // If it's meant to show ALL open postings across tenants, the API needs modification.
+    // Assuming for now it correctly fetches relevant open postings based on request context or configuration.
+    let openPostings: JobPosting[] = [];
+    try {
+        // This API call might need adjustment depending on multi-tenant public board strategy
+        openPostings = await fetchData<JobPosting[]>('/api/recruitment/postings?status=Open');
+    } catch (error: any) {
+        console.error("Error loading open job postings:", error.message);
+        return (
+             <Card className="text-center py-12 shadow-sm border-destructive bg-destructive/10">
+                 <CardHeader>
+                     <CardTitle className="text-destructive">Error Loading Jobs</CardTitle>
+                 </CardHeader>
+                 <CardContent>
+                     <p className="text-destructive/90">Could not load job postings at this time. Please try again later.</p>
+                 </CardContent>
+             </Card>
+        );
+    }
+
 
     if (!openPostings || openPostings.length === 0) {
         return (
@@ -84,9 +110,8 @@ async function OpenJobPostings() {
                     </CardHeader>
                     <CardContent>
                         <p className="text-sm text-muted-foreground mb-4 line-clamp-3">{job.description}</p>
-                         {/* Link to a dedicated detail page (if created) or an external application link */}
+                         {/* Link to a dedicated detail page */}
                          <Button asChild variant="default">
-                            {/* Placeholder link - replace with actual application URL or detail page */}
                              <Link href={`/jobs/${job.id}`}>
                                 View Details & Apply <ExternalLink className="ml-2 h-4 w-4" />
                              </Link>
@@ -97,23 +122,6 @@ async function OpenJobPostings() {
         </div>
     );
 }
-
-export default function PublicJobBoardPage() {
-  return (
-    <div className="flex flex-col gap-8">
-      <div className="text-center">
-         <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Join Our Team</h1>
-         <p className="mt-2 text-lg text-muted-foreground">Explore exciting career opportunities at SyntaxHive Hrm.</p>
-      </div>
-
-      {/* Job Listings Section */}
-      <Suspense fallback={<JobPostingsSkeleton />}>
-        <OpenJobPostings />
-      </Suspense>
-    </div>
-  );
-}
-
 
 // Skeleton loader for job postings
 function JobPostingsSkeleton() {
@@ -138,4 +146,26 @@ function JobPostingsSkeleton() {
             ))}
         </div>
     );
+}
+
+// Dynamically import the data-fetching component
+const OpenJobPostings = dynamic(() => Promise.resolve(OpenJobPostingsComponent), {
+  ssr: true, // Enable SSR for better SEO and initial load
+  loading: () => <JobPostingsSkeleton />,
+});
+
+
+export default function PublicJobBoardPage() {
+  return (
+    <div className="flex flex-col gap-8">
+      <div className="text-center">
+         <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Join Our Team</h1>
+         <p className="mt-2 text-lg text-muted-foreground">Explore exciting career opportunities at SyntaxHive Hrm.</p>
+      </div>
+
+      {/* Job Listings Section */}
+      {/* Suspense is handled by dynamic import's loading state */}
+      <OpenJobPostings />
+    </div>
+  );
 }
