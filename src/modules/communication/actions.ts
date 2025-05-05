@@ -130,9 +130,24 @@ export async function updateEmailSettingsAction(settingsData: Omit<EmailSettings
                  // Replace placeholder/empty password with the actual decrypted password from DB
                  dataToSave = { ...dataToSave, smtpPassword: existingSettings.smtpPassword };
              } else {
-                 // If no existing password and none provided, it's an error
-                 console.error("[Action updateEmailSettings] Password required but not provided and no existing password found.");
-                 return { success: false, errors: [{ code: 'custom', path: ['smtpPassword'], message: 'SMTP Password is required.' }] };
+                 // If no existing password and none provided, it's an error UNLESS we are updating other fields
+                 // Check if any other field actually changed
+                 const initialSafeSettings = await getEmailSettingsAction(); // Fetch safe settings for comparison
+                 const changedFields = Object.keys(dataToSave).filter(
+                    key => key !== 'smtpPassword' && dataToSave[key as keyof typeof dataToSave] !== initialSafeSettings?.[key as keyof typeof initialSafeSettings]
+                 );
+
+                 if (changedFields.length === 0) {
+                    // No password provided, nothing else changed - this is basically a no-op, treat as success?
+                    // Or maybe error because the intention was likely to update password but it was left blank?
+                    // Let's return an error for clarity.
+                     console.error("[Action updateEmailSettings] Password required but not provided and no other fields changed.");
+                     return { success: false, errors: [{ code: 'custom', path: ['smtpPassword'], message: 'SMTP Password is required if no other fields are being updated.' }] };
+                 } else {
+                    // Other fields changed, but no existing password found in DB. This is an invalid state.
+                     console.error("[Action updateEmailSettings] Password required but not provided and no existing password found in DB.");
+                     return { success: false, errors: [{ code: 'custom', path: ['smtpPassword'], message: 'Existing password not found. Please provide the password to save changes.' }] };
+                 }
              }
          } catch (fetchError: any) {
               console.error("[Action updateEmailSettings] Error fetching existing settings:", fetchError);
@@ -162,27 +177,29 @@ export async function testSmtpConnectionAction(): Promise<{ success: boolean; me
      const tenantId = await getTenantId();
      console.log(`[Test Connection Action] Testing connection for tenant: ${tenantId}`);
 
-     let completeSettings: EmailSettings;
+     let completeSettings: EmailSettings | null = null; // Initialize as null
 
      try {
          // Fetch the complete, decrypted settings from the database
          console.log(`[Test Connection Action] Fetching email settings from DB for tenant ${tenantId}...`);
-         const storedSettings = await dbGetEmailSettings(tenantId);
+         completeSettings = await dbGetEmailSettings(tenantId); // Fetches and decrypts
 
-         if (!storedSettings) {
-             console.error(`[Test Connection Action] No settings found in DB for tenant ${tenantId}.`);
-             return { success: false, message: "SMTP settings are not configured. Please save your settings first." };
+         if (!completeSettings) {
+             // This handles cases where settings don't exist OR decryption failed OR essential fields missing
+             console.error(`[Test Connection Action] No valid settings found in DB for tenant ${tenantId}.`);
+             return { success: false, message: "SMTP settings are not configured or are invalid. Please save your settings first." };
          }
 
-         // Validate the fetched settings (including the decrypted password)
-         const validation = emailSettingsSchema.safeParse(storedSettings);
+         // Settings exist and were decrypted successfully (dbGetEmailSettings returns null otherwise)
+         // Validate the fetched settings structure just in case (though db function should ensure this)
+         const validation = emailSettingsSchema.safeParse(completeSettings);
          if (!validation.success) {
-             console.error(`[Test Connection Action] Fetched settings from DB are invalid for tenant ${tenantId}:`, validation.error.flatten());
-             // It's unlikely fetched settings are invalid, but handle defensively
+             console.error(`[Test Connection Action] Fetched settings from DB are structurally invalid for tenant ${tenantId}:`, validation.error.flatten());
+             // This scenario is less likely if dbGetEmailSettings works correctly, but good to handle.
              return { success: false, message: "Stored SMTP settings are incomplete or invalid. Please review and save them again." };
          }
 
-         completeSettings = validation.data; // Use the validated, complete settings
+         // completeSettings is now validated and contains the decrypted password
          console.log(`[Test Connection Action] Using settings from DB for test (password masked): host=${completeSettings.smtpHost}, port=${completeSettings.smtpPort}, user=${completeSettings.smtpUser}, secure=${completeSettings.smtpSecure}`);
 
      } catch (error: any) {
@@ -197,7 +214,7 @@ export async function testSmtpConnectionAction(): Promise<{ success: boolean; me
         port: completeSettings.smtpPort,
         auth: {
             user: completeSettings.smtpUser,
-            pass: completeSettings.smtpPassword, // Use the definite password
+            pass: completeSettings.smtpPassword, // Use the decrypted password
         },
         connectionTimeout: 15000, // Increased timeout
         greetingTimeout: 15000,
@@ -206,16 +223,20 @@ export async function testSmtpConnectionAction(): Promise<{ success: boolean; me
         debug: process.env.NODE_ENV === 'development',
     };
 
+    // Automatically configure secure/requireTLS based on common ports
     if (completeSettings.smtpPort === 465) {
         transportOptions.secure = true;
          console.log("[Test Connection Action] Using secure=true for port 465");
     } else if (completeSettings.smtpPort === 587) {
-        transportOptions.secure = false;
-        transportOptions.requireTLS = true;
+        transportOptions.secure = false; // Often needs STARTTLS
+        transportOptions.requireTLS = true; // Explicitly require STARTTLS
          console.log("[Test Connection Action] Using secure=false, requireTLS=true for port 587");
     } else {
+        // For other ports, rely on the saved smtpSecure value, but warn if ambiguous
         transportOptions.secure = completeSettings.smtpSecure;
          console.warn(`[Test Connection Action] Using explicit secure=${completeSettings.smtpSecure} for non-standard port ${completeSettings.smtpPort}. Verify provider requirements.`);
+         // If secure is false for non-587 ports, TLS might still be required/used implicitly by Nodemailer
+         // but explicit requireTLS is usually for port 587 STARTTLS.
     }
 
     const transporter = nodemailer.createTransport(transportOptions);
@@ -228,7 +249,7 @@ export async function testSmtpConnectionAction(): Promise<{ success: boolean; me
     } catch (error: any) {
         console.error('[Test Connection Action] Verify Error:', error);
         let errorMessage = `Connection failed: ${error.message}`;
-         if (error.code === 'EAUTH' || error.message?.includes('Authentication unsuccessful')) {
+         if (error.code === 'EAUTH' || error.message?.includes('Authentication unsuccessful') || error.message?.includes('Invalid login')) {
             errorMessage = `Authentication failed. Check username and password. (Details: ${error.message})`;
          } else if (error.code === 'ECONNREFUSED') {
              errorMessage = `Connection refused. Check host (${completeSettings.smtpHost}), port (${completeSettings.smtpPort}), and firewall.`;
@@ -236,11 +257,12 @@ export async function testSmtpConnectionAction(): Promise<{ success: boolean; me
              errorMessage = 'Connection timed out. Check network, host, and port.';
          } else if (error.code === 'ENOTFOUND' || error.code === 'EDNS') {
              errorMessage = `Hostname '${completeSettings.smtpHost}' not found. Check the host address.`;
-         } else if (error.message?.includes('wrong version number') || error.code === 'ESOCKET') {
-            errorMessage = `SSL/TLS handshake failed. Check port (${completeSettings.smtpPort}) and encryption settings (secure=${transportOptions.secure}). Details: ${error.message}`;
+         } else if (error.code === 'ESOCKET' || error.message?.includes('wrong version number')) {
+            errorMessage = `SSL/TLS handshake failed. Check port (${completeSettings.smtpPort}) and encryption settings (Secure: ${transportOptions.secure}). Details: ${error.message}`;
          } else if (error.responseCode && error.response) {
             errorMessage = `SMTP Server Error (${error.responseCode}): ${error.response}`;
          }
+        // Append original message if not already included for more context
         if (error.message && !errorMessage.includes(error.message)) {
             errorMessage += ` (Details: ${error.message})`;
         }

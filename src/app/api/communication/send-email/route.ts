@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 // Import the DB function to get settings, not the action
-import { getEmailSettings } from '@/modules/communication/lib/db';
+import { getEmailSettings as dbGetEmailSettings } from '@/modules/communication/lib/db';
 import { sendEmailSchema, type SendEmailFormData } from '@/modules/communication/types';
 import type { EmailSettings } from '@/modules/communication/types';
-// Placeholder for template compilation if using templates
-// import { compileTemplate } from '@/lib/template-engine'; // Assuming a template engine exists
+import { getTenantIdFromSession } from '@/modules/auth/actions'; // Import session helper
 
 // Helper function to create transporter (can be shared or kept here)
 function createTransporter(settings: EmailSettings): nodemailer.Transporter {
@@ -15,8 +14,7 @@ function createTransporter(settings: EmailSettings): nodemailer.Transporter {
         port: settings.smtpPort,
         auth: {
             user: settings.smtpUser,
-            // IMPORTANT: Password should be retrieved securely (e.g., from secrets manager or decrypted)
-            // For now, assuming it's available decrypted in the settings object from DB
+            // IMPORTANT: Password must be the decrypted one fetched from the DB
             pass: settings.smtpPassword,
         },
         connectionTimeout: 15000,
@@ -26,17 +24,22 @@ function createTransporter(settings: EmailSettings): nodemailer.Transporter {
         debug: process.env.NODE_ENV === 'development',
     };
 
+    // Automatically configure secure/requireTLS based on common ports
     if (settings.smtpPort === 465) {
         transportOptions.secure = true;
         console.log('[Send Email API - createTransporter] Using secure=true for port 465');
     } else if (settings.smtpPort === 587) {
-        transportOptions.secure = false;
-        transportOptions.requireTLS = true;
+        transportOptions.secure = false; // Often needs STARTTLS
+        transportOptions.requireTLS = true; // Explicitly require STARTTLS
         console.log('[Send Email API - createTransporter] Using secure=false, requireTLS=true for port 587');
     } else {
+        // For other ports, rely on the saved smtpSecure value, but warn if ambiguous
         transportOptions.secure = settings.smtpSecure;
-        console.warn(`[Send Email API - createTransporter] Using provided 'secure' value (${settings.smtpSecure}) for non-standard port ${settings.smtpPort}.`);
+        console.warn(`[Send Email API - createTransporter] Using provided 'secure' value (${settings.smtpSecure}) for non-standard port ${settings.smtpPort}. Verify provider requirements.`);
+        // If secure is false for non-587 ports, TLS might still be required/used implicitly by Nodemailer
+        // but explicit requireTLS is usually for port 587 STARTTLS.
     }
+
 
     return nodemailer.createTransport(transportOptions);
 }
@@ -44,28 +47,40 @@ function createTransporter(settings: EmailSettings): nodemailer.Transporter {
 
 export async function POST(request: NextRequest) {
   console.log('[Send Email API] Received POST request.');
-  let settings: EmailSettings | null = null;
+  let settings: EmailSettings | null = null; // Hold fetched settings
   try {
-    // 1. Get Email Settings from Database
-    console.log('[Send Email API] Attempting to retrieve email settings from DB...');
-    settings = await getEmailSettings(); // Fetch from DB
+    // 1. Get Tenant ID from session/authentication context
+    const tenantId = await getTenantIdFromSession();
+    if (!tenantId) {
+      console.error('[Send Email API] Unauthorized: Could not determine tenant ID from session.');
+      return NextResponse.json({ error: 'Unauthorized', message: 'Unable to determine tenant context.' }, { status: 401 });
+    }
+    console.log(`[Send Email API] Processing request for tenant: ${tenantId}`);
+
+
+    // 2. Get Email Settings from Database for the specific tenant
+    console.log(`[Send Email API] Attempting to retrieve email settings from DB for tenant ${tenantId}...`);
+    settings = await dbGetEmailSettings(tenantId); // Fetch from DB (includes decrypted password)
     console.log('[Send Email API] Settings retrieved from DB:', settings ? JSON.stringify({ ...settings, smtpPassword: '***' }) : 'null'); // Mask password
 
-    // 2. Validate Settings Retrieved by THIS Request
+    // 3. Validate Settings Retrieved from DB
+    // Check if settings exist and have essential fields (including the decrypted password)
      const isSettingsValid =
          settings && settings.smtpHost && settings.smtpPort && settings.smtpUser &&
-         settings.smtpPassword && // Password must exist (even if empty string initially from DB before encryption)
+         settings.smtpPassword && // Password MUST exist and be non-empty after decryption
          settings.fromEmail && settings.fromName;
 
-     console.log(`[Send Email API] Checking retrieved settings validity: ${isSettingsValid}`);
+     console.log(`[Send Email API] Checking retrieved DB settings validity: ${isSettingsValid}`);
 
     if (!isSettingsValid) {
-      console.error('[Send Email API] Settings validation failed. Settings are null, incomplete, or invalid in DB.');
-       return NextResponse.json({ error: 'Configuration Error', message: 'Email sending is not configured or settings are incomplete. Please check Communication Settings.' }, { status: 503 });
+      console.error('[Send Email API] Settings validation failed. Settings are null, incomplete, or invalid in DB for tenant', tenantId);
+       // Return 503 Service Unavailable as the service isn't configured properly
+       return NextResponse.json({ error: 'Configuration Error', message: 'Email sending is not configured or settings are incomplete/invalid. Please check Communication Settings.' }, { status: 503 });
     }
     console.log('[Send Email API] Settings retrieved and validated successfully.');
 
-    // 3. Parse and Validate Request Body
+
+    // 4. Parse and Validate Request Body (To, Subject, Body)
     console.log('[Send Email API] Parsing request body...');
     const body = await request.json();
     console.log('[Send Email API] Request body parsed:', body);
@@ -80,36 +95,29 @@ export async function POST(request: NextRequest) {
     const { to, subject, body: emailBody } = validation.data;
 
     // --- Template Processing Placeholder ---
-    // If using templates:
-    // const templateId = body.templateId; // Assuming templateId is passed in request
-    // if (templateId) {
-    //    const template = await getTemplateById(templateId); // Fetch from DB
-    //    if (!template) throw new Error ('Template not found');
-    //    const context = body.context || {}; // Get context variables from request
-    //    finalSubject = compileTemplate(template.subject, context);
-    //    finalBody = compileTemplate(template.body, context);
-    // } else {
-       const finalSubject = subject;
-       const finalBody = emailBody;
-    // }
+    // (Keep existing template logic if you implement it)
+    // const templateId = body.templateId;
+    // if (templateId) { ... } else { ... }
+    const finalSubject = subject;
+    const finalBody = emailBody;
     // --- End Placeholder ---
 
 
-    // 4. Create Nodemailer Transporter using DB settings
+    // 5. Create Nodemailer Transporter using DB settings
     console.log(`[Send Email API] Creating transporter for ${settings.smtpHost}:${settings.smtpPort}`);
-    const transporter = createTransporter(settings); // Pass DB settings
+    const transporter = createTransporter(settings); // Pass DB settings (with decrypted password)
 
-    // 5. Define Mail Options
+    // 6. Define Mail Options using settings from DB
     const mailOptions = {
-      from: `"${settings.fromName}" <${settings.fromEmail}>`,
+      from: `"${settings.fromName}" <${settings.fromEmail}>`, // Use fromName and fromEmail from DB settings
       to: to,
-      subject: finalSubject, // Use potentially compiled subject
+      subject: finalSubject,
       // Use 'text' for plain text, 'html' for HTML content
-      [finalBody.trim().startsWith('<') && finalBody.trim().endsWith('>') ? 'html' : 'text']: finalBody, // Use potentially compiled body
+      [finalBody.trim().startsWith('<') && finalBody.trim().endsWith('>') ? 'html' : 'text']: finalBody,
     };
      console.log('[Send Email API] Mail options prepared:', JSON.stringify({ ...mailOptions, from: mailOptions.from }, null, 2)); // Log mail options
 
-    // 6. Send Mail
+    // 7. Send Mail
     console.log(`[Send Email API] Attempting to send email to ${to} via ${settings.smtpHost}`);
     const info = await transporter.sendMail(mailOptions);
     console.log('[Send Email API] Email sent successfully:', info.messageId);
@@ -126,9 +134,12 @@ export async function POST(request: NextRequest) {
      if (error instanceof SyntaxError && error.message.includes('JSON')) {
          errorMessage = 'Invalid request format (JSON expected).';
          statusCode = 400;
-     } else if (error.message?.includes('Email sending is not configured')) {
-         statusCode = 503;
+     } else if (error.message?.includes('Email sending is not configured') || error.message?.includes('settings are incomplete')) {
+         statusCode = 503; // Service Unavailable
          errorMessage = error.message;
+     } else if (error.message?.includes('Unauthorized') || error.message?.includes('tenant context')) {
+        statusCode = 401;
+        errorMessage = error.message;
      } else if (error.code) { // Nodemailer/network errors often have codes
         switch (error.code) {
             case 'EAUTH':
@@ -150,10 +161,14 @@ export async function POST(request: NextRequest) {
                 statusCode = 502;
                 break;
               case 'ESOCKET':
-                errorMessage = `Socket error connecting to SMTP server. Check host/port/firewall/TLS settings. (Detail: ${error.message})`;
+                 // Check for specific TLS/SSL errors within the message
+                 if (error.message?.includes('wrong version number')) {
+                     errorMessage = `SSL/TLS Handshake Error: Incorrect protocol version. Verify port (${settings?.smtpPort}) and encryption settings (Secure: ${settings?.smtpSecure}). Details: ${error.message}`;
+                 } else {
+                    errorMessage = `Socket error connecting to SMTP server. Check host/port/firewall/TLS settings. (Detail: ${error.message})`;
+                 }
                  statusCode = 502;
                  break;
-             // Add more specific Nodemailer error codes as needed
             default:
                 errorMessage = `SMTP Error: ${error.message} (Code: ${error.code})`;
         }
