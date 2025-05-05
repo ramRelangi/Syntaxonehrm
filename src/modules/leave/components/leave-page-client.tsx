@@ -212,11 +212,8 @@ export default function LeavePageClient() {
 
               {/* Tabs for Request Form, Lists, and Type/Holiday Management */}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="leave-tabs">
-                 {/* Use cn helper and responsive grid columns */}
-                 <TabsList className={cn(
-                      "grid w-full",
-                      isAdmin ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-5" : "grid-cols-2" // Responsive for admin
-                  )}>
+                 {/* Use a flex-wrap layout for the tabs list to handle different screen sizes better */}
+                 <TabsList className="h-auto flex flex-wrap justify-start">
                    <TabsTrigger value="request" className="flex items-center gap-1">
                         <PlusCircle className="h-4 w-4"/> Request Leave
                     </TabsTrigger>
@@ -242,7 +239,7 @@ export default function LeavePageClient() {
 
                 {/* Request Leave Tab */}
                 <TabsContent value="request">
-                   <Card className="shadow-sm">
+                   <Card className="shadow-sm mt-4"> {/* Add margin top */}
                        <CardHeader>
                            <CardTitle>Submit Leave Request</CardTitle>
                            <CardDescription>Fill out the form below to request time off.</CardDescription>
