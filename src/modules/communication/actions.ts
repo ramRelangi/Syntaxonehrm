@@ -1,4 +1,3 @@
-
 'use server';
 
 import type { EmailTemplate, EmailSettings, EmailTemplateFormData } from '@/modules/communication/types';
@@ -148,42 +147,38 @@ export async function updateEmailSettingsAction(settingsData: Omit<EmailSettings
 
 // --- Test Connection Action ---
 // Receives potentially incomplete settings from the form (password might be omitted)
-export async function testSmtpConnectionAction(settingsData: Omit<EmailSettings, 'tenantId'>): Promise<{ success: boolean; message: string }> {
+export async function testSmtpConnectionAction(settingsData: Partial<Omit<EmailSettings, 'tenantId'>>): Promise<{ success: boolean; message: string }> {
      const tenantId = await getTenantId();
 
-     // Validate the *provided* data first (password might be missing)
-     const validation = emailSettingsSchema.omit({ tenantId: true }).partial().safeParse(settingsData); // Allow partial for test
+     let completeSettings: EmailSettings;
+
+     // Fetch existing settings first to get the password if not provided
+     const storedSettings = await dbGetEmailSettings(tenantId); // Gets decrypted password
+
+     // Validate essential fields (host, port, user, fromEmail, fromName are needed)
+     // Merge provided data with stored data, prioritizing provided data
+     const mergedDataForValidation = {
+        ...storedSettings, // Use stored as base
+        ...settingsData, // Override with data from form
+     };
+
+      // Password for validation: Use provided one if present, otherwise use stored one
+     const passwordForValidation = settingsData.smtpPassword || storedSettings?.smtpPassword;
+
+     // Validate the potentially merged settings *including* the determined password
+     const validation = emailSettingsSchema.omit({ tenantId: true }).safeParse({
+         ...mergedDataForValidation,
+         smtpPassword: passwordForValidation || '', // Use empty string if still no password
+     });
+
      if (!validation.success) {
+         console.error("[Test Connection Action] Validation failed after merging:", validation.error.flatten());
          const firstError = validation.error.errors[0];
          return { success: false, message: `Validation Error (${firstError?.path[0] || 'input'}): ${firstError?.message || 'Invalid data'}` };
      }
 
-     let completeSettings: EmailSettings;
-
-     // If password is NOT provided in the test data, fetch the stored (decrypted) one
-     if (!settingsData.smtpPassword) {
-         console.log("[Test Connection Action] Password not provided for test. Fetching stored settings...");
-         const storedSettings = await dbGetEmailSettings(tenantId); // Gets decrypted password
-         if (!storedSettings || !storedSettings.smtpPassword) {
-             return { success: false, message: 'Password missing. Please enter password to test or save settings first.' };
-         }
-         // Merge provided data with stored data (especially the password)
-         completeSettings = {
-             ...storedSettings, // Use stored as base
-             ...validation.data, // Override with validated form data (host, port etc. might have changed)
-             tenantId: tenantId, // Ensure tenantId is set
-         };
-         console.log("[Test Connection Action] Using stored password for test.");
-     } else {
-         // Password was provided in the form, use it directly after full validation
-         const fullValidation = emailSettingsSchema.omit({ tenantId: true }).safeParse(settingsData);
-         if (!fullValidation.success) {
-            const firstError = fullValidation.error.errors[0];
-            return { success: false, message: `Validation Error (${firstError?.path[0] || 'input'}): ${firstError?.message || 'Invalid data'}` };
-         }
-         completeSettings = { ...fullValidation.data, tenantId: tenantId };
-         console.log("[Test Connection Action] Using provided password for test.");
-     }
+     completeSettings = { ...validation.data, tenantId: tenantId }; // Use fully validated data
+     console.log(`[Test Connection Action] Using validated settings for test (password masked): host=${completeSettings.smtpHost}, port=${completeSettings.smtpPort}, user=${completeSettings.smtpUser}, secure=${completeSettings.smtpSecure}`);
 
 
     // Now `completeSettings` has all required fields, including the decrypted password
@@ -194,21 +189,27 @@ export async function testSmtpConnectionAction(settingsData: Omit<EmailSettings,
             user: completeSettings.smtpUser,
             pass: completeSettings.smtpPassword, // Use the definite password
         },
-        connectionTimeout: 15000,
+        connectionTimeout: 15000, // Increased timeout
         greetingTimeout: 15000,
         socketTimeout: 15000,
         logger: process.env.NODE_ENV === 'development',
         debug: process.env.NODE_ENV === 'development',
     };
 
+    // Explicitly handle common TLS/SSL port configurations
     if (completeSettings.smtpPort === 465) {
-        transportOptions.secure = true;
+        transportOptions.secure = true; // Use SSL for port 465
+         console.log("[Test Connection Action] Using secure=true for port 465");
     } else if (completeSettings.smtpPort === 587) {
-        transportOptions.secure = false;
-        transportOptions.requireTLS = true;
+        transportOptions.secure = false; // STARTTLS expected for port 587
+        transportOptions.requireTLS = true; // Explicitly require STARTTLS
+         console.log("[Test Connection Action] Using secure=false, requireTLS=true for port 587");
     } else {
+        // For other ports, respect the secure flag from settings but log a warning
         transportOptions.secure = completeSettings.smtpSecure;
+         console.warn(`[Test Connection Action] Using explicit secure=${completeSettings.smtpSecure} for non-standard port ${completeSettings.smtpPort}. Verify provider requirements.`);
     }
+
 
     const transporter = nodemailer.createTransport(transportOptions);
 
@@ -220,19 +221,24 @@ export async function testSmtpConnectionAction(settingsData: Omit<EmailSettings,
     } catch (error: any) {
         console.error('[Test Connection Action] Error:', error);
         let errorMessage = `Connection failed: ${error.message}`;
-         if (error.code === 'EAUTH') {
-            errorMessage = 'Authentication failed. Check username and password.';
+         if (error.code === 'EAUTH' || error.message?.includes('Authentication unsuccessful')) {
+            errorMessage = `Authentication failed. Check username and password. (Details: ${error.message})`;
          } else if (error.code === 'ECONNREFUSED') {
-             errorMessage = 'Connection refused. Check host, port, and firewall.';
+             errorMessage = `Connection refused. Check host (${completeSettings.smtpHost}), port (${completeSettings.smtpPort}), and firewall.`;
          } else if (error.code === 'ETIMEDOUT' || error.code === 'ESOCKETTIMEDOUT') {
              errorMessage = 'Connection timed out. Check network, host, and port.';
-         } else if (error.code === 'ENOTFOUND') {
+         } else if (error.code === 'ENOTFOUND' || error.code === 'EDNS') { // Added EDNS
              errorMessage = `Hostname '${completeSettings.smtpHost}' not found. Check the host address.`;
          } else if (error.message?.includes('wrong version number') || error.code === 'ESOCKET') {
             errorMessage = `SSL/TLS handshake failed. Check port (${completeSettings.smtpPort}) and encryption settings (secure=${transportOptions.secure}). Details: ${error.message}`;
-         } else if (error.message?.includes('Authentication unsuccessful')) {
-             errorMessage = `Authentication unsuccessful. Check credentials or tenant SMTP settings. (Details: ${error.message})`;
+         } else if (error.responseCode && error.response) { // More specific SMTP errors
+            errorMessage = `SMTP Server Error (${error.responseCode}): ${error.response}`;
          }
+        // Ensure the error message includes details if available
+        if (error.message && !errorMessage.includes(error.message)) {
+            errorMessage += ` (Details: ${error.message})`;
+        }
         return { success: false, message: errorMessage };
     }
 }
+

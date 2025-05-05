@@ -1,5 +1,3 @@
-
-
 "use client"; // This page needs client-side interactivity
 
 import * as React from "react";
@@ -23,7 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { EmailTemplate, EmailSettings, ConnectionStatus } from "@/modules/communication/types"; // Import types
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-
+import { useParams } from "next/navigation"; // Import useParams
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T | null> { // Allow null return
@@ -73,6 +71,8 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T | nul
 
 
 export default function CommunicationPage() {
+  const params = useParams();
+  const tenantDomain = params.domain as string;
   const [templates, setTemplates] = React.useState<EmailTemplate[]>([]);
   const [settings, setSettings] = React.useState<EmailSettings | null>(null);
   const [isLoadingTemplates, setIsLoadingTemplates] = React.useState(true);
@@ -92,9 +92,12 @@ export default function CommunicationPage() {
        setConnectionStatus('unconfigured');
        return;
      }
-    console.log("[Communication Page - checkConnectionInBackground] Starting background check...");
+    console.log("[Communication Page - checkConnectionInBackground] Starting background check with settings (password masked):", JSON.stringify({ ...currentSettings, smtpPassword: '***' }));
     setConnectionStatus('checking');
     try {
+        // Log the exact object being sent
+        console.log("[Communication Page - checkConnectionInBackground] Sending settings to API:", JSON.stringify(currentSettings, null, 2));
+
         const response = await fetch('/api/communication/test-connection', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -102,16 +105,22 @@ export default function CommunicationPage() {
         });
 
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ message: 'Unknown connection error' }));
+            const errorText = await response.text();
+            let errorData: { message?: string } = { message: 'Unknown connection error' };
+            try {
+                errorData = JSON.parse(errorText);
+            } catch {
+                 console.warn("[Communication Page - checkConnectionInBackground] Failed to parse error response JSON:", errorText);
+                 errorData.message = errorText || errorData.message;
+            }
             console.error('[Communication Page - checkConnectionInBackground] Background check failed:', errorData.message);
             setConnectionStatus('failed');
-            // Maybe send admin notification here if needed, but API might already do it
         } else {
              console.log("[Communication Page - checkConnectionInBackground] Background check successful.");
             setConnectionStatus('success');
         }
     } catch (error) {
-        console.error('[Communication Page - checkConnectionInBackground] Error during background check:', error);
+        console.error('[Communication Page - checkConnectionInBackground] Error during background check fetch:', error);
         setConnectionStatus('failed');
     }
   }, []); // No external dependencies, uses passed settings
@@ -123,16 +132,25 @@ export default function CommunicationPage() {
     setSettingsError(null);
     setConnectionStatus('checking'); // Assume checking initially
     try {
-        const data = await fetchData<EmailSettings>('/api/communication/settings');
-        console.log("[Communication Page - fetchSettings] Data received from fetchData:", data);
+        // API route handles tenant context via header
+        // Action returns settings *without* password
+        const data = await fetchData<Omit<EmailSettings, 'smtpPassword'> | null>('/api/communication/settings');
+        console.log("[Communication Page - fetchSettings] Data received from fetchData (password excluded):", data);
+
         // fetchData now returns null if 404 or empty, so check for truthiness
-        if (data) {
-            console.log("[Communication Page - fetchSettings] Valid settings data found.");
-            setSettings(data);
-            // Trigger background check only if settings data is present
-             checkConnectionInBackground(data); // No await
+        if (data && data.smtpHost && data.smtpPort && data.smtpUser && data.fromEmail && data.fromName) { // Check essential fields (excluding password)
+            console.log("[Communication Page - fetchSettings] Valid settings data found. Triggering background check...");
+            // Reconstruct a temporary EmailSettings object for the check, assuming password exists in DB
+            // The background check API will validate the actual stored password
+            const settingsForCheck: EmailSettings = {
+                ...data,
+                tenantId: '', // tenantId is not needed for the check API itself, added by backend context
+                smtpPassword: '******' // Use a placeholder - the API route for testing handles fetching the real one
+            };
+            setSettings(settingsForCheck); // Update local state (password is placeholder)
+            checkConnectionInBackground(settingsForCheck); // Call check with placeholder password (API handles real one)
         } else {
-            console.log("[Communication Page - fetchSettings] No valid settings data found (null or empty).");
+            console.log("[Communication Page - fetchSettings] No valid settings data found (null or incomplete).");
             setSettings(null); // Explicitly set to null if no valid settings
             setConnectionStatus('unconfigured'); // Set status if no settings found or empty
         }
@@ -159,6 +177,7 @@ export default function CommunicationPage() {
     setIsLoadingTemplates(true);
     setTemplateError(null);
     try {
+      // API route handles tenant context via header
       const data = await fetchData<EmailTemplate[]>('/api/communication/templates');
       console.log("[Communication Page - fetchTemplates] Data received:", data);
       // If data is null (though unlikely for templates GET), treat as empty array
@@ -405,7 +424,8 @@ export default function CommunicationPage() {
                          {settingsError && <p className="text-center text-destructive py-10">{settingsError}</p>}
                          {!isLoadingSettings && !settingsError && (
                             <EmailSettingsForm
-                                initialSettings={settings}
+                                // Pass settings *without* password to form
+                                initialSettings={settings ? { ...settings, smtpPassword: '' } : null}
                                 onSuccess={handleSettingsSuccess}
                                 onTestResult={handleManualTestConnectionResult} // Pass handler for manual test result
                                 connectionStatus={connectionStatus} // Pass down status for button styling
@@ -418,3 +438,4 @@ export default function CommunicationPage() {
     </div>
   );
 }
+
