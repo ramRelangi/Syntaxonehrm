@@ -14,28 +14,34 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { LeaveType, LeaveRequest, LeaveBalance } from "@/modules/leave/types";
 import { useParams } from "next/navigation"; // Import useParams
-import { getTenantIdFromAuth, getUserIdFromAuth, isUserAdmin } from '@/lib/auth'; // Use actual auth functions
+import { getUserIdFromAuth, isUserAdmin } from '@/lib/auth'; // Use actual auth functions
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     // Use relative paths for client-side fetching
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
-    console.log(`Fetching data from: ${fullUrl}`); // Log the URL being fetched
+    console.log(`[Leave Page - fetchData] Fetching data from: ${fullUrl}`); // Log the URL being fetched
 
     try {
         // API route handles tenant context via header
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
-        console.log(`Fetch response status for ${fullUrl}: ${response.status}`); // Log response status
+        console.log(`[Leave Page - fetchData] Fetch response status for ${fullUrl}: ${response.status}`); // Log response status
 
         if (!response.ok) {
             const errorText = await response.text(); // Get raw error text
-            console.error(`Fetch error response body for ${fullUrl}:`, errorText);
-            const errorData = JSON.parse(errorText || '{}'); // Try parsing JSON, default to empty object
-            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+            console.error(`[Leave Page - fetchData] Fetch error response body for ${fullUrl}:`, errorText);
+            let errorPayload: { message?: string; error?: string } = {};
+             try {
+                 errorPayload = JSON.parse(errorText || '{}'); // Try parsing JSON
+             } catch (parseError) {
+                 console.warn(`[Leave Page - fetchData] Failed to parse error response as JSON for ${fullUrl}. Raw text:`, errorText);
+                 errorPayload.message = errorText; // Use raw text as message if parsing fails
+             }
+             throw new Error(errorPayload.error || errorPayload.message || `HTTP error! status: ${response.status}`);
         }
         return await response.json() as T;
     } catch (error) {
-        console.error(`Error in fetchData for ${fullUrl}:`, error);
+        console.error(`[Leave Page - fetchData] Error in fetchData for ${fullUrl}:`, error);
         // Rethrow a more specific error if possible, or the original one
         if (error instanceof Error) {
            throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
@@ -62,20 +68,24 @@ export default function TenantLeavePage() {
   // Fetch auth context on mount
   React.useEffect(() => {
       const fetchAuthContext = async () => {
+          setIsLoading(true); // Start loading when fetching auth context
           try {
-              // Replace these with your actual session/context logic
-              // const fetchedUserId = await getUserIdFromAuth(); // Assume this returns ID or null
-              // const fetchedIsAdmin = await isUserAdmin(); // Assume this returns boolean
-              const fetchedUserId = 'user-mock-id-from-session'; // MOCK
-              const fetchedIsAdmin = true; // MOCK
+              // Use actual auth helpers
+              const fetchedUserId = await getUserIdFromAuth(); // Assume this returns ID or null
+              const fetchedIsAdmin = await isUserAdmin(); // Assume this returns boolean
               setUserId(fetchedUserId);
               setIsAdmin(fetchedIsAdmin);
-              console.log(`Auth context loaded: User ID - ${fetchedUserId}, Is Admin - ${fetchedIsAdmin}`);
-          } catch (err) {
-              console.error("Failed to fetch auth context:", err);
-              setError("Failed to load user context.");
-              toast({ title: "Auth Error", description: "Could not determine user.", variant: "destructive" });
+              console.log(`[Leave Page] Auth context loaded: User ID - ${fetchedUserId}, Is Admin - ${fetchedIsAdmin}`);
+               if (!fetchedUserId) {
+                   throw new Error("Could not verify user identity.");
+               }
+          } catch (err: any) {
+              console.error("[Leave Page] Failed to fetch auth context:", err);
+              setError("Failed to load user context. Please login again.");
+              toast({ title: "Authentication Error", description: err.message || "Could not determine user.", variant: "destructive" });
+              setIsLoading(false); // Stop loading if auth fails
           }
+          // Loading state will be turned off by refetchData after auth context is set
       };
       fetchAuthContext();
   }, [toast]);
@@ -83,42 +93,49 @@ export default function TenantLeavePage() {
 
    // Function to refetch all necessary data
   const refetchData = React.useCallback(async () => {
-      // Wait for auth context to be loaded
+      // Wait for auth context to be loaded before fetching leave data
       if (userId === null) {
-          console.log("Waiting for auth context before fetching leave data...");
+          console.log("[Leave Page] Waiting for auth context before fetching leave data...");
+          // Don't set loading false here, wait for auth context or error
           return;
       }
-      console.log("Auth context available, fetching leave data...");
+      console.log("[Leave Page] Auth context available, fetching leave data for user:", userId);
 
-      setIsLoading(true);
+      setIsLoading(true); // Set loading true when starting data fetch
       setError(null);
       try {
-      const [typesData, allReqData, myReqData, balancesData] = await Promise.all([
-          fetchData<LeaveType[]>('/api/leave/types'),
-          isAdmin ? fetchData<LeaveRequest[]>('/api/leave/requests') : Promise.resolve([]), // Only fetch all if admin
-          fetchData<LeaveRequest[]>(`/api/leave/requests?employeeId=${userId}`),
-          fetchData<LeaveBalance[]>(`/api/leave/balances/${userId}`),
-      ]);
-      setLeaveTypes(typesData);
-      setAllRequests(allReqData);
-      setMyRequests(myReqData);
-      setMyBalances(balancesData);
+          const [typesData, allReqData, myReqData, balancesData] = await Promise.all([
+              fetchData<LeaveType[]>('/api/leave/types'),
+              isAdmin ? fetchData<LeaveRequest[]>('/api/leave/requests') : Promise.resolve([]), // Only fetch all if admin
+              fetchData<LeaveRequest[]>(`/api/leave/requests?employeeId=${userId}`), // Use actual userId
+              fetchData<LeaveBalance[]>(`/api/leave/balances/${userId}`), // Use actual userId
+          ]);
+          setLeaveTypes(typesData);
+          setAllRequests(allReqData);
+          setMyRequests(myReqData);
+          setMyBalances(balancesData);
       } catch (err: any) { // Catch specific error type
-      setError("Failed to load leave management data. Please try refreshing.");
-      toast({
-          title: "Error Loading Data",
-          description: err.message || "Could not fetch necessary leave information.",
-          variant: "destructive",
-      });
+          console.error("[Leave Page] Error during refetchData:", err);
+          // Specific error handling based on caught message
+          if (err.message?.includes('Invalid identifier') || err.message?.includes('invalid input syntax for type uuid')) {
+              setError("An internal error occurred while fetching data. Invalid identifier used.");
+          } else {
+              setError("Failed to load leave management data. Please try refreshing.");
+          }
+          toast({
+              title: "Error Loading Data",
+              description: err.message || "Could not fetch necessary leave information.",
+              variant: "destructive",
+          });
       } finally {
-      setIsLoading(false);
+          setIsLoading(false); // Stop loading once data fetch attempt is complete (success or error)
       }
   }, [toast, userId, isAdmin]); // Add userId and isAdmin dependencies
 
-  // Fetch data on mount and when auth context changes
+  // Fetch data on mount and when auth context changes (userId becomes available)
   React.useEffect(() => {
       refetchData();
-  }, [refetchData]);
+  }, [refetchData]); // refetchData dependency includes userId and isAdmin
 
    // Callbacks for components to trigger refetch
    const handleLeaveRequestSubmitted = () => {
@@ -149,15 +166,15 @@ export default function TenantLeavePage() {
       </h1>
 
        {/* Show loading or error specific to auth context */}
-       {!userId && !error && (
-          <Card><CardContent className="p-4 text-center text-muted-foreground">Loading user context...</CardContent></Card>
+       {isLoading && !error && ( // Show loading indicator only if actively loading and no error yet
+          <Card><CardContent className="p-4 text-center text-muted-foreground">Loading leave data...</CardContent></Card>
        )}
-       {error && !isLoading && ( // Show main error if not loading general data
+       {error && ( // Show main error if any occurred
            <Card><CardContent className="p-4 text-destructive text-center">{error}</CardContent></Card>
        )}
 
 
-       {userId && ( // Only render main content if user context is loaded
+       {!isLoading && !error && userId && ( // Only render main content if not loading, no error, and user context is loaded
            <>
              {/* Leave Balances Section */}
               <Card className="shadow-sm">
@@ -166,14 +183,10 @@ export default function TenantLeavePage() {
                    <CardDescription>Your current available leave balances.</CardDescription>
                  </CardHeader>
                  <CardContent className="flex flex-wrap gap-4">
-                    {isLoading ? (
-                       <> <Skeleton className="h-10 w-24 rounded-md" /> <Skeleton className="h-10 w-28 rounded-md" /> </>
-                    ) : error ? (
-                       <p className="text-destructive">Error loading balances.</p>
-                    ): myBalances.length > 0 ? (
+                    {myBalances.length > 0 ? (
                        myBalances.map(balance => (
                            <div key={balance.leaveTypeId} className="flex items-center gap-2 p-3 border rounded-md bg-secondary/50">
-                               <span className="font-medium">{leaveTypeNameMap.get(balance.leaveTypeId) || 'Unknown Type'}:</span>
+                               <span className="font-medium">{balance.leaveTypeName || leaveTypeNameMap.get(balance.leaveTypeId) || 'Unknown Type'}:</span>
                                <Badge variant="outline">{balance.balance} days</Badge>
                            </div>
                        ))
@@ -213,54 +226,46 @@ export default function TenantLeavePage() {
                            <CardDescription>Fill out the form below to request time off.</CardDescription>
                        </CardHeader>
                        <CardContent>
-                            {isLoading ? <Skeleton className="h-64 w-full" /> : error ? <p className="text-destructive">{error}</p> :
-                               <LeaveRequestForm
-                                   employeeId={userId!} // userId is guaranteed to be non-null here
-                                   leaveTypes={leaveTypes}
-                                   onSuccess={handleLeaveRequestSubmitted} // Pass success callback
-                               />
-                            }
+                           <LeaveRequestForm
+                               employeeId={userId} // userId is guaranteed to be non-null here
+                               leaveTypes={leaveTypes}
+                               onSuccess={handleLeaveRequestSubmitted} // Pass success callback
+                           />
                        </CardContent>
                    </Card>
                 </TabsContent>
 
                 {/* My Requests Tab */}
                 <TabsContent value="my-requests">
-                     {isLoading ? <Skeleton className="h-64 w-full" /> : error ? <p className="text-destructive">{error}</p> :
-                        <LeaveRequestList
-                            requests={myRequests}
-                            leaveTypes={leaveTypes}
-                            isAdminView={false}
-                            currentUserId={userId!} // userId is guaranteed to be non-null here
-                            onUpdate={handleLeaveRequestUpdated} // Pass update callback
-                        />
-                     }
+                    <LeaveRequestList
+                        requests={myRequests}
+                        leaveTypes={leaveTypes}
+                        isAdminView={false}
+                        currentUserId={userId} // userId is guaranteed to be non-null here
+                        onUpdate={handleLeaveRequestUpdated} // Pass update callback
+                    />
                 </TabsContent>
 
                 {/* All Requests Tab (Admin Only) */}
                 {isAdmin && (
                    <TabsContent value="all-requests">
-                       {isLoading ? <Skeleton className="h-64 w-full" /> : error ? <p className="text-destructive">{error}</p> :
-                           <LeaveRequestList
-                               requests={allRequests}
-                               leaveTypes={leaveTypes}
-                               isAdminView={true}
-                               currentUserId={userId!} // userId is guaranteed to be non-null here
-                               onUpdate={handleLeaveRequestUpdated} // Pass update callback
-                           />
-                       }
+                       <LeaveRequestList
+                           requests={allRequests}
+                           leaveTypes={leaveTypes}
+                           isAdminView={true}
+                           currentUserId={userId} // userId is guaranteed to be non-null here
+                           onUpdate={handleLeaveRequestUpdated} // Pass update callback
+                       />
                    </TabsContent>
                 )}
 
                 {/* Manage Leave Types Tab (Admin Only) */}
                 {isAdmin && (
                    <TabsContent value="manage-types">
-                        {isLoading ? <Skeleton className="h-64 w-full" /> : error ? <p className="text-destructive">{error}</p> :
-                           <LeaveTypeManagement
-                               initialLeaveTypes={leaveTypes}
-                               onUpdate={handleLeaveTypeUpdated} // Pass update callback
-                           />
-                        }
+                       <LeaveTypeManagement
+                           initialLeaveTypes={leaveTypes}
+                           onUpdate={handleLeaveTypeUpdated} // Pass update callback
+                       />
                    </TabsContent>
                 )}
               </Tabs>
@@ -269,3 +274,4 @@ export default function TenantLeavePage() {
     </div>
   );
 }
+

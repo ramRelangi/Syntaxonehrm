@@ -1,3 +1,4 @@
+
 // src/lib/auth.ts
 // Placeholder for actual Authentication logic, including tenant and user identification
 
@@ -9,8 +10,8 @@ import pool from '@/lib/db'; // Import pool for direct DB access in mock
 // --- Placeholder for Session Data Structure ---
 // Replace this with the actual structure provided by your session library
 interface SessionData {
-    userId: string;
-    tenantId: string;
+    userId: string; // Should be a valid UUID
+    tenantId: string; // Should be a valid UUID
     tenantDomain: string;
     userRole: string; // e.g., 'Admin', 'Employee'
     // Add other relevant session fields
@@ -29,7 +30,7 @@ const MOCK_SESSION_COOKIE = 'mockSession';
  * @returns {Promise<SessionData | null>} The session data or null if not authenticated.
  */
 async function getSession(): Promise<SessionData | null> {
-    console.warn("[getSession] Using MOCK session data from cookie. REPLACE with actual session logic.");
+    // console.warn("[getSession] Using MOCK session data from cookie. REPLACE with actual session logic."); // Reduce noise
 
     const cookieStore = cookies();
     const sessionCookie = cookieStore.get(MOCK_SESSION_COOKIE);
@@ -44,8 +45,15 @@ async function getSession(): Promise<SessionData | null> {
     try {
         const sessionData: SessionData = JSON.parse(sessionCookie.value);
         console.log("[getSession] Parsed mock session data from cookie:", sessionData);
-        // Basic validation
-        if (sessionData && sessionData.userId && sessionData.tenantId && sessionData.tenantDomain && sessionData.userRole) {
+        // Basic validation - ensure IDs look like UUIDs (simple check)
+         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (
+            sessionData &&
+            sessionData.userId && uuidRegex.test(sessionData.userId) &&
+            sessionData.tenantId && uuidRegex.test(sessionData.tenantId) &&
+            sessionData.tenantDomain &&
+            sessionData.userRole
+        ) {
             // Optionally re-verify tenant and user existence in DB here for added safety
             // const tenant = await getTenantByDomain(sessionData.tenantDomain);
             // const user = await getUserById(sessionData.userId); // Need getUserById in auth/lib/db
@@ -53,7 +61,7 @@ async function getSession(): Promise<SessionData | null> {
             return sessionData;
             // }
         }
-        console.warn("[getSession] Invalid session data found in cookie.");
+        console.warn("[getSession] Invalid or incomplete session data found in cookie:", sessionData);
         // Clear the invalid cookie
         cookieStore.delete(MOCK_SESSION_COOKIE);
         return null;
@@ -68,17 +76,17 @@ async function getSession(): Promise<SessionData | null> {
 /**
  * Gets the tenant ID UUID from the current authenticated session.
  *
- * @returns {Promise<string | null>} The tenant ID UUID or null if not authenticated.
+ * @returns {Promise<string | null>} The tenant ID UUID or null if not authenticated or ID is invalid.
  */
 export async function getTenantIdFromAuth(): Promise<string | null> {
     console.log("[getTenantIdFromAuth] Attempting to resolve tenant ID from session...");
     try {
         const session = await getSession();
-        if (session) {
+        if (session?.tenantId) { // Check specifically for tenantId
             console.log(`[getTenantIdFromAuth] Resolved tenant ID from session: ${session.tenantId}`);
-            return session.tenantId;
+            return session.tenantId; // Return the UUID string
         }
-        console.warn("[getTenantIdFromAuth] No active session found.");
+        console.warn("[getTenantIdFromAuth] No active session or valid tenant ID found.");
         return null;
     } catch (error) {
         console.error("[getTenantIdFromAuth] Error resolving tenant ID from session:", error);
@@ -89,17 +97,17 @@ export async function getTenantIdFromAuth(): Promise<string | null> {
 /**
  * Gets the current user's ID from the session.
  *
- * @returns {Promise<string | null>} User ID or null if not authenticated.
+ * @returns {Promise<string | null>} User ID UUID or null if not authenticated or ID is invalid.
  */
 export async function getUserIdFromAuth(): Promise<string | null> {
      console.log("[getUserIdFromAuth] Attempting to resolve user ID from session...");
     try {
         const session = await getSession();
-        if (session) {
+        if (session?.userId) { // Check specifically for userId
             console.log(`[getUserIdFromAuth] Resolved user ID from session: ${session.userId}`);
-            return session.userId;
+            return session.userId; // Return the UUID string
         }
-        console.warn("[getUserIdFromAuth] No active session found.");
+        console.warn("[getUserIdFromAuth] No active session or valid user ID found.");
         return null;
     } catch (error) {
         console.error("[getUserIdFromAuth] Error resolving user ID from session:", error);
@@ -117,9 +125,9 @@ export async function isUserAdmin(): Promise<boolean> {
     console.log("[isUserAdmin] Checking admin status from session...");
      try {
         const session = await getSession();
-        const isAdmin = session?.userRole === 'Admin';
+        const isAdmin = session?.userRole === 'Admin'; // Check role specifically
         console.log(`[isUserAdmin] Admin status determined from session: ${isAdmin}`);
-        return isAdmin;
+        return isAdmin; // Returns true or false
     } catch (error) {
         console.error("[isUserAdmin] Error checking admin status from session:", error);
         return false; // Return false on error
@@ -192,7 +200,7 @@ function mapRowToUser(row: any): User {
  * **REPLACE WITH ACTUAL SESSION MANAGEMENT.**
  */
 export async function setMockSession(sessionData: SessionData) {
-    console.warn("[setMockSession] Setting MOCK session cookie. REPLACE with actual session logic.");
+    // console.warn("[setMockSession] Setting MOCK session cookie. REPLACE with actual session logic."); // Reduce noise
     cookies().set(MOCK_SESSION_COOKIE, JSON.stringify(sessionData), {
         httpOnly: true, // Basic security
         secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
@@ -208,7 +216,7 @@ export async function setMockSession(sessionData: SessionData) {
  * **REPLACE WITH ACTUAL SESSION MANAGEMENT.**
  */
 export async function clearMockSession() {
-    console.warn("[clearMockSession] Clearing MOCK session cookie. REPLACE with actual session logic.");
+    // console.warn("[clearMockSession] Clearing MOCK session cookie. REPLACE with actual session logic."); // Reduce noise
     cookies().delete(MOCK_SESSION_COOKIE);
      console.log("[clearMockSession] Mock session cookie cleared.");
 }

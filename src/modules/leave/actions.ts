@@ -1,3 +1,4 @@
+
 'use server';
 
 import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus, LeaveBalance } from '@/modules/leave/types';
@@ -34,6 +35,10 @@ export async function getLeaveRequests(filters?: { employeeId?: string, status?:
       return dbGetAllLeaveRequests(tenantId, filters);
   } catch (dbError: any) {
       console.error(`[Action getLeaveRequests] Database error for tenant ${tenantId}:`, dbError);
+      // Provide more specific error message for UUID errors
+      if (dbError.code === '22P02' && dbError.message?.includes('uuid')) {
+           throw new Error("Internal server error: Invalid identifier.");
+      }
       throw new Error(`Failed to fetch leave requests: ${dbError.message}`);
   }
 }
@@ -59,8 +64,16 @@ export async function addLeaveRequest(formData: Omit<LeaveRequestFormData, 'tena
   if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
 
   // Employee ID should typically come from the session for the logged-in user submitting the request
-  const employeeId = await getUserIdFromAuth();
+  const employeeId = await getUserIdFromAuth(); // Await the promise
   if (!employeeId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Could not identify employee.' }] };
+
+  // Ensure employeeId is a valid UUID (basic check)
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(employeeId)) {
+       console.error("[Action addLeaveRequest] Invalid employee ID format from session:", employeeId);
+       return { success: false, errors: [{ code: 'custom', path: [], message: 'Invalid employee identifier.' }] };
+  }
+
 
   const dataWithContext = { ...formData, tenantId, employeeId };
 
@@ -92,8 +105,16 @@ export async function updateLeaveRequestStatus(
   const tenantId = await getTenantIdFromAuth();
   if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
 
-  const approverId = await getUserIdFromAuth();
+  const approverId = await getUserIdFromAuth(); // Await the promise
   if (!approverId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Approver ID not found.' }] };
+
+   // Ensure approverId is a valid UUID (basic check)
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(approverId)) {
+       console.error("[Action updateLeaveRequestStatus] Invalid approver ID format from session:", approverId);
+       return { success: false, errors: [{ code: 'custom', path: [], message: 'Invalid approver identifier.' }] };
+  }
+
 
   // Authorization Check
   const isAdmin = await isUserAdmin(); // Implement this check based on user role
@@ -127,8 +148,16 @@ export async function cancelLeaveRequest(id: string): Promise<{ success: boolean
   const tenantId = await getTenantIdFromAuth();
   if (!tenantId) return { success: false, error: 'Tenant context not found.' };
 
-  const userId = await getUserIdFromAuth();
+  const userId = await getUserIdFromAuth(); // Await the promise
   if (!userId) return { success: false, error: 'Could not identify user.' };
+
+   // Ensure userId is a valid UUID (basic check)
+   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+   if (!uuidRegex.test(userId)) {
+        console.error("[Action cancelLeaveRequest] Invalid user ID format from session:", userId);
+        return { success: false, error: 'Invalid user identifier.' };
+   }
+
 
   try {
     // Pass tenantId and userId to the DB function for validation
@@ -263,12 +292,25 @@ export async function getEmployeeLeaveBalances(employeeId: string): Promise<Leav
        console.error("[Action getEmployeeLeaveBalances] Tenant ID could not be determined from auth.");
        throw new Error("Tenant context not found.");
     }
+
+     // Ensure employeeId is a valid UUID (basic check)
+     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+     if (!uuidRegex.test(employeeId)) {
+          console.error("[Action getEmployeeLeaveBalances] Invalid employee ID format:", employeeId);
+          throw new Error('Invalid employee identifier.');
+     }
+
+
     console.log(`[Action getEmployeeLeaveBalances] Fetching balances for employee ${employeeId}, tenant ${tenantId}`);
     // TODO: Authorization - Check if user can view this employee's balances
     try {
         return dbGetLeaveBalances(tenantId, employeeId);
     } catch (dbError: any) {
          console.error(`[Action getEmployeeLeaveBalances] Database error for employee ${employeeId}, tenant ${tenantId}:`, dbError);
+         // Provide more specific error message for UUID errors
+         if (dbError.code === '22P02' && dbError.message?.includes('uuid')) {
+             throw new Error("Internal server error: Invalid identifier.");
+         }
          throw new Error(`Failed to fetch leave balances: ${dbError.message}`);
     }
 }

@@ -3,6 +3,9 @@ import pool from '@/lib/db';
 import type { LeaveRequest, LeaveType, LeaveRequestStatus, LeaveBalance } from '@/modules/leave/types';
 import { differenceInDays } from 'date-fns';
 
+// Basic UUID validation regex
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // --- Leave Type Operations ---
 
 function mapRowToLeaveType(row: any): LeaveType {
@@ -19,6 +22,11 @@ function mapRowToLeaveType(row: any): LeaveType {
 
 // Get leave types for a specific tenant
 export async function getAllLeaveTypes(tenantId: string): Promise<LeaveType[]> {
+    // Validate tenantId
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB getAllLeaveTypes] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
     const client = await pool.connect();
     try {
         const res = await client.query('SELECT * FROM leave_types WHERE tenant_id = $1 ORDER BY name ASC', [tenantId]);
@@ -33,6 +41,15 @@ export async function getAllLeaveTypes(tenantId: string): Promise<LeaveType[]> {
 
 // Get leave type by ID (ensure it belongs to the tenant)
 export async function getLeaveTypeById(id: string, tenantId: string): Promise<LeaveType | undefined> {
+    // Validate IDs
+    if (!id || !uuidRegex.test(id)) {
+        console.error(`[DB getLeaveTypeById] Invalid leave type ID format: ${id}`);
+        throw new Error("Invalid leave type identifier.");
+    }
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB getLeaveTypeById] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
     const client = await pool.connect();
     try {
         const res = await client.query('SELECT * FROM leave_types WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
@@ -47,10 +64,11 @@ export async function getLeaveTypeById(id: string, tenantId: string): Promise<Le
 
 // Add leave type for a specific tenant
 export async function addLeaveType(typeData: Omit<LeaveType, 'id'>): Promise<LeaveType> {
-    const client = await pool.connect();
-    if (!typeData.tenantId) {
-        throw new Error("Tenant ID is required to add a leave type.");
+    if (!typeData.tenantId || !uuidRegex.test(typeData.tenantId)) {
+        console.error(`[DB addLeaveType] Invalid tenantId format: ${typeData.tenantId}`);
+        throw new Error("Invalid tenant identifier.");
     }
+    const client = await pool.connect();
     const query = `
         INSERT INTO leave_types (tenant_id, name, description, requires_approval, default_balance, accrual_rate)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -83,6 +101,15 @@ export async function addLeaveType(typeData: Omit<LeaveType, 'id'>): Promise<Lea
 
 // Update leave type (ensure it belongs to the tenant)
 export async function updateLeaveType(id: string, tenantId: string, updates: Partial<Omit<LeaveType, 'id' | 'tenantId'>>): Promise<LeaveType | undefined> {
+    // Validate IDs
+     if (!id || !uuidRegex.test(id)) {
+        console.error(`[DB updateLeaveType] Invalid leave type ID format: ${id}`);
+        throw new Error("Invalid leave type identifier.");
+    }
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB updateLeaveType] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
     const client = await pool.connect();
     const setClauses: string[] = [];
     const values: any[] = [];
@@ -134,6 +161,15 @@ export async function updateLeaveType(id: string, tenantId: string, updates: Par
 
 // Delete leave type (ensure it belongs to the tenant and is not in use)
 export async function deleteLeaveType(id: string, tenantId: string): Promise<boolean> {
+    // Validate IDs
+    if (!id || !uuidRegex.test(id)) {
+        console.error(`[DB deleteLeaveType] Invalid leave type ID format: ${id}`);
+        throw new Error("Invalid leave type identifier.");
+    }
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB deleteLeaveType] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
     const client = await pool.connect();
     try {
         // Check if the type is used in requests or balances within the tenant before deleting
@@ -198,6 +234,16 @@ const BASE_REQUEST_QUERY = `
 
 // Get leave requests for a specific tenant, optionally filtered
 export async function getAllLeaveRequests(tenantId: string, filters?: { employeeId?: string, status?: LeaveRequestStatus }): Promise<LeaveRequest[]> {
+    // Validate IDs
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB getAllLeaveRequests] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+    if (filters?.employeeId && !uuidRegex.test(filters.employeeId)) {
+        console.error(`[DB getAllLeaveRequests] Invalid employeeId format in filter: ${filters.employeeId}`);
+        throw new Error("Invalid employee identifier.");
+    }
+
     const client = await pool.connect();
     let query = BASE_REQUEST_QUERY;
     const conditions: string[] = ['lr.tenant_id = $1']; // Always filter by tenant
@@ -229,6 +275,15 @@ export async function getAllLeaveRequests(tenantId: string, filters?: { employee
 
 // Get leave request by ID (ensure it belongs to the tenant)
 export async function getLeaveRequestById(id: string, tenantId: string): Promise<LeaveRequest | undefined> {
+     // Validate IDs
+     if (!id || !uuidRegex.test(id)) {
+        console.error(`[DB getLeaveRequestById] Invalid leave request ID format: ${id}`);
+        throw new Error("Invalid leave request identifier.");
+    }
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB getLeaveRequestById] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
     const client = await pool.connect();
     const query = `${BASE_REQUEST_QUERY} WHERE lr.id = $1 AND lr.tenant_id = $2`;
     try {
@@ -244,10 +299,20 @@ export async function getLeaveRequestById(id: string, tenantId: string): Promise
 
 // Add leave request for a specific tenant
 export async function addLeaveRequest(requestData: Omit<LeaveRequest, 'id' | 'requestDate' | 'status' | 'leaveTypeName' | 'employeeName'>): Promise<LeaveRequest> {
-    const client = await pool.connect();
-    if (!requestData.tenantId) {
-        throw new Error("Tenant ID is required to add a leave request.");
+     // Validate IDs
+    if (!requestData.tenantId || !uuidRegex.test(requestData.tenantId)) {
+        console.error(`[DB addLeaveRequest] Invalid tenantId format: ${requestData.tenantId}`);
+        throw new Error("Invalid tenant identifier.");
     }
+    if (!requestData.employeeId || !uuidRegex.test(requestData.employeeId)) {
+        console.error(`[DB addLeaveRequest] Invalid employeeId format: ${requestData.employeeId}`);
+        throw new Error("Invalid employee identifier.");
+    }
+    if (!requestData.leaveTypeId || !uuidRegex.test(requestData.leaveTypeId)) {
+        console.error(`[DB addLeaveRequest] Invalid leaveTypeId format: ${requestData.leaveTypeId}`);
+        throw new Error("Invalid leave type identifier.");
+    }
+    const client = await pool.connect();
     const leaveType = await getLeaveTypeById(requestData.leaveTypeId, requestData.tenantId); // Fetch leave type details for tenant
     if (!leaveType) throw new Error("Invalid leaveTypeId for this tenant");
 
@@ -311,6 +376,19 @@ export async function updateLeaveRequestStatus(
     comments?: string,
     approverId?: string
 ): Promise<LeaveRequest | undefined> {
+    // Validate IDs
+    if (!id || !uuidRegex.test(id)) {
+        console.error(`[DB updateLeaveRequestStatus] Invalid leave request ID format: ${id}`);
+        throw new Error("Invalid leave request identifier.");
+    }
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB updateLeaveRequestStatus] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+    if (approverId && !uuidRegex.test(approverId)) {
+        console.error(`[DB updateLeaveRequestStatus] Invalid approverId format: ${approverId}`);
+        throw new Error("Invalid approver identifier.");
+    }
     const client = await pool.connect();
     try {
         await client.query('BEGIN'); // Start transaction
@@ -370,6 +448,19 @@ export async function updateLeaveRequestStatus(
 
 // Cancel leave request (ensure it belongs to the tenant and requester)
 export async function cancelLeaveRequest(id: string, tenantId: string, userId: string): Promise<LeaveRequest | undefined> {
+    // Validate IDs
+     if (!id || !uuidRegex.test(id)) {
+        console.error(`[DB cancelLeaveRequest] Invalid leave request ID format: ${id}`);
+        throw new Error("Invalid leave request identifier.");
+    }
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB cancelLeaveRequest] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+    if (!userId || !uuidRegex.test(userId)) {
+        console.error(`[DB cancelLeaveRequest] Invalid userId format: ${userId}`);
+        throw new Error("Invalid user identifier.");
+    }
      const client = await pool.connect();
      try {
         // Fetch request to check ownership and status (with tenant check)
@@ -418,6 +509,15 @@ export async function cancelLeaveRequest(id: string, tenantId: string, userId: s
 
 // Initialize balances for a new type for all employees WITHIN a tenant
 async function initializeBalancesForNewType(tenantId: string, leaveTypeId: string, defaultBalance: number) {
+    // Validate IDs
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB initializeBalancesForNewType] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+    if (!leaveTypeId || !uuidRegex.test(leaveTypeId)) {
+        console.error(`[DB initializeBalancesForNewType] Invalid leaveTypeId format: ${leaveTypeId}`);
+        throw new Error("Invalid leave type identifier.");
+    }
     const client = await pool.connect();
     // Add balance entry for the new type for ALL existing employees of the tenant
     // Use INSERT ... ON CONFLICT DO NOTHING to avoid errors if an entry somehow exists
@@ -441,6 +541,15 @@ async function initializeBalancesForNewType(tenantId: string, leaveTypeId: strin
 
 // Ensure balances exist for a specific employee within a tenant
 async function initializeEmployeeBalances(tenantId: string, employeeId: string, client?: any): Promise<void> {
+    // Validate IDs
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB initializeEmployeeBalances] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+    if (!employeeId || !uuidRegex.test(employeeId)) {
+        console.error(`[DB initializeEmployeeBalances] Invalid employeeId format: ${employeeId}`);
+        throw new Error("Invalid employee identifier.");
+    }
     const conn = client || await pool.connect(); // Use provided client or get a new one
     try {
         const leaveTypes = await getAllLeaveTypes(tenantId); // Fetch current leave types for the tenant
@@ -464,6 +573,15 @@ async function initializeEmployeeBalances(tenantId: string, employeeId: string, 
 
 // Get balances for a specific employee within a tenant
 export async function getLeaveBalancesForEmployee(tenantId: string, employeeId: string): Promise<LeaveBalance[]> {
+    // Validate IDs
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB getLeaveBalancesForEmployee] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+    if (!employeeId || !uuidRegex.test(employeeId)) {
+        console.error(`[DB getLeaveBalancesForEmployee] Invalid employeeId format: ${employeeId}`);
+        throw new Error("Invalid employee identifier.");
+    }
     const client = await pool.connect();
     try {
         // Ensure balances exist first before fetching
@@ -495,6 +613,19 @@ export async function getLeaveBalancesForEmployee(tenantId: string, employeeId: 
 
 // Function to get a specific balance (useful for checks) within a tenant
 async function getSpecificLeaveBalance(tenantId: string, employeeId: string, leaveTypeId: string): Promise<number | undefined> {
+     // Validate IDs
+     if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB getSpecificLeaveBalance] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+    if (!employeeId || !uuidRegex.test(employeeId)) {
+        console.error(`[DB getSpecificLeaveBalance] Invalid employeeId format: ${employeeId}`);
+        throw new Error("Invalid employee identifier.");
+    }
+    if (!leaveTypeId || !uuidRegex.test(leaveTypeId)) {
+        console.error(`[DB getSpecificLeaveBalance] Invalid leaveTypeId format: ${leaveTypeId}`);
+        throw new Error("Invalid leave type identifier.");
+    }
     const client = await pool.connect();
     try {
         // Ensure balance exists first
@@ -517,6 +648,19 @@ async function getSpecificLeaveBalance(tenantId: string, employeeId: string, lea
 
 // Internal function to adjust balance within a tenant, potentially within a transaction
 async function adjustLeaveBalance(tenantId: string, employeeId: string, leaveTypeId: string, amount: number, client?: any): Promise<void> {
+    // Validate IDs
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB adjustLeaveBalance] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+    if (!employeeId || !uuidRegex.test(employeeId)) {
+        console.error(`[DB adjustLeaveBalance] Invalid employeeId format: ${employeeId}`);
+        throw new Error("Invalid employee identifier.");
+    }
+    if (!leaveTypeId || !uuidRegex.test(leaveTypeId)) {
+        console.error(`[DB adjustLeaveBalance] Invalid leaveTypeId format: ${leaveTypeId}`);
+        throw new Error("Invalid leave type identifier.");
+    }
     const conn = client || await pool.connect(); // Use provided client or get a new one
     const query = `
         UPDATE leave_balances
