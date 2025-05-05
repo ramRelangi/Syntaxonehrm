@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation';
 
 // Dynamically import the client component
 const TenantRecruitmentPageClient = dynamic(() => import('@/modules/recruitment/components/recruitment-page-client'), {
-  ssr: false, // Consider if SSR is beneficial or if client-side fetching is sufficient
+  // ssr: false, // Remove this line - ssr: false is not allowed in Server Components
   loading: () => (
     <div className="flex flex-col gap-8">
       <div className="flex items-center justify-between flex-wrap gap-4">
