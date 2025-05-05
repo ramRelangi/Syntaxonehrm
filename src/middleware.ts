@@ -8,7 +8,6 @@ const IGNORED_SUBDOMAINS = ['www', 'api'];
 const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
 
 // Paths that are public on the root domain
-// /login is now handled conditionally
 const PUBLIC_ROOT_PATHS = ['/register', '/forgot-password', '/jobs'];
 
 export async function middleware(request: NextRequest) {
@@ -34,24 +33,25 @@ export async function middleware(request: NextRequest) {
        normalizedHostname === ROOT_DOMAIN ||
        normalizedHostname === 'localhost' ||
        normalizedHostname === '127.0.0.1' ||
-       normalizedHostname.match(/^192\.168\.\d+\.\d+$/) ||
-       normalizedHostname.match(/^10\.\d+\.\d+\.\d+$/) ||
-       normalizedHostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/) ||
+       normalizedHostname.match(/^192\.168\.\d+\.\d+$/) || // Local IPs
+       normalizedHostname.match(/^10\.\d+\.\d+\.\d+$/) || // Local IPs
+       normalizedHostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/) || // Local IPs
        IGNORED_SUBDOMAINS.some(sub => normalizedHostname.startsWith(`${sub}.${ROOT_DOMAIN}`));
 
   // --- Root Domain Handling ---
   if (isRootDomainRequest) {
      console.log(`[Middleware] Handling root domain request for: ${url.pathname}`);
 
-     // Redirect root '/' to '/register' (Start page)
+     // Redirect root '/' to '/register' (Now root entry page)
      if (url.pathname === '/') {
          console.log('[Middleware] Root / requested. Redirecting to /register.');
-         url.pathname = '/register'; // CHANGED: Redirect root to register
+         url.pathname = '/register';
          return NextResponse.redirect(url);
      }
 
      // Allow access to defined public paths on the root domain
      const isPublicRootPath = PUBLIC_ROOT_PATHS.some(path => {
+        // Match exact path or path starting with the public path + '/'
         return url.pathname === path || url.pathname.startsWith(path + '/');
      });
 
@@ -77,38 +77,41 @@ export async function middleware(request: NextRequest) {
   if (subdomain && !IGNORED_SUBDOMAINS.includes(subdomain)) {
     // Valid subdomain detected
     const requestHeaders = new Headers(request.headers);
-    requestHeaders.set('X-Tenant-Domain', subdomain); // Set header for API routes and page props
+    requestHeaders.set('X-Tenant-Domain', subdomain); // Set header
 
     const originalPath = url.pathname;
     const domainSegment = `/${subdomain}`;
 
-    // Rewrite subdomain /login to the internal auth/login page (without domain segment)
-    // This assumes the login page under (auth) doesn't need the [domain] segment.
-    // If the login page IS under /[domain]/login, keep the previous rewrite logic.
+    // Redirect subdomain /jobs requests to the root domain /jobs
+    if (originalPath === '/jobs' || originalPath.startsWith('/jobs/')) {
+        const rootJobsUrl = new URL(originalPath, `${request.nextUrl.protocol}//${ROOT_DOMAIN}:${url.port || (request.nextUrl.protocol === 'https:' ? 443 : 80)}`); // Construct root URL correctly
+        console.log(`[Middleware] Redirecting subdomain path ${hostname}${originalPath} to root domain jobs path ${rootJobsUrl.toString()}`);
+        return NextResponse.redirect(rootJobsUrl);
+    }
+
+    // Handle specific auth routes on subdomains
     if (originalPath === '/login') {
         console.log(`[Middleware] Rewriting subdomain login path ${hostname}${originalPath} to internal path /login`);
-        url.pathname = `/login`; // Rewrite to the root login page
+        url.pathname = `/login`; // Rewrite to the root login page (under auth group)
         return NextResponse.rewrite(url, {
              request: { headers: requestHeaders },
         });
-    }
-    // Handle tenant-specific forgot password
-    else if (originalPath.startsWith('/forgot-password')) {
-        url.pathname = `/forgot-password${domainSegment}`;
+    } else if (originalPath.startsWith('/forgot-password')) {
+        url.pathname = `/forgot-password${domainSegment}`; // Rewrite to /[domain]/forgot-password (under auth group)
         console.log(`[Middleware] Rewriting subdomain forgot password path ${hostname}${originalPath} to internal path ${url.pathname}`);
         return NextResponse.rewrite(url, {
              request: { headers: requestHeaders },
         });
     }
-     // Rewrite root for subdomain to /dashboard
+    // Rewrite root for subdomain to /dashboard (under app group)
     else if (originalPath === '/') {
-        url.pathname = `${domainSegment}/dashboard`; // Rewrite subdomain root to its dashboard
+        url.pathname = `${domainSegment}/dashboard`; // Rewrite to /[domain]/dashboard
         console.log(`[Middleware] Rewriting subdomain root path ${hostname}${originalPath} to internal dashboard path ${url.pathname}`);
         return NextResponse.rewrite(url, {
             request: { headers: requestHeaders },
         });
     }
-    // Rewrite other paths to the internal /[domain]/... structure
+    // Rewrite other paths to the internal /[domain]/... structure (under app group)
     else {
         url.pathname = `${domainSegment}${originalPath}`;
         console.log(`[Middleware] Rewriting subdomain path ${hostname}${originalPath} to internal path ${url.pathname}`);
@@ -137,3 +140,5 @@ export const config = {
      '/((?!_next/static|_next/image|images/|favicon.ico|api/).*)',
    ],
 };
+
+    
