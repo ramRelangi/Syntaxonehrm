@@ -16,6 +16,7 @@ import type { LeaveType, LeaveRequest, LeaveBalance, Holiday } from "@/modules/l
 import { getHolidaysAction } from '@/modules/leave/actions'; // Import holiday action
 import { getSessionData } from '@/modules/auth/actions'; // Import session helper
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Import Alert
+import { cn } from "@/lib/utils"; // Import cn utility
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
@@ -23,6 +24,7 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     console.log(`[Leave Page Client - fetchData] Fetching data from: ${fullUrl}`);
 
     try {
+        // API routes use headers for tenant context
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
         console.log(`[Leave Page Client - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
 
@@ -171,9 +173,6 @@ export default function LeavePageClient() {
         );
     }
 
-     // Determine number of columns for the TabsList
-     const tabColumnCount = isAdmin ? 5 : 2;
-
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
@@ -213,8 +212,11 @@ export default function LeavePageClient() {
 
               {/* Tabs for Request Form, Lists, and Type/Holiday Management */}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="leave-tabs">
-                 {/* Use dynamic grid-cols class */}
-                 <TabsList className={`grid w-full grid-cols-${tabColumnCount}`}>
+                 {/* Use cn helper and responsive grid columns */}
+                 <TabsList className={cn(
+                      "grid w-full",
+                      isAdmin ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-5" : "grid-cols-2" // Responsive for admin
+                  )}>
                    <TabsTrigger value="request" className="flex items-center gap-1">
                         <PlusCircle className="h-4 w-4"/> Request Leave
                     </TabsTrigger>
