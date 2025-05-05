@@ -18,14 +18,20 @@ import { Loader2, CalendarIcon, Save, PlusCircle } from 'lucide-react'; // Remov
 import { format, parseISO, isValid, formatISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { DialogClose } from '@/components/ui/dialog';
+// Import the server action
+import { addJobPostingAction, updateJobPostingAction } from '@/modules/recruitment/actions';
+
 
 interface JobPostingFormProps {
   jobPosting?: JobPosting;
   onSuccess: () => void;
-  tenantDomain: string; // Add tenantDomain prop
+  // tenantDomain prop is no longer needed as actions derive context
 }
 
-export function JobPostingForm({ jobPosting, onSuccess, tenantDomain }: JobPostingFormProps) {
+// Form data type should match the action input (excluding tenantId)
+type JobPostingFormSubmitData = Omit<JobPostingFormData, 'tenantId'>;
+
+export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
   const [closingDatePickerOpen, setClosingDatePickerOpen] = React.useState(false);
@@ -41,8 +47,8 @@ export function JobPostingForm({ jobPosting, onSuccess, tenantDomain }: JobPosti
     } catch (e) { console.error("Error parsing date:", e); return ""; }
   };
 
-  const form = useForm<JobPostingFormData>({
-    resolver: zodResolver(jobPostingSchema.omit({ id: true, datePosted: true })),
+  const form = useForm<JobPostingFormSubmitData>({
+    resolver: zodResolver(jobPostingSchema.omit({ id: true, datePosted: true, tenantId: true })), // Omit tenantId from form validation schema
     defaultValues: {
       title: jobPosting?.title ?? "",
       description: jobPosting?.description ?? "",
@@ -54,11 +60,10 @@ export function JobPostingForm({ jobPosting, onSuccess, tenantDomain }: JobPosti
     },
   });
 
-   const onSubmit = async (data: JobPostingFormData) => {
+   const onSubmit = async (data: JobPostingFormSubmitData) => {
     setIsLoading(true);
-    console.log("[Job Posting Form] Submitting data:", data);
-    const apiUrl = isEditMode ? `/api/recruitment/postings/${jobPosting!.id}` : '/api/recruitment/postings';
-    const method = isEditMode ? 'PUT' : 'POST';
+    form.clearErrors(); // Clear previous errors
+    console.log("[Job Posting Form] Attempting to submit data:", data);
 
     // Ensure closingDate is formatted correctly or undefined
     const payload = {
@@ -66,64 +71,70 @@ export function JobPostingForm({ jobPosting, onSuccess, tenantDomain }: JobPosti
          closingDate: data.closingDate && isValid(parseISO(data.closingDate))
             ? formatISO(parseISO(data.closingDate), { representation: 'date' }) // Send as 'YYYY-MM-DD' string if valid
             : undefined, // Send undefined if empty or invalid
+         salaryRange: data.salaryRange || undefined, // Ensure undefined for empty salary
      };
 
-     // Clean up empty strings to be undefined for optional fields
-     if (payload.salaryRange === '') payload.salaryRange = undefined;
-
-     console.log("[Job Posting Form] Sending payload:", payload);
+     console.log("[Job Posting Form] Sending payload to action:", payload);
 
 
     try {
-        const response = await fetch(apiUrl, {
-            method: method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
-
-        let result: any;
-        let responseText: string | null = null;
-        try {
-           responseText = await response.text();
-           if(responseText) result = JSON.parse(responseText);
-        } catch (e) {
-           if (!response.ok) throw new Error(responseText || `HTTP error! status: ${response.status}`);
-           result = {}; // OK, no JSON body
+        let result;
+        if (isEditMode && jobPosting?.id) {
+            console.log(`[Job Posting Form] Calling updateJobPostingAction for ID: ${jobPosting.id}`);
+            result = await updateJobPostingAction(jobPosting.id, payload); // Action derives tenantId
+        } else {
+             console.log(`[Job Posting Form] Calling addJobPostingAction`);
+            result = await addJobPostingAction(payload); // Action derives tenantId
         }
 
-        if (!response.ok) {
-            console.error("[Job Posting Form] API Error Response:", result);
-            throw new Error(result?.error || result?.message || `HTTP error! status: ${response.status}`);
+        console.log("[Job Posting Form] Action Result:", result);
+
+        if (!result.success) {
+             console.error("[Job Posting Form] Action Error:", result.errors);
+             const errorMessage = result.errors?.[0]?.message || `Failed to ${isEditMode ? 'update' : 'create'} job posting.`;
+              // Set field-specific errors if path is available
+              if (result.errors?.[0]?.path) {
+                  const fieldPath = result.errors[0].path[0] as keyof JobPostingFormSubmitData;
+                  form.setError(fieldPath, { message: errorMessage });
+              } else {
+                  form.setError("root.serverError", { message: errorMessage });
+              }
+             throw new Error(errorMessage); // Throw to prevent success toast
         }
 
-         console.log("[Job Posting Form] API Success Response:", result);
+         console.log("[Job Posting Form] Action Success:", result.jobPosting);
 
         toast({
             title: `Job Posting ${isEditMode ? 'Updated' : 'Created'}`,
-            description: `${result.title || data.title} has been successfully ${isEditMode ? 'updated' : 'created'}.`,
+            description: `${result.jobPosting?.title || data.title} has been successfully ${isEditMode ? 'updated' : 'created'}.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
         onSuccess(); // Trigger callback (close dialog, refetch data)
 
     } catch (error: any) {
-        console.error("[Job Posting Form] Submission error:", error);
-        toast({
-            title: `Error ${isEditMode ? 'Updating' : 'Creating'} Job Posting`,
-            description: error.message || "An unexpected error occurred.",
-            variant: "destructive",
-        });
-        form.setError("root.serverError", { message: error.message || "An unexpected server error occurred." });
+        console.error("[Job Posting Form] Submission error catch block:", error);
+        // Avoid double-toasting if a specific error was already set
+        if (!form.formState.errors.root?.serverError && !Object.keys(form.formState.errors).length) {
+             toast({
+                title: `Error ${isEditMode ? 'Updating' : 'Creating'} Job Posting`,
+                description: error.message || "An unexpected error occurred.",
+                variant: "destructive",
+            });
+            form.setError("root.serverError", { message: error.message || "An unexpected error occurred." });
+        }
     } finally {
         setIsLoading(false);
+        console.log("[Job Posting Form] Submission finished.");
     }
   };
 
   return (
     <Form {...form}>
+      {/* Ensure form tag has onSubmit */}
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
          {form.formState.errors.root?.serverError && (
-          <FormMessage className="text-destructive text-center">
+          <FormMessage className="text-destructive text-center bg-destructive/10 p-3 rounded-md">
             {form.formState.errors.root.serverError.message}
           </FormMessage>
         )}
@@ -283,7 +294,8 @@ export function JobPostingForm({ jobPosting, onSuccess, tenantDomain }: JobPosti
                 Cancel
               </Button>
           </DialogClose>
-          <Button type="submit" disabled={isLoading || !form.formState.isDirty}> {/* Disable if not dirty */}
+          {/* Ensure button type is submit */}
+          <Button type="submit" disabled={isLoading || !form.formState.isDirty}>
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <PlusCircle className="mr-2 h-4 w-4" />)
