@@ -6,7 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton for load
 
 // Dynamically import the client component
 const LeavePageClient = dynamic(() => import('@/modules/leave/components/leave-page-client'), {
-  ssr: false, // Disable SSR for this client-heavy component initially
+  // ssr: false, // REMOVED: ssr: false is not allowed in Server Components
   loading: () => (
     // Basic skeleton loader for the entire leave page content area
     <div className="flex flex-col gap-6">
@@ -44,11 +44,9 @@ export default async function TenantLeavePage({ params }: TenantLeavePageProps) 
     redirect(loginUrl);
   }
 
-  // Pass tenant domain, user ID, and admin status to the client component
-  // The component will now be dynamically loaded
+  // Render the dynamically imported client component
+  // It will handle fetching its data client-side
   return (
-    <LeavePageClient
-      // Pass props as before
-    />
+    <LeavePageClient />
   );
 }
