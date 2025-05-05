@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from 'react';
@@ -25,7 +24,7 @@ interface EmailSettingsFormProps {
   initialSettings?: Omit<EmailSettings, 'smtpPassword' | 'tenantId'> | null;
   onSuccess: () => void;
   // Prop to *trigger* the test connection check in the parent
-  onTestConnectionTrigger: () => void;
+  onTestConnectionTrigger: () => Promise<boolean>; // Expect a promise resolving to boolean
   connectionStatus: ConnectionStatus;
 }
 
@@ -71,42 +70,70 @@ export function EmailSettingsForm({ initialSettings, onSuccess, onTestConnection
 
    const onSubmit = async (data: EmailSettingsFormData) => {
     setIsLoadingSave(true);
+    form.clearErrors(); // Clear previous errors
     console.log("[Settings Form] Submitting settings via action (password masked):", JSON.stringify({ ...data, smtpPassword: '***' }));
 
     try {
+        // First, optionally test the connection with the *provided* data if password was entered
+        if (data.smtpPassword && data.smtpPassword !== '******') {
+            console.log("[Settings Form] Password provided, testing connection before saving...");
+             // Call the action directly with the form data for testing
+             const testResult = await testSmtpConnectionAction(data);
+             if (!testResult.success) {
+                  console.error("[Settings Form] Pre-save connection test failed:", testResult.message);
+                  toast({
+                      title: "Connection Test Failed",
+                      description: testResult.message,
+                      variant: "destructive",
+                      duration: 8000,
+                  });
+                   form.setError("root.serverError", { message: `Connection failed: ${testResult.message}` });
+                   setIsLoadingSave(false);
+                  return; // Stop submission if test fails
+             }
+              console.log("[Settings Form] Pre-save connection test successful.");
+        }
+
+
+        // Proceed with saving
         const result = await updateEmailSettingsAction(data);
 
         if (!result.success) {
             console.error("[Settings Form] Action Save Error:", result.errors);
+             let errorMessage = "Failed to save settings.";
+             let errorSet = false;
             if (result.errors) {
+                errorMessage = result.errors[0]?.message || errorMessage;
                 result.errors.forEach((err: any) => {
                     const path = err.path?.[0] as keyof EmailSettingsFormData | undefined;
-                    if (path) {
+                    if (path && path !== 'root') {
                         form.setError(path, { message: err.message });
-                    } else {
-                         form.setError("root.serverError", { message: err.message || "An unknown validation error occurred." });
+                         errorSet = true;
                     }
                 });
-                 toast({ title: "Validation Error", description: "Please check the form fields.", variant: "destructive" });
-            } else {
-                 form.setError("root.serverError", { message: "Failed to save settings due to a server error." });
-                 toast({ title: "Error Saving Settings", description: "An unexpected server error occurred.", variant: "destructive" });
             }
-             throw new Error("Failed to save settings.");
+             // If no specific field error was set, set a root error
+             if (!errorSet) {
+                 form.setError("root.serverError", { message: errorMessage });
+             }
+             toast({ title: "Error Saving Settings", description: errorMessage, variant: "destructive" });
+             // No need to throw here, just let the function complete
+        } else {
+             console.log("[Settings Form] Action Save Success (response masked):", result.settings ? JSON.stringify({...result.settings, smtpPassword: '***'}) : '{}');
+             toast({ title: "Settings Saved", description: "Email configuration updated.", className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100" });
+
+             // Reset form with the returned safe settings (no password)
+             form.reset({
+                ...result.settings,
+                smtpPassword: '', // Clear password field after successful save
+             });
+             onSuccess(); // Trigger parent callback (includes background check)
         }
 
-         console.log("[Settings Form] Action Save Success (response masked):", result.settings ? JSON.stringify({...result.settings, smtpPassword: '***'}) : '{}');
-         toast({ title: "Settings Saved", description: "Email configuration updated.", className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100" });
-
-         form.reset({
-            ...result.settings,
-            smtpPassword: '',
-         });
-         onSuccess();
-
-    } catch (error: any) {
+    } catch (error: any) { // Catch errors from test connection or unexpected issues
+        console.error("[Settings Form] Submission error (catch block):", error);
+        // Ensure an error message is displayed if not already set
         if (!form.formState.errors.root?.serverError && !Object.keys(form.formState.errors).length) {
-             console.error("[Settings Form] Submission error:", error);
              toast({ title: "Error Saving Settings", description: error.message || "An unexpected error occurred.", variant: "destructive" });
              form.setError("root.serverError", { message: error.message || "An unexpected error occurred." });
         }
@@ -115,19 +142,23 @@ export function EmailSettingsForm({ initialSettings, onSuccess, onTestConnection
     }
   };
 
-  // This function now just calls the prop passed from the parent
-  const handleTestConnectionClick = () => {
-      console.log("[EmailSettingsForm] Triggering test connection via prop 'onTestConnectionTrigger'. Type:", typeof onTestConnectionTrigger);
-      if (typeof onTestConnectionTrigger === 'function') {
-          onTestConnectionTrigger(); // Call the function passed from parent
-      } else {
-          console.error("[EmailSettingsForm] onTestConnectionTrigger is not a function!");
-          toast({
-              title: "Internal Error",
-              description: "Could not initiate connection test.",
+  // Function to handle the "Test Connection" button click
+  const handleTestConnectionClick = async () => {
+    console.log("[EmailSettingsForm] Triggering manual test connection via prop 'onTestConnectionTrigger'.");
+     form.clearErrors("root.testError"); // Clear previous test errors
+    try {
+        // Call the parent's function which executes the action
+        await onTestConnectionTrigger();
+         // Success/failure toast is handled by the parent based on action result
+    } catch (error: any) {
+         console.error("[EmailSettingsForm] Error during manual test trigger:", error);
+         toast({
+              title: "Test Error",
+              description: error.message || "Failed to initiate connection test.",
               variant: "destructive",
-          });
-      }
+         });
+          form.setError("root.testError", { message: error.message || "Failed to initiate test." });
+    }
   };
 
     // Determine if test button should be disabled (when saving or already checking)
@@ -163,9 +194,10 @@ export function EmailSettingsForm({ initialSettings, onSuccess, onTestConnection
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-         {form.formState.errors.root?.serverError && (
+         {/* Display root errors (save or test) */}
+         {(form.formState.errors.root?.serverError || form.formState.errors.root?.testError) && (
           <FormMessage className="text-destructive text-center bg-destructive/10 p-3 rounded-md">
-            {form.formState.errors.root.serverError.message}
+            {form.formState.errors.root?.serverError?.message || form.formState.errors.root?.testError?.message}
           </FormMessage>
         )}
 
@@ -202,8 +234,8 @@ export function EmailSettingsForm({ initialSettings, onSuccess, onTestConnection
 
         <FormField control={form.control} name="smtpSecure" render={({ field }) => (
             <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
-                <div className="space-y-0.5"><FormLabel>Use Encryption (Implicit TLS/SSL)</FormLabel>
-                <FormDescription>Set true for port 465. Set false for port 587 (STARTTLS). Check provider docs.</FormDescription></div>
+                <div className="space-y-0.5"><FormLabel>Use Implicit Encryption (SSL/TLS)</FormLabel>
+                <FormDescription>Typically true for port 465. Port 587 usually uses STARTTLS (set this to false).</FormDescription></div>
                 <FormControl><Switch checked={field.value} onCheckedChange={field.onChange}/></FormControl>
                  <FormMessage />
             </FormItem>
