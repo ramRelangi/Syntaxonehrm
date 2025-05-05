@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import nodemailer from 'nodemailer';
-import { cookies } from 'next/headers'; // Import cookies
+import { cookies, headers } from 'next/headers';
 import {
     registrationSchema,
     type RegistrationFormData,
@@ -15,15 +15,15 @@ import {
     tenantForgotPasswordSchema,
     rootForgotPasswordSchema,
     type RootForgotPasswordFormInputs,
-    type SessionData, // Import SessionData type
+    type SessionData,
 } from '@/modules/auth/types';
 import { addTenant, getUserByEmail, addUser, getTenantByDomain, getUserById as dbGetUserById } from '@/modules/auth/lib/db';
-import pool, { testDbConnection } from '@/lib/db'; // Import pool and test function
+import pool, { testDbConnection } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import { initializeDatabase } from '@/lib/init-db';
-import { MOCK_SESSION_COOKIE } from '@/lib/auth'; // Keep constant import
+import { MOCK_SESSION_COOKIE } from '@/lib/auth';
 
-const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
+const SALT_ROUNDS = 10;
 
 // --- Internal Email Sending Configuration (for Registration/Admin) ---
 const INTERNAL_SMTP_HOST = process.env.INTERNAL_SMTP_HOST;
@@ -36,7 +36,7 @@ const INTERNAL_FROM_NAME = process.env.INTERNAL_FROM_NAME || 'SyntaxHive Hrm Reg
 
 function getInternalSmtpConfig(): { host: string; port: number; user: string; pass: string; secure: boolean; fromEmail: string; fromName: string } | null {
     if (!INTERNAL_SMTP_HOST || !INTERNAL_SMTP_PORT_STR || !INTERNAL_SMTP_USER || !INTERNAL_SMTP_PASSWORD) {
-        console.warn('[Internal Email Config] Missing required internal SMTP environment variables (HOST, PORT, USER, PASS).');
+        console.warn('[Internal Email Config] Missing required internal SMTP environment variables (HOST, PORT, USER, PASS). Registration/reset emails may not send.');
         return null;
     }
     const port = parseInt(INTERNAL_SMTP_PORT_STR, 10);
@@ -44,9 +44,10 @@ function getInternalSmtpConfig(): { host: string; port: number; user: string; pa
          console.warn('[Internal Email Config] Invalid INTERNAL_SMTP_PORT.');
          return null;
     }
-    const secure = INTERNAL_SMTP_SECURE_STR !== undefined
-        ? INTERNAL_SMTP_SECURE_STR === 'true'
-        : (port === 465);
+    let secure = port === 465; // Default to true for 465
+    if (INTERNAL_SMTP_SECURE_STR !== undefined) {
+        secure = INTERNAL_SMTP_SECURE_STR === 'true';
+    }
 
     return {
         host: INTERNAL_SMTP_HOST,
@@ -70,11 +71,8 @@ function createInternalTransporter(): nodemailer.Transporter | null {
         host: config.host, port: config.port, auth: { user: config.user, pass: config.pass },
         connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 15000,
         secure: config.secure,
+        requireTLS: config.port === 587 && !config.secure,
     };
-    if (config.port === 587 && !config.secure) {
-        transportOptions.requireTLS = true;
-    }
-    console.log(`[Internal Email] Creating transporter with options: host=${transportOptions.host}, port=${transportOptions.port}, user=${transportOptions.auth.user ? '***' : 'N/A'}, secure=${transportOptions.secure}, requireTLS=${transportOptions.requireTLS}`);
     return nodemailer.createTransport(transportOptions);
 }
 
@@ -89,9 +87,10 @@ function constructLoginUrl(tenantDomain: string): string {
              port = `:${url.port}`;
          }
      } catch (e) {
-         console.warn("Could not parse NEXT_PUBLIC_BASE_URL to extract port, using default behavior.");
-         if (process.env.NODE_ENV !== 'production') {
-              port = ':9002'; // Default dev port
+         console.warn("[constructLoginUrl] Could not parse NEXT_PUBLIC_BASE_URL to extract port, using default behavior.");
+         const defaultPort = process.env.PORT || '9002';
+         if (process.env.NODE_ENV !== 'production' && defaultPort !== '80' && defaultPort !== '443') {
+              port = `:${defaultPort}`;
          }
      }
     const loginUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/login`;
@@ -103,7 +102,7 @@ async function sendWelcomeEmail(tenantName: string, adminName: string, adminEmai
     console.log(`[sendWelcomeEmail] Attempting to send welcome email to ${adminEmail} for ${tenantDomain}`);
     const transporter = createInternalTransporter();
     if (!transporter) {
-        console.error('[sendWelcomeEmail] Failed to create internal email transporter. Check INTERNAL SMTP config.');
+        console.error('[sendWelcomeEmail] Failed to create internal email transporter. Check INTERNAL SMTP config in .env file.');
         return false;
     }
     const loginUrl = constructLoginUrl(tenantDomain);
@@ -127,15 +126,8 @@ async function sendWelcomeEmail(tenantName: string, adminName: string, adminEmai
 }
 
 // --- Registration Action ---
-export async function registerTenantAction(formData: RegistrationFormData): Promise<{ success: boolean; tenant?: Tenant; user?: User; loginUrl?: string; errors?: z.ZodIssue[] | { code?: string; path: (string | number)[]; message: string }[] }> {
+export async function registerTenantAction(formData: RegistrationFormData): Promise<{ success: boolean; tenant?: Tenant; user?: Omit<User, 'passwordHash'>; loginUrl?: string; errors?: z.ZodIssue[] | { path: (string | number)[]; message: string }[] }> {
     console.log("[registerTenantAction] Starting registration process...");
-
-    const dbCheck = await testDbConnection();
-    if (!dbCheck.success) {
-        console.error("[registerTenantAction] Database connection check failed:", dbCheck.message);
-        return { success: false, errors: [{ path: ['root'], message: `Database connection issue: ${dbCheck.message}` }] };
-    }
-    console.log("[registerTenantAction] Database connection successful.");
 
     const validation = registrationSchema.safeParse(formData);
     if (!validation.success) {
@@ -145,22 +137,21 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     const { companyName, companyDomain, adminName, adminEmail, adminPassword } = validation.data;
     const lowerCaseDomain = companyDomain.toLowerCase();
 
-    try {
-        console.log("[registerTenantAction] Checking if 'tenants' table exists...");
-        await pool.query('SELECT 1 FROM tenants LIMIT 1');
-        console.log("[registerTenantAction] 'tenants' table exists. Schema seems initialized.");
-    } catch (schemaError: any) {
-        if (schemaError.code === '42P01') {
-            console.warn("[registerTenantAction] 'tenants' table not found. Schema initialization failed or not run.");
-            return { success: false, errors: [{ path: ['root'], message: 'Database schema is not initialized. Please run `npm run db:init` first.' }] };
-        } else {
-            console.error("[registerTenantAction] Unexpected error checking database schema:", schemaError);
-            return { success: false, errors: [{ path: ['root'], message: `Database Error: Failed to verify schema. Details: ${schemaError.message}` }] };
-        }
-    }
-
     let newTenant: Tenant | null = null;
     try {
+        console.log("[registerTenantAction] Checking database connection...");
+        const dbCheck = await testDbConnection();
+        if (!dbCheck.success) {
+            console.error("[registerTenantAction] Database connection check failed:", dbCheck.message);
+            throw new Error(`Database connection issue: ${dbCheck.message}`);
+        }
+        console.log("[registerTenantAction] Database connection successful.");
+
+        console.log("[registerTenantAction] Ensuring database schema is initialized...");
+        await initializeDatabase();
+        console.log("[registerTenantAction] Database schema check/initialization complete.");
+
+
         console.log(`[registerTenantAction] Checking if domain '${lowerCaseDomain}' exists...`);
         const existingTenant = await getTenantByDomain(lowerCaseDomain);
         if (existingTenant) {
@@ -194,12 +185,23 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.log(`[registerTenantAction] Login URL constructed: ${loginUrl}`);
 
         console.log(`[registerTenantAction] Registration process completed successfully for tenant ${newTenant.id}.`);
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash: _, ...safeUser } = newUser;
         return { success: true, tenant: newTenant, user: safeUser, loginUrl: loginUrl };
 
     } catch (error: any) {
         console.error("[registerTenantAction] Error during registration transaction:", error);
+
+        if (newTenant?.id && !error.message.includes('User email already exists')) {
+            console.warn(`[registerTenantAction] Rolling back tenant creation (ID: ${newTenant.id}) due to subsequent error.`);
+            try {
+                const client = await pool.connect();
+                await client.query('DELETE FROM tenants WHERE id = $1', [newTenant.id]);
+                client.release();
+                console.log(`[registerTenantAction] Partially created tenant ${newTenant.id} deleted.`);
+            } catch (cleanupError) {
+                console.error(`[registerTenantAction] CRITICAL: Failed to cleanup partially created tenant ${newTenant.id}:`, cleanupError);
+            }
+        }
 
         let userMessage = 'Failed to register tenant due to a server error.';
         let errorPath: (string | number)[] = ['root'];
@@ -208,10 +210,12 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
             userMessage = error.message;
             if (error.message.includes('domain')) errorPath = ['companyDomain'];
             else if (error.message.includes('email')) errorPath = ['adminEmail'];
-        } else if (error.code === '42P01') {
-            userMessage = `Database relation "${error.table || 'required'}" does not exist. Schema initialization might be incomplete. Run \`npm run db:init\`.`;
+        } else if (error.message?.includes('Database schema not initialized') || error.code === '42P01') {
+             userMessage = 'Database Error: Required table not found. Please run `npm run db:init` to initialize the database schema.';
+        } else if (error.message?.includes('Database connection issue')) {
+             userMessage = error.message;
         } else if (error.message) {
-            userMessage = error.message;
+            userMessage = `Registration failed: ${error.message}`;
         }
 
         return { success: false, errors: [{ path: errorPath, message: userMessage }] };
@@ -281,14 +285,12 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             path: '/',
-            // Set domain to allow access across subdomains of the root domain
             domain: `.${rootDomain}`, // Prepend dot for subdomain compatibility
             sameSite: 'lax',
             maxAge: 60 * 60 * 24 * 7, // 1 week
         });
         console.log(`[loginAction] Mock session cookie set for domain: .${rootDomain}`);
 
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash: _, ...safeUser } = user;
         return { success: true, user: safeUser };
 
@@ -303,35 +305,29 @@ export async function logoutAction() {
     console.log("[logoutAction] Logging out user...");
 
     let tenantDomain: string | null = null;
-    let redirectUrl = '/login'; // Default to root login page
-    const cookieStore = cookies(); // Get cookies instance
+    const cookieStore = cookies();
     const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
 
     try {
-        // Retrieve domain from session cookie *before* deleting it
         const sessionCookie = cookieStore.get(MOCK_SESSION_COOKIE);
         if (sessionCookie?.value) {
             const sessionData: SessionData = JSON.parse(sessionCookie.value);
             tenantDomain = sessionData.tenantDomain;
         }
 
-        if (tenantDomain) {
-            redirectUrl = constructLoginUrl(tenantDomain);
-        }
-
-        // Clear the session cookie
         cookieStore.delete({
              name: MOCK_SESSION_COOKIE,
              path: '/',
-             domain: `.${rootDomain}` // Use the same domain scope used for setting
+             domain: `.${rootDomain}`
         });
         console.log(`[logoutAction] Mock session cookie cleared for domain: .${rootDomain}`);
 
     } catch (error) {
-        console.error("[logoutAction] Error reading cookie or constructing redirect URL:", error);
-        // Attempt to clear cookie even if retrieval failed
+        console.error("[logoutAction] Error reading cookie or clearing cookie:", error);
         try { cookieStore.delete({name: MOCK_SESSION_COOKIE, path: '/', domain: `.${rootDomain}`}); } catch {}
     }
+
+    const redirectUrl = tenantDomain ? constructLoginUrl(tenantDomain) : '/login';
 
     console.log(`[logoutAction] Redirecting to: ${redirectUrl}`);
     redirect(redirectUrl);
@@ -380,7 +376,7 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
         const tenant = await getTenantByDomain(tenantDomain);
         if (!tenant) {
              console.warn(`[forgotPasswordLogic] Tenant not found for domain: ${tenantDomain}`);
-             return { success: true, message: userMessage };
+             return { success: true, message: userMessage }; // Return success to prevent user enumeration
         }
         tenantId = tenant.id;
         console.log(`[forgotPasswordLogic] Found tenant: ${tenantId}`);
@@ -388,12 +384,14 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
         const user = await getUserByEmail(email, tenantId);
         if (!user) {
             console.warn(`[forgotPasswordLogic] User not found for email: ${email} in tenant: ${tenantId}`);
-            return { success: true, message: userMessage };
+            return { success: true, message: userMessage }; // Return success to prevent user enumeration
         }
          console.log(`[forgotPasswordLogic] Found user: ${user.id}`);
 
-        const resetToken = `fake-reset-token-${Date.now()}`;
-        console.log(`[forgotPasswordLogic] Generated reset token for user ${user.id}`);
+        // --- TODO: Implement Secure Token Generation & Storage ---
+        const resetToken = `fake-reset-token-${Date.now()}`; // Replace with secure implementation
+        console.log(`[forgotPasswordLogic] Generated reset token (MOCK) for user ${user.id}`);
+        // --- End TODO ---
 
         const transporter = createInternalTransporter();
         if (!transporter) {
@@ -401,7 +399,7 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
             return { success: false, message: 'Failed to send reset email due to server configuration.' };
         }
         const resetUrlBase = constructLoginUrl(tenantDomain).replace('/login', '/reset-password');
-        const resetUrl = `${resetUrlBase}?token=${resetToken}`;
+        const resetUrl = `${resetUrlBase}?token=${resetToken}`; // Use the actual (non-hashed) token in the URL
         console.log(`[forgotPasswordLogic] Reset URL: ${resetUrl}`);
 
         const config = getInternalSmtpConfig();
@@ -409,8 +407,8 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
             from: `"${config?.fromName || INTERNAL_FROM_NAME}" <${config?.fromEmail || INTERNAL_FROM_EMAIL}>`,
             to: user.email,
             subject: `Password Reset Request for SyntaxHive Hrm (${tenant.name})`,
-            text: `Hello ${user.name},\n\nYou requested a password reset for your SyntaxHive Hrm account associated with ${tenant.name}.\n\nClick the link below to reset your password:\n${resetUrl}\n\nIf you did not request this, please ignore this email.\n\nBest regards,\nThe SyntaxHive Hrm Team`,
-            html: `<p>Hello ${user.name},</p><p>You requested a password reset for your <strong>SyntaxHive Hrm</strong> account associated with <strong>${tenant.name}</strong>.</p><p>Click the link below to reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>If you did not request this, please ignore this email.</p><p>Best regards,<br>The SyntaxHive Hrm Team</p>`,
+            text: `Hello ${user.name},\n\nYou requested a password reset for your SyntaxHive Hrm account associated with ${tenant.name}.\n\nClick the link below to reset your password:\n${resetUrl}\n\nThis link will expire in 1 hour.\n\nIf you did not request this, please ignore this email.\n\nBest regards,\nThe SyntaxHive Hrm Team`,
+            html: `<p>Hello ${user.name},</p><p>You requested a password reset for your <strong>SyntaxHive Hrm</strong> account associated with <strong>${tenant.name}</strong>.</p><p>Click the link below to reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link will expire in 1 hour.</p><p>If you did not request this, please ignore this email.</p><p>Best regards,<br>The SyntaxHive Hrm Team</p>`,
         };
         await transporter.sendMail(mailOptions);
         console.log(`[forgotPasswordLogic] Password reset email sent to ${user.email}`);
@@ -438,7 +436,6 @@ export async function getSessionData(): Promise<SessionData | null> {
                 sessionData.tenantDomain &&
                 sessionData.userRole
             ) {
-                // console.log("[getSessionData] Valid session data found:", sessionData);
                 return sessionData;
             }
             console.warn("[getSessionData] Invalid session data found in cookie.");
@@ -453,8 +450,6 @@ export async function getSessionData(): Promise<SessionData | null> {
 
 export async function getTenantIdFromSession(): Promise<string | null> {
     const session = await getSessionData();
-    if (!session) console.log("[getTenantIdFromSession] No session found.");
-    // else console.log("[getTenantIdFromSession] Found session, returning tenantId:", session.tenantId);
     return session?.tenantId ?? null;
 }
 
@@ -479,8 +474,8 @@ export async function getUserFromSession(): Promise<Omit<User, 'passwordHash'> |
         return null;
     }
     try {
-        const user = await dbGetUserById(session.userId); // Only userId needed now
-        if (user && user.tenantId === session.tenantId) { // Verify tenant match
+        const user = await dbGetUserById(session.userId);
+        if (user && user.tenantId === session.tenantId) {
             const { passwordHash, ...safeUser } = user;
             return safeUser;
         }
