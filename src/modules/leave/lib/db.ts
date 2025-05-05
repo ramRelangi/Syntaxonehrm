@@ -2,6 +2,7 @@
 import pool from '@/lib/db';
 import type { LeaveRequest, LeaveType, LeaveRequestStatus, LeaveBalance } from '@/modules/leave/types';
 import { differenceInDays } from 'date-fns';
+import { formatISO, isValid, parseISO } from 'date-fns'; // Import date-fns functions
 
 // Basic UUID validation regex
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -141,7 +142,7 @@ export async function updateLeaveType(id: string, tenantId: string, updates: Par
     values.push(tenantId); // tenantId for WHERE clause
     const query = `
         UPDATE leave_types
-        SET ${setClauses.join(', ')}
+        SET ${setClauses.join(', ')}, updated_at = NOW()
         WHERE id = $${valueIndex} AND tenant_id = $${valueIndex + 1}
         RETURNING *;
     `;
@@ -409,7 +410,7 @@ export async function updateLeaveRequestStatus(
         // 2. Update the request status (include tenantId in WHERE)
         const updateQuery = `
             UPDATE leave_requests
-            SET status = $1, comments = $2, approver_id = $3, approval_date = NOW()
+            SET status = $1, comments = $2, approver_id = $3, approval_date = NOW(), updated_at = NOW()
             WHERE id = $4 AND tenant_id = $5 AND status = 'Pending' -- Ensure it's still pending and matches tenant
             RETURNING *;
         `;
@@ -481,7 +482,7 @@ export async function cancelLeaveRequest(id: string, tenantId: string, userId: s
          // Update status to Cancelled (with tenant check)
          const updateQuery = `
             UPDATE leave_requests
-            SET status = 'Cancelled', comments = $1, approval_date = NOW() -- Optional: Log cancellation time
+            SET status = 'Cancelled', comments = $1, approval_date = NOW(), updated_at = NOW()
             WHERE id = $2 AND tenant_id = $3 AND status = 'Pending' -- Ensure it's still pending and matches tenant
             RETURNING *;
          `;
@@ -552,6 +553,13 @@ async function initializeEmployeeBalances(tenantId: string, employeeId: string, 
     }
     const conn = client || await pool.connect(); // Use provided client or get a new one
     try {
+        // Check if employee exists for the tenant first
+        const empCheck = await conn.query('SELECT 1 FROM employees WHERE id = $1 AND tenant_id = $2', [employeeId, tenantId]);
+        if (empCheck.rowCount === 0) {
+            console.warn(`[DB initializeEmployeeBalances] Employee ${employeeId} not found for tenant ${tenantId}. Skipping balance initialization.`);
+            return; // Skip if employee doesn't exist
+        }
+
         const leaveTypes = await getAllLeaveTypes(tenantId); // Fetch current leave types for the tenant
         const query = `
             INSERT INTO leave_balances (tenant_id, employee_id, leave_type_id, balance, last_updated)
