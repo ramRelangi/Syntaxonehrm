@@ -1,14 +1,15 @@
 
+import dotenv from 'dotenv';
 import { Pool } from 'pg';
 
-
-// Load environment variables from .env file - REMOVED explicit dotenv.config()
-// dotenv.config();
+// Load environment variables from .env file
+dotenv.config();
 console.log('db.ts is being loaded');
-console.log('DB_HOST:', process.env.DB_HOST ? '******' : 'Not Set'); // Avoid logging sensitive info
+console.log('DB_HOST:', process.env.DB_HOST);
 console.log('DB_PORT:', process.env.DB_PORT);
 console.log('DB_USER:', process.env.DB_USER);
-console.log('DB_PASS:', process.env.DB_PASS ? '******' : 'Not Set'); // Avoid logging sensitive info
+// Avoid logging sensitive info
+console.log('DB_PASS:', process.env.DB_PASS ? '******' : 'Not Set');
 console.log('DB_NAME:', process.env.DB_NAME);
 
 // Ensure required environment variables are loaded
@@ -18,15 +19,19 @@ const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]
 if (missingEnvVars.length > 0) {
   const errorMessage = `Missing required database environment variables: ${missingEnvVars.join(', ')}. Please ensure they are set in your .env file and the server has been restarted.`;
   console.error(`FATAL ERROR: ${errorMessage}`);
-  // Throwing here might prevent the app from starting, ensure variables are set
+  // Throwing here prevents the app from starting if config is missing
   throw new Error(errorMessage);
 }
 
 let pool: Pool;
 
 try {
+  // If DB_HOST is 'localhost', explicitly use '127.0.0.1' to avoid potential IPv6 issues
+  const dbHost = process.env.DB_HOST === 'localhost' ? '127.0.0.1' : process.env.DB_HOST;
+  console.log(`Attempting to connect with host: ${dbHost}`); // Log the host being used
+
   pool = new Pool({
-    host: process.env.DB_HOST,
+    host: dbHost,
     port: parseInt(process.env.DB_PORT || '5432', 10), // Default port is 5432
     user: process.env.DB_USER,
     password: process.env.DB_PASS,
@@ -44,11 +49,11 @@ try {
   });
 
   console.log(
-    `Database pool created for ${process.env.DB_USER}@${process.env.DB_HOST}:${process.env.DB_PORT || '5432'}/${process.env.DB_NAME}`
+    `Database pool created for ${process.env.DB_USER}@${dbHost}:${process.env.DB_PORT || '5432'}/${process.env.DB_NAME}`
   );
 } catch (error) {
   console.error('FATAL ERROR: Failed to create database pool.', error);
-  // Rethrow or handle appropriately
+  // Re-throw to ensure the application doesn't start in a broken state
   throw new Error('Failed to create database pool.');
 }
 
@@ -70,21 +75,23 @@ export async function testDbConnection() {
 
     // Provide more specific error messages based on error codes
     let friendlyMessage = 'Database connection failed.';
+    const dbHost = process.env.DB_HOST === 'localhost' ? '127.0.0.1' : process.env.DB_HOST; // Use the same host logic
+    const dbPort = process.env.DB_PORT || '5432';
+
     if (err.code === 'ECONNREFUSED') {
-      friendlyMessage = `Connection refused at ${err.address}:${err.port}. Ensure the database server is running and accessible.`;
+      friendlyMessage = `Connection refused at ${dbHost}:${dbPort}. Please ensure the PostgreSQL database server is running and accessible from your application. Check firewall settings and database logs.`;
     } else if (err.code === 'ENOTFOUND') {
-      friendlyMessage = `Database host not found (${process.env.DB_HOST}). Check DB_HOST and DNS.`;
+      friendlyMessage = `Database host not found (${dbHost}). Check DB_HOST in your .env file and ensure DNS is resolving correctly.`;
     } else if (err.code === 'ETIMEDOUT') {
-      friendlyMessage = 'Database connection timed out. Check network and server status.';
+      friendlyMessage = 'Database connection timed out. Check network connectivity, firewall rules, and if the database server is responding.';
     } else if (err.code === '28P01') {
-      friendlyMessage = 'Database authentication failed. Check DB_USER and DB_PASS.';
+      friendlyMessage = 'Database authentication failed. Please verify DB_USER and DB_PASS in your .env file.';
     } else if (err.code === '3D000') {
-      friendlyMessage = `Database "${process.env.DB_NAME}" does not exist. Please create it before running the application.`;
+      friendlyMessage = `Database "${process.env.DB_NAME}" does not exist. Please create it or ensure DB_NAME in your .env file is correct.`;
     } else {
         // Include the original error message for other DB errors
         friendlyMessage = `Database error: ${err.message} (Code: ${err.code || 'N/A'})`;
     }
-
 
     console.error(`[DB Test Error Details] Code: ${err.code}, Message: ${err.message}`);
     return { success: false, message: friendlyMessage, error: err };

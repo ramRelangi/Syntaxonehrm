@@ -13,12 +13,21 @@ This is SyntaxHive Hrm.
     Copy the `.env.example` file (if it exists) to `.env`. **Crucially, you must first manually create a PostgreSQL database.** Then, fill in the connection details for your **existing** database in the `.env` file:
     ```env
     # PostgreSQL Database Configuration (Ensure this database exists!)
-    DB_HOST=your_db_host
+    DB_HOST=your_db_host # Use '127.0.0.1' instead of 'localhost' if you encounter ECONNREFUSED errors
     DB_PORT=5432
     DB_USER=your_db_user
     DB_PASSWORD=your_db_password
     DB_NAME=your_db_name
     # Optional: DB_SSL=true (if required by your DB provider)
+
+    # Internal SMTP for Registration/Password Reset Emails (Optional, but recommended)
+    INTERNAL_SMTP_HOST=your_internal_smtp_host
+    INTERNAL_SMTP_PORT=587 # or 465, 25 etc.
+    INTERNAL_SMTP_USER=your_internal_smtp_username
+    INTERNAL_SMTP_PASSWORD=your_internal_smtp_password
+    INTERNAL_SMTP_SECURE=false # Typically false for 587/25, true for 465. Adjust as needed.
+    INTERNAL_FROM_EMAIL=noreply@yourdomain.com
+    INTERNAL_FROM_NAME="SyntaxHive Hrm System"
 
     # Google GenAI API Key (Optional - for AI features)
     GOOGLE_GENAI_API_KEY=your_google_ai_api_key
@@ -35,6 +44,7 @@ This is SyntaxHive Hrm.
     **Important:**
      - The database specified by `DB_NAME` must exist on your PostgreSQL server before proceeding. This application **does not** automatically create the root database itself, only tenant-specific tables upon registration.
      - For production, set `NEXT_PUBLIC_ROOT_DOMAIN` to your actual domain (e.g., `syntaxhivehrm.app`). For local development, `localhost` is usually sufficient.
+     - **Troubleshooting `ECONNREFUSED` errors:** If you see database connection errors like `ECONNREFUSED ::1:5432` or similar, ensure your PostgreSQL server is running and listening for connections. Try setting `DB_HOST=127.0.0.1` in your `.env` file instead of `localhost`.
 
 3.  **Initialize Global Database Schema (Create Core Tables):**
     Make sure your PostgreSQL server is running and the database specified in `.env` exists. Then, run the schema initialization script:
@@ -53,7 +63,7 @@ This is SyntaxHive Hrm.
     Navigate to `http://localhost:9002/register` to create your company account and the initial admin user. This step requires the database tables to have been created by `npm run db:init`.
 
 6.  **Login:**
-    After registration, you should receive a welcome email (if email sending is configured) with your unique login URL (e.g., `http://your-company.localhost:9002`). Use this URL and the credentials you created during registration to log in.
+    After registration, you should receive a welcome email (if internal SMTP is configured) with your unique login URL (e.g., `http://your-company.localhost:9002/login`). Use this URL and the credentials you created during registration to log in.
 
 ## Development Notes
 
@@ -66,3 +76,4 @@ This is SyntaxHive Hrm.
 -   Multi-tenancy is implemented using subdomains (e.g., `tenant1.syntaxhivehrm.app`, `tenant2.syntaxhivehrm.app`). Middleware handles rewriting requests to the correct tenant context.
 -   Make sure to restart the development server (`npm run dev`) after changing environment variables in `.env`.
 -   The `npm run db:init` script is crucial for setting up the database tables. Run it after creating your database and configuring `.env`.
+
