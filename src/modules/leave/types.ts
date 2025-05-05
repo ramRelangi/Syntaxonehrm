@@ -66,3 +66,19 @@ export interface LeaveBalance {
     balance: number; // e.g., number of days or hours
     lastUpdated: string; // ISO string
 }
+
+
+// --- Holiday ---
+export const holidaySchema = z.object({
+  id: z.string().optional(), // Optional for creation
+  tenantId: z.string().uuid(), // Tenant association
+  name: z.string().min(3, "Holiday name must be at least 3 characters"),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format"),
+  description: z.string().optional(),
+  createdAt: z.string().datetime().optional(),
+  updatedAt: z.string().datetime().optional(),
+});
+
+export type Holiday = z.infer<typeof holidaySchema>;
+// FormData for adding/editing holidays
+export type HolidayFormData = Omit<Holiday, 'id' | 'tenantId' | 'createdAt' | 'updatedAt'>;

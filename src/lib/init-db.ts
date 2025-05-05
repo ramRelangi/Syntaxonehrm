@@ -10,6 +10,7 @@ SELECT 'uuid-ossp extension ensured.';
 
 -- Drop existing tables in reverse dependency order (carefully!)
 -- Note: CASCADE will drop dependent objects like constraints, indexes, views, etc.
+DROP TABLE IF EXISTS holidays CASCADE;
 DROP TABLE IF EXISTS email_configuration CASCADE;
 DROP TABLE IF EXISTS email_templates CASCADE;
 DROP TABLE IF EXISTS candidates CASCADE;
@@ -255,6 +256,20 @@ CREATE TABLE IF NOT EXISTS email_configuration (
 );
 SELECT 'email_configuration table created.';
 
+-- Holidays Table
+CREATE TABLE IF NOT EXISTS holidays (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    date DATE NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, date) -- Prevent duplicate holiday entries for the same date within a tenant
+);
+SELECT 'holidays table created.';
+CREATE INDEX IF NOT EXISTS idx_holidays_tenant_id_date ON holidays(tenant_id, date);
+
 
 -- Recreate Trigger function to update updated_at timestamp (universal)
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -298,6 +313,7 @@ SELECT apply_update_trigger_if_not_exists('job_postings');
 SELECT apply_update_trigger_if_not_exists('candidates');
 SELECT apply_update_trigger_if_not_exists('email_templates');
 SELECT apply_update_trigger_if_not_exists('email_configuration');
+SELECT apply_update_trigger_if_not_exists('holidays'); -- Apply to new holidays table
 
 SELECT 'All triggers checked/applied.';
 `;
@@ -307,10 +323,10 @@ export async function initializeDatabase() {
   try {
     console.log('Attempting to connect to database for schema initialization...');
     client = await pool.connect();
-    console.log('Connected to database. Executing schema recreation script...');
+    console.log('Connected to database. Executing schema creation script...');
     // Execute the entire script as a single query
     await client.query(schemaSQL);
-    console.log('Database schema recreation script executed successfully.');
+    console.log('Database schema creation script executed successfully.');
   } catch (err: any) {
     console.error('-----------------------------------------');
     console.error('Error during database schema initialization:', err.message);

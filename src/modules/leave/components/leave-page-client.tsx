@@ -5,14 +5,16 @@
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar, PlusCircle, ListChecks, Settings } from "lucide-react";
+import { Calendar, PlusCircle, ListChecks, Settings, LandPlot } from "lucide-react"; // Added LandPlot for Holidays
 import { LeaveRequestForm } from "@/modules/leave/components/leave-request-form";
 import { LeaveRequestList } from "@/modules/leave/components/leave-request-list";
 import { Badge } from "@/components/ui/badge";
 import { LeaveTypeManagement } from "@/modules/leave/components/leave-type-management";
+import { HolidayManagement } from "@/modules/leave/components/holiday-management"; // Import HolidayManagement
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { LeaveType, LeaveRequest, LeaveBalance } from "@/modules/leave/types";
+import type { LeaveType, LeaveRequest, LeaveBalance, Holiday } from "@/modules/leave/types"; // Added Holiday type
+import { getHolidaysAction } from '@/modules/leave/actions'; // Import holiday action
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
@@ -58,26 +60,30 @@ export default function LeavePageClient({ tenantDomain, userId, isAdmin }: Leave
   const [allRequests, setAllRequests] = React.useState<LeaveRequest[]>([]);
   const [myRequests, setMyRequests] = React.useState<LeaveRequest[]>([]);
   const [myBalances, setMyBalances] = React.useState<LeaveBalance[]>([]);
+  const [holidays, setHolidays] = React.useState<Holiday[]>([]); // State for holidays
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState('request'); // Manage active tab
 
   // Function to refetch all necessary data
   const refetchData = React.useCallback(async () => {
-      console.log("[Leave Page Client] Fetching leave data for user:", userId);
+      console.log("[Leave Page Client] Fetching leave and holiday data for user:", userId);
       setIsLoading(true); // Set loading true when starting data fetch
       setError(null);
       try {
-          const [typesData, allReqData, myReqData, balancesData] = await Promise.all([
+          // Fetch all data concurrently
+          const [typesData, allReqData, myReqData, balancesData, holidaysData] = await Promise.all([
               fetchData<LeaveType[]>('/api/leave/types'),
               isAdmin ? fetchData<LeaveRequest[]>('/api/leave/requests') : Promise.resolve([]), // Only fetch all if admin
               fetchData<LeaveRequest[]>(`/api/leave/requests?employeeId=${userId}`), // Use actual userId
               fetchData<LeaveBalance[]>(`/api/leave/balances/${userId}`), // Use actual userId
+              getHolidaysAction(), // Fetch holidays using server action
           ]);
           setLeaveTypes(typesData);
           setAllRequests(allReqData);
           setMyRequests(myReqData);
           setMyBalances(balancesData);
+          setHolidays(holidaysData);
       } catch (err: any) { // Catch specific error type
           console.error("[Leave Page Client] Error during refetchData:", err);
           if (err.message?.includes('Invalid identifier') || err.message?.includes('invalid input syntax for type uuid')) {
@@ -113,6 +119,10 @@ export default function LeavePageClient({ tenantDomain, userId, isAdmin }: Leave
     const handleLeaveTypeUpdated = () => {
      refetchData(); // Refetch all data
    };
+
+   const handleHolidayUpdated = () => {
+        refetchData(); // Refetch all data when holidays change
+   }
 
    // Derive leave type name map
    const leaveTypeNameMap = React.useMemo(() => {
@@ -159,9 +169,10 @@ export default function LeavePageClient({ tenantDomain, userId, isAdmin }: Leave
               </Card>
 
 
-              {/* Tabs for Request Form, Lists, and Type Management */}
+              {/* Tabs for Request Form, Lists, and Type/Holiday Management */}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="leave-tabs">
-                <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
+                {/* Adjusted grid columns based on admin status */}
+                <TabsList className={`grid w-full grid-cols-${isAdmin ? 5 : 2}`}>
                   <TabsTrigger value="request" className="flex items-center gap-1">
                        <PlusCircle className="h-4 w-4"/> Request Leave
                    </TabsTrigger>
@@ -176,6 +187,11 @@ export default function LeavePageClient({ tenantDomain, userId, isAdmin }: Leave
                   {isAdmin && (
                       <TabsTrigger value="manage-types" className="flex items-center gap-1">
                          <Settings className="h-4 w-4"/> Manage Types
+                      </TabsTrigger>
+                  )}
+                  {isAdmin && (
+                      <TabsTrigger value="manage-holidays" className="flex items-center gap-1">
+                         <LandPlot className="h-4 w-4"/> Manage Holidays
                       </TabsTrigger>
                   )}
                 </TabsList>
@@ -230,10 +246,19 @@ export default function LeavePageClient({ tenantDomain, userId, isAdmin }: Leave
                        />
                    </TabsContent>
                 )}
+
+                 {/* Manage Holidays Tab (Admin Only) */}
+                {isAdmin && (
+                   <TabsContent value="manage-holidays">
+                       <HolidayManagement
+                           initialHolidays={holidays}
+                           onUpdate={handleHolidayUpdated} // Pass the refetch callback
+                       />
+                   </TabsContent>
+                )}
               </Tabs>
            </>
        )}
     </div>
   );
 }
-

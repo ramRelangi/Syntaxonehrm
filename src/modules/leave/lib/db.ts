@@ -1,6 +1,6 @@
 
 import pool from '@/lib/db';
-import type { LeaveRequest, LeaveType, LeaveRequestStatus, LeaveBalance } from '@/modules/leave/types';
+import type { LeaveRequest, LeaveType, LeaveRequestStatus, LeaveBalance, Holiday, HolidayFormData } from '@/modules/leave/types';
 import { differenceInDays } from 'date-fns';
 import { formatISO, isValid, parseISO } from 'date-fns'; // Import date-fns functions
 
@@ -737,6 +737,166 @@ export async function runMonthlyAccrual() {
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('Error during monthly accrual:', err);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+
+// --- Holiday Operations ---
+
+function mapRowToHoliday(row: any): Holiday {
+    return {
+        id: row.id,
+        tenantId: row.tenant_id,
+        name: row.name,
+        date: formatISO(new Date(row.date), { representation: 'date' }), // Format as YYYY-MM-DD
+        description: row.description ?? undefined,
+        createdAt: new Date(row.created_at).toISOString(),
+        updatedAt: new Date(row.updated_at).toISOString(),
+    };
+}
+
+// Get holidays for a specific tenant
+export async function getAllHolidays(tenantId: string): Promise<Holiday[]> {
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB getAllHolidays] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+    const client = await pool.connect();
+    try {
+        const res = await client.query('SELECT * FROM holidays WHERE tenant_id = $1 ORDER BY date ASC', [tenantId]);
+        return res.rows.map(mapRowToHoliday);
+    } catch (err) {
+        console.error(`Error fetching holidays for tenant ${tenantId}:`, err);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+// Add holiday for a specific tenant
+export async function addHoliday(holidayData: Omit<Holiday, 'id' | 'createdAt' | 'updatedAt'>): Promise<Holiday> {
+    if (!holidayData.tenantId || !uuidRegex.test(holidayData.tenantId)) {
+        console.error(`[DB addHoliday] Invalid tenantId format: ${holidayData.tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+    // Validate date format before inserting
+    try {
+        parseISO(holidayData.date);
+    } catch (e) {
+        throw new Error("Invalid date format. Please use YYYY-MM-DD.");
+    }
+
+    const client = await pool.connect();
+    const query = `
+        INSERT INTO holidays (tenant_id, name, date, description)
+        VALUES ($1, $2, $3, $4)
+        RETURNING *;
+    `;
+    const values = [
+        holidayData.tenantId,
+        holidayData.name,
+        holidayData.date,
+        holidayData.description || null,
+    ];
+    try {
+        const res = await client.query(query, values);
+        return mapRowToHoliday(res.rows[0]);
+    } catch (err: any) {
+        console.error('Error adding holiday:', err);
+        if (err.code === '23505' && err.constraint === 'holidays_tenant_id_date_key') {
+            throw new Error(`A holiday already exists on ${holidayData.date} for this tenant.`);
+        }
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+// Update holiday (ensure it belongs to the tenant)
+export async function updateHoliday(id: string, tenantId: string, updates: HolidayFormData): Promise<Holiday | undefined> {
+    if (!id || !uuidRegex.test(id)) {
+        console.error(`[DB updateHoliday] Invalid holiday ID format: ${id}`);
+        throw new Error("Invalid holiday identifier.");
+    }
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB updateHoliday] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+     // Validate date format if provided
+    if (updates.date) {
+        try {
+            parseISO(updates.date);
+        } catch (e) {
+            throw new Error("Invalid date format. Please use YYYY-MM-DD.");
+        }
+    }
+
+    const client = await pool.connect();
+    const setClauses: string[] = [];
+    const values: any[] = [];
+    let valueIndex = 1;
+
+    const columnMap: { [K in keyof HolidayFormData]?: string } = {
+        name: 'name',
+        date: 'date',
+        description: 'description',
+    };
+
+    for (const key in updates) {
+        if (Object.prototype.hasOwnProperty.call(updates, key)) {
+            const dbKey = columnMap[key as keyof typeof columnMap];
+            if (dbKey) {
+                setClauses.push(`${dbKey} = $${valueIndex}`);
+                values.push(updates[key as keyof typeof updates] ?? null);
+                valueIndex++;
+            }
+        }
+    }
+
+    if (setClauses.length === 0) return (await client.query('SELECT * FROM holidays WHERE id = $1 AND tenant_id = $2', [id, tenantId])).rows.map(mapRowToHoliday)[0];
+
+    values.push(id);
+    values.push(tenantId);
+    const query = `
+        UPDATE holidays
+        SET ${setClauses.join(', ')}, updated_at = NOW()
+        WHERE id = $${valueIndex} AND tenant_id = $${valueIndex + 1}
+        RETURNING *;
+    `;
+    try {
+        const res = await client.query(query, values);
+        return res.rows.length > 0 ? mapRowToHoliday(res.rows[0]) : undefined;
+    } catch (err: any) {
+        console.error(`Error updating holiday ${id} for tenant ${tenantId}:`, err);
+        if (err.code === '23505' && err.constraint === 'holidays_tenant_id_date_key') {
+            throw new Error(`Another holiday already exists on ${updates.date} for this tenant.`);
+        }
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+// Delete holiday (ensure it belongs to the tenant)
+export async function deleteHoliday(id: string, tenantId: string): Promise<boolean> {
+    if (!id || !uuidRegex.test(id)) {
+        console.error(`[DB deleteHoliday] Invalid holiday ID format: ${id}`);
+        throw new Error("Invalid holiday identifier.");
+    }
+    if (!tenantId || !uuidRegex.test(tenantId)) {
+        console.error(`[DB deleteHoliday] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier.");
+    }
+    const client = await pool.connect();
+    const query = 'DELETE FROM holidays WHERE id = $1 AND tenant_id = $2';
+    try {
+        const res = await client.query(query, [id, tenantId]);
+        return res.rowCount > 0;
+    } catch (err) {
+        console.error(`Error deleting holiday ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();

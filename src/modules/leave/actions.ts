@@ -1,7 +1,8 @@
+
 'use server';
 
-import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus, LeaveBalance } from '@/modules/leave/types';
-import { leaveRequestSchema, refinedLeaveRequestSchema } from '@/modules/leave/types'; // Use refined schema for add
+import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus, LeaveBalance, Holiday, HolidayFormData } from '@/modules/leave/types';
+import { leaveRequestSchema, refinedLeaveRequestSchema, holidaySchema } from '@/modules/leave/types'; // Use refined schema for add, add holiday schema
 import {
   getAllLeaveRequests as dbGetAllLeaveRequests,
   getLeaveRequestById as dbGetLeaveRequestById,
@@ -15,6 +16,10 @@ import {
   deleteLeaveType as dbDeleteLeaveType,
   getLeaveBalancesForEmployee as dbGetLeaveBalances,
   runMonthlyAccrual as dbRunMonthlyAccrual, // Import accrual function
+  getAllHolidays as dbGetAllHolidays, // Import holiday functions
+  addHoliday as dbAddHoliday,
+  updateHoliday as dbUpdateHoliday,
+  deleteHoliday as dbDeleteHoliday,
 } from '@/modules/leave/lib/db'; // Import from the new DB file
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
@@ -289,5 +294,89 @@ export async function runAccrualProcess(): Promise<{ success: boolean; error?: s
     } catch (error: any) {
         console.error("Error running accrual process (action):", error);
         return { success: false, error: error.message || 'Failed to run accrual process.' };
+    }
+}
+
+// --- Holiday Actions ---
+
+export async function getHolidaysAction(): Promise<Holiday[]> {
+    const tenantId = await getTenantIdFromSession();
+    if (!tenantId) throw new Error("Tenant context not found.");
+    try {
+        return dbGetAllHolidays(tenantId);
+    } catch (error: any) {
+        console.error(`[Action getHolidaysAction] Error fetching holidays for tenant ${tenantId}:`, error);
+        throw new Error(`Failed to fetch holidays: ${error.message}`);
+    }
+}
+
+export async function addHolidayAction(formData: HolidayFormData): Promise<{ success: boolean; holiday?: Holiday; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
+    const tenantId = await getTenantIdFromSession();
+    if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
+
+    const isAdmin = await isAdminFromSession();
+    if (!isAdmin) return { success: false, errors: [{ code: 'custom', path: [], message: 'Unauthorized.' }] };
+
+    const validation = holidaySchema.omit({ id: true, tenantId: true, createdAt: true, updatedAt: true }).safeParse(formData);
+    if (!validation.success) {
+        console.error("Add Holiday Validation Error:", validation.error.flatten());
+        return { success: false, errors: validation.error.errors };
+    }
+
+    try {
+        const newHoliday = await dbAddHoliday({ ...validation.data, tenantId });
+        revalidatePath(`/${tenantId}/leave`); // Revalidate leave page
+        return { success: true, holiday: newHoliday };
+    } catch (error: any) {
+        console.error("Error adding holiday (action):", error);
+        return { success: false, errors: [{ code: 'custom', path: ['date'], message: error.message || 'Failed to add holiday.' }] };
+    }
+}
+
+export async function updateHolidayAction(id: string, formData: HolidayFormData): Promise<{ success: boolean; holiday?: Holiday; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
+    const tenantId = await getTenantIdFromSession();
+    if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
+
+    const isAdmin = await isAdminFromSession();
+    if (!isAdmin) return { success: false, errors: [{ code: 'custom', path: [], message: 'Unauthorized.' }] };
+
+    const validation = holidaySchema.omit({ id: true, tenantId: true, createdAt: true, updatedAt: true }).safeParse(formData);
+    if (!validation.success) {
+        console.error("Update Holiday Validation Error:", validation.error.flatten());
+        return { success: false, errors: validation.error.errors };
+    }
+
+    try {
+        const updatedHoliday = await dbUpdateHoliday(id, tenantId, validation.data);
+        if (updatedHoliday) {
+            revalidatePath(`/${tenantId}/leave`);
+            return { success: true, holiday: updatedHoliday };
+        } else {
+            return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Holiday not found.' }] };
+        }
+    } catch (error: any) {
+        console.error("Error updating holiday (action):", error);
+        return { success: false, errors: [{ code: 'custom', path: ['date'], message: error.message || 'Failed to update holiday.' }] };
+    }
+}
+
+export async function deleteHolidayAction(id: string): Promise<{ success: boolean; error?: string }> {
+    const tenantId = await getTenantIdFromSession();
+    if (!tenantId) return { success: false, error: 'Tenant context not found.' };
+
+    const isAdmin = await isAdminFromSession();
+    if (!isAdmin) return { success: false, error: 'Unauthorized.' };
+
+    try {
+        const deleted = await dbDeleteHoliday(id, tenantId);
+        if (deleted) {
+            revalidatePath(`/${tenantId}/leave`);
+            return { success: true };
+        } else {
+            return { success: false, error: 'Holiday not found.' };
+        }
+    } catch (error: any) {
+        console.error("Error deleting holiday (action):", error);
+        return { success: false, error: error.message || 'Failed to delete holiday.' };
     }
 }
