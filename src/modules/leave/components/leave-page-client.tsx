@@ -1,4 +1,3 @@
-
 // src/modules/leave/components/leave-page-client.tsx
 "use client";
 
@@ -15,6 +14,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { LeaveType, LeaveRequest, LeaveBalance, Holiday } from "@/modules/leave/types"; // Added Holiday type
 import { getHolidaysAction } from '@/modules/leave/actions'; // Import holiday action
+import { getSessionData } from '@/modules/auth/actions'; // Import session helper
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Import Alert
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
@@ -35,12 +36,15 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
                  console.warn(`[Leave Page Client - fetchData] Failed to parse error response as JSON for ${fullUrl}. Raw text:`, errorText);
                  errorPayload.message = errorText;
              }
-             throw new Error(errorPayload.error || errorPayload.message || `HTTP error! status: ${response.status}`);
+             // Try to extract a more specific message
+             const specificError = errorPayload.error || errorPayload.message || `HTTP error! status: ${response.status}`;
+             throw new Error(specificError);
         }
         return await response.json() as T;
     } catch (error) {
         console.error(`[Leave Page Client - fetchData] Error in fetchData for ${fullUrl}:`, error);
         if (error instanceof Error) {
+           // Rethrow the extracted or original error message
            throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
         } else {
            throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
@@ -48,81 +52,105 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     }
 }
 
-interface LeavePageClientProps {
-  tenantDomain: string;
-  userId: string;
-  isAdmin: boolean;
-}
-
-export default function LeavePageClient({ tenantDomain, userId, isAdmin }: LeavePageClientProps) {
+export default function LeavePageClient() {
   const { toast } = useToast();
+  const [userId, setUserId] = React.useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = React.useState<boolean>(false);
+  const [tenantDomain, setTenantDomain] = React.useState<string | null>(null);
   const [leaveTypes, setLeaveTypes] = React.useState<LeaveType[]>([]);
   const [allRequests, setAllRequests] = React.useState<LeaveRequest[]>([]);
   const [myRequests, setMyRequests] = React.useState<LeaveRequest[]>([]);
   const [myBalances, setMyBalances] = React.useState<LeaveBalance[]>([]);
-  const [holidays, setHolidays] = React.useState<Holiday[]>([]); // State for holidays
+  const [holidays, setHolidays] = React.useState<Holiday[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-  const [activeTab, setActiveTab] = React.useState('request'); // Manage active tab
+  const [authError, setAuthError] = React.useState<string | null>(null);
+  const [fetchError, setFetchError] = React.useState<string | null>(null);
+  const [activeTab, setActiveTab] = React.useState('request');
 
-  // Function to refetch all necessary data
+  // Fetch auth context (user ID, admin status, domain) on mount
+  React.useEffect(() => {
+    const fetchAuthContext = async () => {
+        setIsLoading(true); // Start loading
+        setAuthError(null);
+        try {
+            // Use the server action to get session data
+            const session = await getSessionData();
+            if (!session || !session.userId || !session.tenantId || !session.tenantDomain) {
+                throw new Error("Could not verify user identity or tenant context.");
+            }
+            setUserId(session.userId);
+            setIsAdmin(session.userRole === 'Admin');
+            setTenantDomain(session.tenantDomain);
+            console.log("[Leave Page Client] Auth Context Loaded:", { userId: session.userId, isAdmin: session.userRole === 'Admin', tenantDomain: session.tenantDomain });
+        } catch (err: any) {
+            console.error("[Leave Page Client] Error fetching auth context:", err);
+            setAuthError(err.message || "Failed to load user session.");
+             toast({
+                title: "Authentication Error",
+                description: err.message || "Failed to load user session.",
+                variant: "destructive",
+            });
+        } finally {
+             // Don't set loading false here, let refetchData handle it
+        }
+    };
+    fetchAuthContext();
+  }, [toast]);
+
+
+  // Function to refetch all necessary data AFTER auth context is loaded
   const refetchData = React.useCallback(async () => {
-      console.log("[Leave Page Client] Fetching leave and holiday data for user:", userId);
-      setIsLoading(true); // Set loading true when starting data fetch
-      setError(null);
+      if (!userId || !tenantDomain) {
+          console.log("[Leave Page Client] Skipping refetchData, userId or tenantDomain not available yet.");
+          setIsLoading(false); // Ensure loading stops if auth failed or isn't ready
+          return;
+      }
+      console.log("[Leave Page Client] Refetching leave and holiday data for user:", userId);
+      setIsLoading(true);
+      setFetchError(null);
       try {
-          // Fetch all data concurrently
           const [typesData, allReqData, myReqData, balancesData, holidaysData] = await Promise.all([
               fetchData<LeaveType[]>('/api/leave/types'),
-              isAdmin ? fetchData<LeaveRequest[]>('/api/leave/requests') : Promise.resolve([]), // Only fetch all if admin
-              fetchData<LeaveRequest[]>(`/api/leave/requests?employeeId=${userId}`), // Use actual userId
-              fetchData<LeaveBalance[]>(`/api/leave/balances/${userId}`), // Use actual userId
-              getHolidaysAction(), // Fetch holidays using server action
+              isAdmin ? fetchData<LeaveRequest[]>('/api/leave/requests') : Promise.resolve([]),
+              fetchData<LeaveRequest[]>(`/api/leave/requests?employeeId=${userId}`),
+              fetchData<LeaveBalance[]>(`/api/leave/balances/${userId}`),
+              getHolidaysAction(),
           ]);
           setLeaveTypes(typesData);
           setAllRequests(allReqData);
           setMyRequests(myReqData);
           setMyBalances(balancesData);
           setHolidays(holidaysData);
-      } catch (err: any) { // Catch specific error type
+      } catch (err: any) {
           console.error("[Leave Page Client] Error during refetchData:", err);
-          if (err.message?.includes('Invalid identifier') || err.message?.includes('invalid input syntax for type uuid')) {
-              setError("An internal error occurred while fetching data. Invalid identifier used.");
-          } else {
-              setError("Failed to load leave management data. Please try refreshing.");
-          }
+          const errorMsg = err.message || "Failed to load leave management data.";
+          setFetchError(errorMsg);
           toast({
               title: "Error Loading Data",
-              description: err.message || "Could not fetch necessary leave information.",
+              description: errorMsg,
               variant: "destructive",
           });
       } finally {
-          setIsLoading(false); // Stop loading once data fetch attempt is complete (success or error)
+          setIsLoading(false);
       }
-  }, [toast, userId, isAdmin]); // Add userId and isAdmin dependencies
+  }, [toast, userId, isAdmin, tenantDomain]);
 
-  // Fetch data on mount
+  // Fetch data when userId and tenantDomain become available
   React.useEffect(() => {
-      refetchData();
-  }, [refetchData]);
+    if (userId && tenantDomain) {
+        refetchData();
+    }
+  }, [userId, tenantDomain, refetchData]); // Depend on userId and tenantDomain
 
    // Callbacks for components to trigger refetch
    const handleLeaveRequestSubmitted = () => {
-     refetchData(); // Refetch all data
-     setActiveTab('my-requests'); // Switch to "My Requests" tab
+     refetchData();
+     setActiveTab('my-requests');
    };
 
-   const handleLeaveRequestUpdated = () => {
-     refetchData(); // Refetch all data
-   };
-
-    const handleLeaveTypeUpdated = () => {
-     refetchData(); // Refetch all data
-   };
-
-   const handleHolidayUpdated = () => {
-        refetchData(); // Refetch all data when holidays change
-   }
+   const handleLeaveRequestUpdated = () => refetchData();
+   const handleLeaveTypeUpdated = () => refetchData();
+   const handleHolidayUpdated = () => refetchData();
 
    // Derive leave type name map
    const leaveTypeNameMap = React.useMemo(() => {
@@ -131,22 +159,36 @@ export default function LeavePageClient({ tenantDomain, userId, isAdmin }: Leave
      return map;
    }, [leaveTypes]);
 
+   // Conditional rendering based on loading and error states
+    if (authError) {
+        return (
+            <div className="flex flex-col gap-6 items-center justify-center min-h-[400px]">
+                 <Alert variant="destructive" className="max-w-md">
+                    <AlertTitle>Authentication Error</AlertTitle>
+                    <AlertDescription>{authError}</AlertDescription>
+                </Alert>
+            </div>
+        );
+    }
+
+     // Determine number of columns for the TabsList
+     const tabColumnCount = isAdmin ? 5 : 2;
 
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
-          <Calendar className="h-6 w-6" /> Leave Management for {tenantDomain}
+          <Calendar className="h-6 w-6" /> Leave Management {tenantDomain ? `for ${tenantDomain}` : ''}
       </h1>
 
-       {isLoading && !error && (
-          <Card><CardContent className="p-4 text-center text-muted-foreground">Loading leave data...</CardContent></Card>
+       {isLoading && !fetchError && (
+          <Card><CardContent className="p-4 text-center text-muted-foreground"><Skeleton className="h-64 w-full" /></CardContent></Card>
        )}
-       {error && (
-           <Card><CardContent className="p-4 text-destructive text-center">{error}</CardContent></Card>
+       {fetchError && !isLoading && (
+           <Card><CardContent className="p-4 text-destructive text-center">{fetchError}</CardContent></Card>
        )}
 
 
-       {!isLoading && !error && (
+       {!isLoading && !fetchError && userId && (
            <>
              {/* Leave Balances Section */}
               <Card className="shadow-sm">
@@ -171,30 +213,30 @@ export default function LeavePageClient({ tenantDomain, userId, isAdmin }: Leave
 
               {/* Tabs for Request Form, Lists, and Type/Holiday Management */}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="leave-tabs">
-                {/* Adjusted grid columns based on admin status */}
-                <TabsList className={`grid w-full grid-cols-${isAdmin ? 5 : 2}`}>
-                  <TabsTrigger value="request" className="flex items-center gap-1">
-                       <PlusCircle className="h-4 w-4"/> Request Leave
-                   </TabsTrigger>
-                  <TabsTrigger value="my-requests" className="flex items-center gap-1">
-                      <ListChecks className="h-4 w-4"/> My Requests
-                   </TabsTrigger>
-                  {isAdmin && (
-                       <TabsTrigger value="all-requests" className="flex items-center gap-1">
-                          <ListChecks className="h-4 w-4"/> Manage Requests
+                 {/* Use dynamic grid-cols class */}
+                 <TabsList className={`grid w-full grid-cols-${tabColumnCount}`}>
+                   <TabsTrigger value="request" className="flex items-center gap-1">
+                        <PlusCircle className="h-4 w-4"/> Request Leave
+                    </TabsTrigger>
+                   <TabsTrigger value="my-requests" className="flex items-center gap-1">
+                       <ListChecks className="h-4 w-4"/> My Requests
+                    </TabsTrigger>
+                   {isAdmin && (
+                        <TabsTrigger value="all-requests" className="flex items-center gap-1">
+                           <ListChecks className="h-4 w-4"/> Manage Requests
+                        </TabsTrigger>
+                   )}
+                   {isAdmin && (
+                       <TabsTrigger value="manage-types" className="flex items-center gap-1">
+                          <Settings className="h-4 w-4"/> Manage Types
                        </TabsTrigger>
-                  )}
-                  {isAdmin && (
-                      <TabsTrigger value="manage-types" className="flex items-center gap-1">
-                         <Settings className="h-4 w-4"/> Manage Types
-                      </TabsTrigger>
-                  )}
-                  {isAdmin && (
-                      <TabsTrigger value="manage-holidays" className="flex items-center gap-1">
-                         <LandPlot className="h-4 w-4"/> Manage Holidays
-                      </TabsTrigger>
-                  )}
-                </TabsList>
+                   )}
+                   {isAdmin && (
+                       <TabsTrigger value="manage-holidays" className="flex items-center gap-1">
+                          <LandPlot className="h-4 w-4"/> Manage Holidays
+                       </TabsTrigger>
+                   )}
+                 </TabsList>
 
                 {/* Request Leave Tab */}
                 <TabsContent value="request">
@@ -205,7 +247,7 @@ export default function LeavePageClient({ tenantDomain, userId, isAdmin }: Leave
                        </CardHeader>
                        <CardContent>
                            <LeaveRequestForm
-                               employeeId={userId}
+                               employeeId={userId} // Pass confirmed userId
                                leaveTypes={leaveTypes}
                                onSuccess={handleLeaveRequestSubmitted}
                            />
@@ -219,7 +261,7 @@ export default function LeavePageClient({ tenantDomain, userId, isAdmin }: Leave
                         requests={myRequests}
                         leaveTypes={leaveTypes}
                         isAdminView={false}
-                        currentUserId={userId}
+                        currentUserId={userId} // Pass confirmed userId
                         onUpdate={handleLeaveRequestUpdated}
                     />
                 </TabsContent>
@@ -231,7 +273,7 @@ export default function LeavePageClient({ tenantDomain, userId, isAdmin }: Leave
                            requests={allRequests}
                            leaveTypes={leaveTypes}
                            isAdminView={true}
-                           currentUserId={userId}
+                           currentUserId={userId} // Pass confirmed userId
                            onUpdate={handleLeaveRequestUpdated}
                        />
                    </TabsContent>

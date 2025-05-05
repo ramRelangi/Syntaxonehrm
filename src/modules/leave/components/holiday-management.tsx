@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from 'react';
@@ -100,7 +99,16 @@ export function HolidayManagement({ initialHolidays, onUpdate }: HolidayManageme
       const result = await action(...actionParams);
 
       if (!result.success) {
-        throw new Error(result.errors?.[0]?.message || 'Failed to save holiday.');
+          console.error("Holiday Submit error (action result):", result.errors);
+          const errorMessage = result.errors?.[0]?.message || 'Failed to save holiday.';
+          // Set field-specific errors if path is available
+          if (result.errors?.[0]?.path && result.errors[0].path.length > 0) {
+               const fieldPath = result.errors[0].path[0] as keyof HolidayFormData;
+               form.setError(fieldPath, { message: errorMessage });
+          } else {
+               form.setError("root.serverError", { message: errorMessage });
+          }
+          throw new Error(errorMessage); // Throw to prevent success toast
       }
 
       toast({
@@ -115,13 +123,16 @@ export function HolidayManagement({ initialHolidays, onUpdate }: HolidayManageme
       onUpdate(); // Refresh parent state
 
     } catch (error: any) {
-      console.error("Holiday Submit error:", error);
-      toast({
-        title: `Error ${isEditMode ? 'Updating' : 'Adding'} Holiday`,
-        description: error.message || "An unexpected error occurred.",
-        variant: "destructive",
-      });
-      form.setError("root.serverError", { message: error.message || "An unexpected server error occurred." });
+      console.error("Holiday Submit error (catch block):", error);
+      // Avoid double-toasting if a specific error was already set
+      if (!form.formState.errors.date && !form.formState.errors.root?.serverError) {
+            toast({
+                title: `Error ${isEditMode ? 'Updating' : 'Adding'} Holiday`,
+                description: error.message || "An unexpected error occurred.",
+                variant: "destructive",
+            });
+            form.setError("root.serverError", { message: error.message || "An unexpected server error occurred." });
+        }
     } finally {
       setIsSubmitting(false);
     }
@@ -169,7 +180,7 @@ export function HolidayManagement({ initialHolidays, onUpdate }: HolidayManageme
     if (!open) {
       setEditingHoliday(null);
       form.reset();
-      form.clearErrors();
+      form.clearErrors(); // Clear errors when dialog closes
     }
     setIsDialogOpen(open);
   };
@@ -196,7 +207,7 @@ export function HolidayManagement({ initialHolidays, onUpdate }: HolidayManageme
             </DialogHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4">
-                {form.formState.errors.root?.serverError && (
+                {form.formState.errors.root?.serverError && !form.formState.errors.date && ( // Only show root error if no specific date error
                   <FormMessage className="text-destructive text-center">
                     {form.formState.errors.root.serverError.message}
                   </FormMessage>
@@ -227,7 +238,8 @@ export function HolidayManagement({ initialHolidays, onUpdate }: HolidayManageme
                               variant={"outline"}
                               className={cn(
                                 "w-full pl-3 text-left font-normal",
-                                !field.value && "text-muted-foreground"
+                                !field.value && "text-muted-foreground",
+                                form.formState.errors.date && "border-destructive focus-visible:ring-destructive" // Highlight if error
                               )}
                             >
                               {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
@@ -247,7 +259,7 @@ export function HolidayManagement({ initialHolidays, onUpdate }: HolidayManageme
                           />
                         </PopoverContent>
                       </Popover>
-                      <FormMessage />
+                      <FormMessage /> {/* Will display date validation/server errors */}
                     </FormItem>
                   )}
                 />

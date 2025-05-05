@@ -1,4 +1,3 @@
-
 'use server';
 
 import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus, LeaveBalance, Holiday, HolidayFormData } from '@/modules/leave/types';
@@ -63,7 +62,7 @@ export async function getLeaveRequestById(id: string): Promise<LeaveRequest | un
    }
 }
 
-export async function addLeaveRequest(formData: Omit<LeaveRequestFormData, 'tenantId'>): Promise<{ success: boolean; request?: LeaveRequest; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
+export async function addLeaveRequest(formData: Omit<LeaveRequestFormData, 'tenantId' | 'employeeId'>): Promise<{ success: boolean; request?: LeaveRequest; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
   const tenantId = await getTenantIdFromSession(); // Use new session helper
   if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
 
@@ -324,12 +323,16 @@ export async function addHolidayAction(formData: HolidayFormData): Promise<{ suc
     }
 
     try {
+        // Ensure tenantId is included before passing to DB function
         const newHoliday = await dbAddHoliday({ ...validation.data, tenantId });
         revalidatePath(`/${tenantId}/leave`); // Revalidate leave page
         return { success: true, holiday: newHoliday };
     } catch (error: any) {
         console.error("Error adding holiday (action):", error);
-        return { success: false, errors: [{ code: 'custom', path: ['date'], message: error.message || 'Failed to add holiday.' }] };
+        // Correct the error path to 'date' if it's a unique constraint violation
+        const errorMessage = error.message || 'Failed to add holiday.';
+        const errorPath = errorMessage.includes('already exists on') ? ['date'] : ['root'];
+        return { success: false, errors: [{ code: 'custom', path: errorPath, message: errorMessage }] };
     }
 }
 
@@ -356,7 +359,10 @@ export async function updateHolidayAction(id: string, formData: HolidayFormData)
         }
     } catch (error: any) {
         console.error("Error updating holiday (action):", error);
-        return { success: false, errors: [{ code: 'custom', path: ['date'], message: error.message || 'Failed to update holiday.' }] };
+        // Correct the error path to 'date' if it's a unique constraint violation
+        const errorMessage = error.message || 'Failed to update holiday.';
+        const errorPath = errorMessage.includes('already exists on') ? ['date'] : ['root'];
+        return { success: false, errors: [{ code: 'custom', path: errorPath, message: errorMessage }] };
     }
 }
 
