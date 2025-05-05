@@ -15,84 +15,7 @@ import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import nodemailer from 'nodemailer';
 // Import session helpers from auth actions
-import { getTenantIdFromSession, isAdminFromSession } from '@/modules/auth/actions';
-
-// --- Internal SMTP Config for Admin Notifications ---
-const INTERNAL_SMTP_HOST = process.env.INTERNAL_SMTP_HOST;
-const INTERNAL_SMTP_PORT_STR = process.env.INTERNAL_SMTP_PORT;
-const INTERNAL_SMTP_USER = process.env.INTERNAL_SMTP_USER;
-const INTERNAL_SMTP_PASSWORD = process.env.INTERNAL_SMTP_PASSWORD;
-const INTERNAL_SMTP_SECURE_STR = process.env.INTERNAL_SMTP_SECURE;
-const INTERNAL_FROM_EMAIL = process.env.INTERNAL_FROM_EMAIL || 'noreply@syntaxhivehrm.app';
-const INTERNAL_FROM_NAME = process.env.INTERNAL_FROM_NAME || 'SyntaxHive Hrm System';
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
-
-function getInternalSmtpConfig(): { host: string; port: number; user: string; pass: string; secure: boolean; fromEmail: string; fromName: string } | null {
-    if (!INTERNAL_SMTP_HOST || !INTERNAL_SMTP_PORT_STR || !INTERNAL_SMTP_USER || !INTERNAL_SMTP_PASSWORD) {
-        console.warn('[Internal Email Config] Missing required internal SMTP environment variables (HOST, PORT, USER, PASS).');
-        return null;
-    }
-    const port = parseInt(INTERNAL_SMTP_PORT_STR, 10);
-    if (isNaN(port)) {
-         console.warn('[Internal Email Config] Invalid INTERNAL_SMTP_PORT.');
-         return null;
-    }
-    // Determine secure based on port or explicit setting
-    let secure = port === 465; // Default to true for 465
-    if (INTERNAL_SMTP_SECURE_STR !== undefined) {
-        secure = INTERNAL_SMTP_SECURE_STR === 'true';
-    }
-
-    return {
-        host: INTERNAL_SMTP_HOST,
-        port: port,
-        user: INTERNAL_SMTP_USER,
-        pass: INTERNAL_SMTP_PASSWORD,
-        secure: secure,
-        fromEmail: INTERNAL_FROM_EMAIL,
-        fromName: INTERNAL_FROM_NAME,
-    };
-}
-
-// --- Define sendAdminNotification locally ---
-async function sendAdminNotification(subject: string, body: string) {
-    if (!ADMIN_EMAIL) {
-        console.error("Admin email (ADMIN_EMAIL) not configured. Cannot send notification.");
-        return;
-    }
-    const config = getInternalSmtpConfig();
-    if (!config) {
-        console.error("Internal SMTP settings not configured. Cannot send admin notification.");
-        return;
-    }
-
-    let transportOptions: nodemailer.TransportOptions = {
-        host: config.host, port: config.port, auth: { user: config.user, pass: config.pass },
-        connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 15000,
-        secure: config.secure,
-        // Explicitly require TLS for port 587 if not secure
-        requireTLS: config.port === 587 && !config.secure,
-    };
-
-    const transporter = nodemailer.createTransport(transportOptions);
-    const mailOptions = {
-        from: `"${config.fromName}" <${config.fromEmail}>`,
-        to: ADMIN_EMAIL,
-        subject: `[SyntaxHive Hrm Notification] ${subject}`,
-        text: body,
-        html: `<p>${body.replace(/\n/g, '<br>')}</p>`, // Basic HTML conversion
-    };
-
-    try {
-        console.log(`Sending admin notification to ${ADMIN_EMAIL} via ${config.host}...`);
-        const info = await transporter.sendMail(mailOptions);
-        console.log('Admin notification sent successfully:', info.messageId);
-    } catch (error) {
-        console.error('Error sending admin notification:', error);
-        // Avoid infinite loops if the internal SMTP itself fails
-    }
-}
-
+import { getTenantIdFromSession, isAdminFromSession, sendAdminNotification } from '@/modules/auth/actions';
 
 // --- Helper Functions ---
 async function getTenantId(): Promise<string> {
@@ -194,8 +117,9 @@ export async function updateEmailSettingsAction(settingsData: Omit<EmailSettings
     let tenantId: string;
     try {
         tenantId = await getTenantId();
+        console.log(`[updateEmailSettingsAction] Retrieved tenantId from session: ${tenantId}`); // Log retrieved tenantId
     } catch (authError: any) {
-         console.error(`[updateEmailSettingsAction] Auth Error: ${authError.message}`);
+         console.error(`[updateEmailSettingsAction] Auth Error fetching tenantId: ${authError.message}`);
          return { success: false, errors: [{ path: ['root'], message: 'Authentication failed: ' + authError.message }] };
     }
     console.log(`[updateEmailSettingsAction] Attempting to update settings for tenant ${tenantId}`);
@@ -238,16 +162,13 @@ export async function updateEmailSettingsAction(settingsData: Omit<EmailSettings
                      smtpPassword: existingSettings.smtpPassword, // Use existing decrypted password
                  };
             } else {
-                 // No existing password found, and none provided now. This is an error only if settings are being created for the first time.
-                 // The validation step might have already caught this if it's a required field,
-                 // but we add a check here for robustness.
-                 // Check if there are *any* existing settings at all. If not, password IS required.
+                 // No existing password found, and none provided now.
+                 // If settings are being created, password IS required.
                  if (!existingSettings) {
                       console.error(`[updateEmailSettingsAction] Password required for initial setup but not provided for tenant ${tenantId}.`);
                       return { success: false, errors: [{ path: ['smtpPassword'], message: 'SMTP Password is required for initial setup.' }] };
                  } else {
-                     // Existing settings found, but no password. This indicates a potential data issue.
-                     // We should probably require the password again.
+                     // Existing settings found, but no password. Indicates data issue. Require password again.
                      console.error(`[updateEmailSettingsAction] Existing settings found but no password stored for tenant ${tenantId}. Password must be provided.`);
                      return { success: false, errors: [{ path: ['smtpPassword'], message: 'Existing password not found. Please provide the SMTP password.' }] };
                  }
@@ -266,7 +187,8 @@ export async function updateEmailSettingsAction(settingsData: Omit<EmailSettings
 
 
     try {
-        console.log(`[updateEmailSettingsAction] Calling dbUpdateEmailSettings for tenant ${tenantId}...`);
+        // Log the tenantId being passed to the DB function just before the call
+        console.log(`[updateEmailSettingsAction] Calling dbUpdateEmailSettings with tenantId: ${tenantId} and data (password masked):`, JSON.stringify({ ...dataToSave, smtpPassword: '***' }));
         // dbUpdateEmailSettings encrypts before saving and returns WITHOUT password
         const updatedSafeSettings = await dbUpdateEmailSettings(tenantId, dataToSave);
         console.log(`[updateEmailSettingsAction] Settings updated successfully for tenant ${tenantId}. Revalidating path.`);
@@ -274,13 +196,13 @@ export async function updateEmailSettingsAction(settingsData: Omit<EmailSettings
         return { success: true, settings: updatedSafeSettings };
     } catch (error: any) {
         // Log the detailed error including potentially the DB error code
-        console.error(`[updateEmailSettingsAction] Error updating settings for tenant ${tenantId} (action):`, error.message, error.code ? `(Code: ${error.code})` : '');
+        console.error(`[updateEmailSettingsAction] Error updating settings for tenant ${tenantId} (action):`, error.message, error.code ? `(Code: ${error.code})` : '', error); // Log full error
 
         // Provide a more specific error message if possible
         let errorMessage = error.message || 'Failed to save settings.';
         let errorPath: (string | number)[] = ['root']; // Default path
 
-        // Example: Check for specific PostgreSQL error codes or messages
+        // Check for specific PostgreSQL error codes or messages
         if (error.code === '23503' && error.message?.includes('email_configuration_tenant_id_fkey')) {
              errorMessage = 'Tenant association failed. The specified tenant does not exist.';
         } else if (error.message?.includes('Encryption key is missing')) {
@@ -448,6 +370,7 @@ export async function sendEmailAction(data: { to: string; subject: string; body:
                  if (!settings.fromEmail) missing.push('From Email');
                  if (!settings.fromName) missing.push('From Name');
              }
+             // Corrected error message to guide the user
              throw new Error(`Email sending is not configured or settings are incomplete (Missing: ${missing.join(', ')}). Please check and save SMTP details in Communication Settings.`);
         }
         console.log(`[Send Email Action] Using settings for ${settings.smtpHost}:${settings.smtpPort}`);
