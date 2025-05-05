@@ -32,15 +32,16 @@ async function checkRecruitmentPermission(): Promise<string> {
 // --- Job Posting Server Actions ---
 
 export async function getJobPostings(filters?: { status?: JobPosting['status'] }): Promise<JobPosting[]> {
-    const tenantId = await getTenantIdFromSession(); // Use new session helper
+    const tenantId = await getTenantIdFromSession(); // Get tenant ID from session
     if (!tenantId) {
         console.error("[Action getJobPostings] Tenant ID could not be determined from session.");
-        // For public job board, we might allow fetching 'Open' without tenantId
-        // Let the DB/API layer handle this based on context. Here, assume internal needs tenant.
-        throw new Error("Tenant context not found.");
+        // Public board might allow fetching 'Open' without tenantId, but API routes usually require it.
+        // Throwing error as this action likely serves internal views needing auth.
+        throw new Error("Unauthorized or missing tenant context.");
     }
     console.log(`[Action getJobPostings] Fetching for tenant ${tenantId}, filters:`, filters);
     try {
+        // Pass tenantId to the DB function
         return dbGetAllJobPostings(tenantId, filters);
     } catch (dbError: any) {
         console.error(`[Action getJobPostings] Database error for tenant ${tenantId}:`, dbError);
@@ -281,3 +282,5 @@ export async function deleteCandidateAction(id: string): Promise<{ success: bool
         return { success: false, error: error.message || 'Failed to delete candidate.' };
     }
 }
+
+    

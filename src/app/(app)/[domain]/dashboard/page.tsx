@@ -7,11 +7,10 @@ import { Users, Briefcase, FileText, Calendar, BarChart2, UploadCloud } from "lu
 import Link from "next/link";
 import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getTenantByDomain } from '@/modules/auth/lib/db'; // Used for initial verification in layout/page, but API needs ID
-import { getTenantId } from '@/api/utils/get-tenant-id'; // Import the updated utility to get ID for API calls
+import { getTenantByDomain } from '@/modules/auth/lib/db';
 import { notFound } from 'next/navigation';
-import { headers } from 'next/headers'; // To create a mock request for getTenantId
-import type { NextRequest } from "next/server"; // Import type for mock request
+import { headers, cookies } from 'next/headers'; // Import cookies
+import { MOCK_SESSION_COOKIE } from '@/lib/auth'; // Import cookie name
 
 // Import Server Actions directly - Actions derive context implicitly
 import { getEmployees } from '@/modules/employees/actions';
@@ -23,43 +22,40 @@ interface DashboardPageProps {
   params: { domain: string };
 }
 
-
-// Helper to construct mock request for getTenantId
-function createMockRequest(): NextRequest {
-    const headersList = headers(); // Get headers from the incoming server request
-    // Construct a more realistic mock URL using host and protocol
-    const host = headersList.get('host') || 'localhost';
-    const protocol = headersList.get('x-forwarded-proto') || 'http';
-    const mockUrl = `${protocol}://${host}`;
-    console.log(`[Dashboard - createMockRequest] Mock URL: ${mockUrl}`);
-    // Create a new Request object with headers. Cast to NextRequest if needed or use as Request.
-    const request = new Request(mockUrl, { headers: headersList });
-    return request as NextRequest; // Cast to NextRequest
-}
-
-
-// Helper to fetch data from API routes - SERVER SIDE VERSION (Needs tenant context)
-async function fetchData<T>(tenantId: string, url: string, options?: RequestInit): Promise<T> {
+// Helper to fetch data from API routes - SERVER SIDE VERSION (Needs tenant context and auth cookie)
+async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     // Construct the full URL relative to the application's base URL
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002';
     const formattedUrl = url.startsWith('/') ? url.substring(1) : url;
     const fullUrl = `${baseUrl.replace(/\/$/, '')}/${formattedUrl}`;
 
-    console.log(`[Dashboard Fetch] Fetching server-side data for tenant ${tenantId} from: ${fullUrl}`); // Log the URL
+    const headersList = headers(); // Get current headers
+    const tenantDomain = headersList.get('X-Tenant-Domain'); // Get domain from middleware header
+    const cookieStore = cookies(); // Get cookies instance
+    const sessionCookie = cookieStore.get(MOCK_SESSION_COOKIE); // Get the session cookie
+
+    console.log(`[Dashboard Fetch] Fetching server-side data from: ${fullUrl}`);
 
     try {
-        const headersList = headers(); // Get current headers
-        const tenantDomain = headersList.get('X-Tenant-Domain'); // Get domain from middleware header
-
         const fetchHeaders = new Headers(options?.headers);
+
+        // Add Tenant Domain Header
         if (tenantDomain) {
-             fetchHeaders.set('X-Tenant-Domain', tenantDomain); // Pass tenant domain to API routes
+             fetchHeaders.set('X-Tenant-Domain', tenantDomain);
              console.log(`[Dashboard Fetch] Added X-Tenant-Domain header: ${tenantDomain}`);
         } else {
-            console.error(`[Dashboard Fetch] Critical: X-Tenant-Domain header missing for API call to ${fullUrl}. Attempting with tenantId: ${tenantId}`);
-            // Fallback or alternative way to pass tenant context if header missing?
-            // For now, we rely on the header set by middleware. If it's missing, API calls will likely fail authorization.
+            console.error(`[Dashboard Fetch] Critical: X-Tenant-Domain header missing for API call to ${fullUrl}.`);
              throw new Error('Tenant context header is missing.');
+        }
+
+        // Add Session Cookie Header
+        if (sessionCookie) {
+            fetchHeaders.set('Cookie', `${MOCK_SESSION_COOKIE}=${sessionCookie.value}`);
+            console.log(`[Dashboard Fetch] Added Cookie header for session.`);
+        } else {
+             console.warn(`[Dashboard Fetch] Session cookie (${MOCK_SESSION_COOKIE}) not found. API calls may fail authentication.`);
+             // Depending on API requirements, you might throw an error or proceed
+             // throw new Error('Authentication cookie missing.');
         }
 
 
@@ -73,7 +69,7 @@ async function fetchData<T>(tenantId: string, url: string, options?: RequestInit
         if (!response.ok) {
             const errorText = await response.text();
             // Log the raw error text first for debugging
-            console.error(`[Dashboard Fetch] Server-side fetch error for ${fullUrl} (Tenant: ${tenantId}): Status ${response.status}, Body: ${errorText}`);
+            console.error(`[Dashboard Fetch] Server-side fetch error for ${fullUrl}: Status ${response.status}, Body: ${errorText}`);
             // Try to parse JSON to get a more specific error message from the API
             let errorMessage = `HTTP error! status: ${response.status}`;
             try {
@@ -87,7 +83,7 @@ async function fetchData<T>(tenantId: string, url: string, options?: RequestInit
         }
         return await response.json() as T;
     } catch (error) {
-        console.error(`[Dashboard Fetch] Error fetching ${fullUrl} for tenant ${tenantId}:`, error);
+        console.error(`[Dashboard Fetch] Error fetching ${fullUrl}:`, error);
         if (error instanceof Error) {
            throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
         } else {
@@ -114,7 +110,6 @@ async function MetricCard({ title, icon: Icon, valuePromise, link, linkText, cha
          } else if (error.message?.includes('invalid input syntax for type uuid')) {
               errorMessage = "DB Error";
          } else if (error.message?.includes('Failed to fetch')) {
-              // This shouldn't happen anymore, but keep as fallback
               errorMessage = "Fetch Error";
          } else {
               errorMessage = error.message || "Error"; // Use original message if available
@@ -156,7 +151,8 @@ async function getUpcomingLeavesCount() {
 }
 
 async function getOpenPositionsCount() {
-     const openPositions = await getJobPostings({ status: 'Open' });
+     // Use the fetchData helper which now includes auth cookies
+     const openPositions = await fetchData<any[]>('/api/recruitment/postings?status=Open');
      return openPositions.length;
  }
 
@@ -191,7 +187,7 @@ export default async function TenantDashboardPage({ params }: DashboardPageProps
     const quickLinks = [
         { href: `/employees/add`, label: 'Add New Employee', icon: Users },
         { href: `/recruitment`, label: 'Manage Job Postings', icon: Briefcase },
-        { href: `/leave#leave-tabs`, label: 'Request Leave', icon: Calendar }, // Hash remains
+        { href: `/leave`, label: 'Request Leave', icon: Calendar }, // Hash removed, handled by client component state
         { href: `/smart-resume-parser`, label: 'Parse Resume', icon: UploadCloud },
     ];
 
@@ -268,3 +264,6 @@ export default async function TenantDashboardPage({ params }: DashboardPageProps
     </div>
   );
 }
+
+
+    

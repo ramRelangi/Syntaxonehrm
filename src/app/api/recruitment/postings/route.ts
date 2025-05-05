@@ -1,36 +1,19 @@
-
 import { NextRequest, NextResponse } from 'next/server';
-// Import DB function directly for GET
-import { getAllJobPostings as dbGetAllJobPostings, addJobPosting as dbAddJobPosting } from '@/modules/recruitment/lib/db'; // Use correct names from db file
-import { jobPostingSchema, type JobPostingFormData } from '@/modules/recruitment/types';
-import type { JobPostingStatus } from '@/modules/recruitment/types';
-import { getTenantIdFromAuth } from '@/lib/auth'; // Use auth helper to get tenant ID
-// Removed server action import for GET
-// import { getJobPostings as getJobPostingsAction, addJobPostingAction } from '@/modules/recruitment/actions';
-import { addJobPostingAction } from '@/modules/recruitment/actions'; // Correctly import addJobPostingAction
+// Import server action for GET
+import { getJobPostings, addJobPostingAction } from '@/modules/recruitment/actions';
+import { jobPostingSchema, type JobPostingFormData, type JobPostingStatus } from '@/modules/recruitment/types';
+// Removed DB function and auth helper import as action handles it
 
 
 export async function GET(request: NextRequest) {
   try {
     console.log(`GET /api/recruitment/postings - Fetching...`);
 
-    // Resolve tenantId directly within the API route handler
-    const tenantId = await getTenantIdFromAuth();
-    if (!tenantId) {
-        // Public job board might hit this without tenant context.
-        // Let's assume for now that internal API access requires a tenant context.
-        console.error(`[API GET /api/recruitment/postings] Failed to resolve tenant ID from auth context.`);
-        // Return 401 Unauthorized as the context is missing
-        return NextResponse.json({ error: "Unauthorized or missing tenant context." }, { status: 401 });
-    }
-     console.log(`[API GET /api/recruitment/postings] Resolved tenant ID: ${tenantId}`);
-
-
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status') as JobPostingStatus | undefined;
 
-    // Call DB function directly with resolved tenantId and status filter
-    const postings = await dbGetAllJobPostings(tenantId, { status });
+    // Call server action (action handles tenant context and auth internally)
+    const postings = await getJobPostings({ status });
     return NextResponse.json(postings);
 
   } catch (error: any) {
@@ -38,14 +21,10 @@ export async function GET(request: NextRequest) {
     let message = 'Failed to fetch job postings';
     let status = 500;
 
-     // Distinguish between auth errors and general errors caught here
+    // Distinguish between auth errors and general errors caught here
     if (error.message?.includes('Unauthorized') || error.message?.includes('Tenant context not found')) {
-        message = 'Unauthorized or tenant context missing.';
+        message = 'Unauthorized or missing tenant context.';
         status = 401; // Or 403 Forbidden if appropriate
-    } else if (error.code === '22P02' && error.message?.includes('uuid')) { // Invalid UUID format
-         message = 'Internal server error: Invalid identifier format.';
-         console.error("UUID Syntax Error in GET /api/recruitment/postings - Check tenantId handling.");
-         status = 500; // Internal error
     } else {
         message = error.message || message;
     }
@@ -97,3 +76,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: status });
   }
 }
+
+    
