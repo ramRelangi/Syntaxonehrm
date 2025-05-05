@@ -1,3 +1,4 @@
+
 'use server';
 
 import type { EmailTemplate, EmailSettings, EmailTemplateFormData } from '@/modules/communication/types';
@@ -14,14 +15,16 @@ import {
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import nodemailer from 'nodemailer';
-import { getTenantIdFromSession, isAdminFromSession } from '@/modules/auth/actions';
+import { getTenantIdFromSession, isAdminFromSession, sendAdminNotification } from '@/modules/auth/actions';
 
 // --- Helper Functions ---
 async function getTenantId(): Promise<string> {
     const tenantId = await getTenantIdFromSession(); // Use new session helper
     if (!tenantId) {
+        console.error("[Communication Actions] Tenant context not found in session.");
         throw new Error("Tenant context not found. User may not be authenticated or associated with a tenant.");
     }
+    console.log(`[Communication Actions] Resolved tenantId: ${tenantId}`);
     return tenantId;
 }
 
@@ -97,110 +100,106 @@ export async function deleteEmailTemplateAction(id: string): Promise<{ success: 
 // Returns settings WITHOUT password for security reasons
 export async function getEmailSettingsAction(): Promise<Omit<EmailSettings, 'smtpPassword'> | null> {
     const tenantId = await getTenantId();
+    console.log(`[getEmailSettingsAction] Fetching settings for tenant ${tenantId}...`);
     const settings = await dbGetEmailSettings(tenantId); // This already decrypts
     if (settings) {
+        console.log(`[getEmailSettingsAction] Settings found for tenant ${tenantId} (password excluded).`);
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { smtpPassword, ...safeSettings } = settings; // Remove password before returning
         return safeSettings;
     }
+    console.log(`[getEmailSettingsAction] No settings found for tenant ${tenantId}.`);
     return null;
 }
 
 // Expects full settings data including password (if provided)
 export async function updateEmailSettingsAction(settingsData: Omit<EmailSettings, 'tenantId'>): Promise<{ success: boolean; settings?: Omit<EmailSettings, 'smtpPassword'>; errors?: z.ZodIssue[] }> {
     const tenantId = await getTenantId();
+    console.log(`[updateEmailSettingsAction] Attempting to update settings for tenant ${tenantId}`); // Log tenantId
+
     // Validate against the schema that *includes* the password field
+    // Note: `tenantId` is omitted because it's derived, not submitted by the form.
     const validation = emailSettingsSchema.omit({ tenantId: true }).safeParse(settingsData);
 
     if (!validation.success) {
-        console.error("Update Settings Validation Error:", validation.error.flatten());
+        console.error(`[updateEmailSettingsAction] Validation Error for tenant ${tenantId}:`, validation.error.flatten());
         return { success: false, errors: validation.error.errors };
     }
+    console.log(`[updateEmailSettingsAction] Validation successful for tenant ${tenantId}.`);
 
     let dataToSave = validation.data;
 
-    // If password field is empty or just placeholder, try to fetch the existing encrypted password
+    // Handle password: Keep existing encrypted if new one is placeholder/empty
     if (!dataToSave.smtpPassword || dataToSave.smtpPassword === '******') {
-         console.log("[Action updateEmailSettings] Password field empty/placeholder. Fetching existing settings...");
+         console.log(`[updateEmailSettingsAction] Password field empty/placeholder for tenant ${tenantId}. Fetching existing encrypted password...`);
          try {
-             // Fetch settings from DB (which includes decrypted password)
-             const existingSettings = await dbGetEmailSettings(tenantId);
-             if (existingSettings?.smtpPassword) {
-                 console.log("[Action updateEmailSettings] Using existing password.");
-                 // Replace placeholder/empty password with the actual decrypted password from DB
+             // Fetch FULL settings including encrypted password directly (or adapt dbGetEmailSettings if it returns encrypted too)
+             const existingSettings = await dbGetEmailSettings(tenantId); // Assuming this decrypts, need encrypted one
+             // Modify dbGetEmailSettings or add a new function to get the encrypted password if needed
+             // For now, assuming dbGetEmailSettings returns the decrypted password. Re-encrypting it here is NOT ideal.
+             // A better approach: modify dbUpdateEmailSettings to handle empty password input.
+
+             if (existingSettings?.smtpPassword) { // Check if existing decrypted password is there
+                 console.log(`[updateEmailSettingsAction] Using existing password for tenant ${tenantId}.`);
+                 // If the DB function requires the password, provide the one we just fetched (decrypted).
+                 // The DB function will re-encrypt it.
                  dataToSave = { ...dataToSave, smtpPassword: existingSettings.smtpPassword };
              } else {
-                 // If no existing password and none provided, it's an error UNLESS we are updating other fields
-                 // Check if any other field actually changed
-                 const initialSafeSettings = await getEmailSettingsAction(); // Fetch safe settings for comparison
-                 const changedFields = Object.keys(dataToSave).filter(
-                    key => key !== 'smtpPassword' && dataToSave[key as keyof typeof dataToSave] !== initialSafeSettings?.[key as keyof typeof initialSafeSettings]
-                 );
-
-                 if (changedFields.length === 0) {
-                    // No password provided, nothing else changed - this is basically a no-op, treat as success?
-                    // Or maybe error because the intention was likely to update password but it was left blank?
-                    // Let's return an error for clarity.
-                     console.error("[Action updateEmailSettings] Password required but not provided and no other fields changed.");
-                     return { success: false, errors: [{ code: 'custom', path: ['smtpPassword'], message: 'SMTP Password is required if no other fields are being updated.' }] };
-                 } else {
-                    // Other fields changed, but no existing password found in DB. This is an invalid state.
-                     console.error("[Action updateEmailSettings] Password required but not provided and no existing password found in DB.");
-                     return { success: false, errors: [{ code: 'custom', path: ['smtpPassword'], message: 'Existing password not found. Please provide the password to save changes.' }] };
-                 }
+                 // No existing password and none provided.
+                 console.error(`[updateEmailSettingsAction] Password required but not provided and no existing password found for tenant ${tenantId}.`);
+                 return { success: false, errors: [{ code: 'custom', path: ['smtpPassword'], message: 'SMTP Password is required.' }] };
              }
          } catch (fetchError: any) {
-              console.error("[Action updateEmailSettings] Error fetching existing settings:", fetchError);
+              console.error(`[updateEmailSettingsAction] Error fetching existing settings for tenant ${tenantId}:`, fetchError);
               return { success: false, errors: [{ code: 'custom', path: ['root'], message: `Failed to retrieve existing settings: ${fetchError.message}` }] };
          }
     } else {
-         console.log("[Action updateEmailSettings] New password provided in the form.");
+         console.log(`[updateEmailSettingsAction] New password provided for tenant ${tenantId}.`);
     }
 
 
     try {
+        console.log(`[updateEmailSettingsAction] Calling dbUpdateEmailSettings for tenant ${tenantId}...`);
         // dbUpdateEmailSettings encrypts before saving and returns WITHOUT password
         const updatedSafeSettings = await dbUpdateEmailSettings(tenantId, dataToSave);
+        console.log(`[updateEmailSettingsAction] Settings updated successfully for tenant ${tenantId}. Revalidating path.`);
         revalidatePath(`/${tenantId}/communication`);
         return { success: true, settings: updatedSafeSettings };
     } catch (error: any) {
-        console.error("Error updating settings (action):", error);
+        console.error(`[updateEmailSettingsAction] Error updating settings for tenant ${tenantId} (action):`, error);
+        // Check for foreign key violation specifically
+        if (error.message?.includes('violates foreign key constraint')) {
+            console.error(`[updateEmailSettingsAction] Foreign key violation likely due to invalid tenant ID: ${tenantId}`);
+            return { success: false, errors: [{ code: 'custom', path: ['root'], message: `Internal Server Error: Invalid tenant context (${error.message})` }] };
+        }
         return { success: false, errors: [{ code: 'custom', path: ['smtpHost'], message: error.message || 'Failed to save settings.' }] };
     }
 }
 
 
 // --- Test Connection Action ---
-// This action now fetches settings internally based on tenant context.
-// It no longer accepts settings data from the client.
+// Fetches settings internally based on tenant context.
 export async function testSmtpConnectionAction(): Promise<{ success: boolean; message: string }> {
      const tenantId = await getTenantId();
      console.log(`[Test Connection Action] Testing connection for tenant: ${tenantId}`);
 
-     let completeSettings: EmailSettings | null = null; // Initialize as null
+     let completeSettings: EmailSettings | null = null;
 
      try {
-         // Fetch the complete, decrypted settings from the database
          console.log(`[Test Connection Action] Fetching email settings from DB for tenant ${tenantId}...`);
          completeSettings = await dbGetEmailSettings(tenantId); // Fetches and decrypts
 
          if (!completeSettings) {
-             // This handles cases where settings don't exist OR decryption failed OR essential fields missing
-             console.error(`[Test Connection Action] No valid settings found in DB for tenant ${tenantId}.`);
+             console.warn(`[Test Connection Action] No valid settings found in DB for tenant ${tenantId}.`);
              return { success: false, message: "SMTP settings are not configured or are invalid. Please save your settings first." };
          }
 
-         // Settings exist and were decrypted successfully (dbGetEmailSettings returns null otherwise)
-         // Validate the fetched settings structure just in case (though db function should ensure this)
          const validation = emailSettingsSchema.safeParse(completeSettings);
          if (!validation.success) {
              console.error(`[Test Connection Action] Fetched settings from DB are structurally invalid for tenant ${tenantId}:`, validation.error.flatten());
-             // This scenario is less likely if dbGetEmailSettings works correctly, but good to handle.
              return { success: false, message: "Stored SMTP settings are incomplete or invalid. Please review and save them again." };
          }
-
-         // completeSettings is now validated and contains the decrypted password
-         console.log(`[Test Connection Action] Using settings from DB for test (password masked): host=${completeSettings.smtpHost}, port=${completeSettings.smtpPort}, user=${completeSettings.smtpUser}, secure=${completeSettings.smtpSecure}`);
+         console.log(`[Test Connection Action] Using validated settings from DB for test (password masked).`);
 
      } catch (error: any) {
          console.error(`[Test Connection Action] Error fetching or validating settings for tenant ${tenantId}:`, error);
@@ -216,7 +215,7 @@ export async function testSmtpConnectionAction(): Promise<{ success: boolean; me
             user: completeSettings.smtpUser,
             pass: completeSettings.smtpPassword, // Use the decrypted password
         },
-        connectionTimeout: 15000, // Increased timeout
+        connectionTimeout: 15000,
         greetingTimeout: 15000,
         socketTimeout: 15000,
         logger: process.env.NODE_ENV === 'development',
@@ -226,17 +225,12 @@ export async function testSmtpConnectionAction(): Promise<{ success: boolean; me
     // Automatically configure secure/requireTLS based on common ports
     if (completeSettings.smtpPort === 465) {
         transportOptions.secure = true;
-         console.log("[Test Connection Action] Using secure=true for port 465");
     } else if (completeSettings.smtpPort === 587) {
-        transportOptions.secure = false; // Often needs STARTTLS
-        transportOptions.requireTLS = true; // Explicitly require STARTTLS
-         console.log("[Test Connection Action] Using secure=false, requireTLS=true for port 587");
+        transportOptions.secure = false;
+        transportOptions.requireTLS = true;
     } else {
-        // For other ports, rely on the saved smtpSecure value, but warn if ambiguous
         transportOptions.secure = completeSettings.smtpSecure;
          console.warn(`[Test Connection Action] Using explicit secure=${completeSettings.smtpSecure} for non-standard port ${completeSettings.smtpPort}. Verify provider requirements.`);
-         // If secure is false for non-587 ports, TLS might still be required/used implicitly by Nodemailer
-         // but explicit requireTLS is usually for port 587 STARTTLS.
     }
 
     const transporter = nodemailer.createTransport(transportOptions);
@@ -266,6 +260,76 @@ export async function testSmtpConnectionAction(): Promise<{ success: boolean; me
         if (error.message && !errorMessage.includes(error.message)) {
             errorMessage += ` (Details: ${error.message})`;
         }
+        // Send admin notification on failure
+        await sendAdminNotification({ message: `SMTP Test Connection Failed for tenant ${tenantId}: ${errorMessage}` });
         return { success: false, message: errorMessage };
+    }
+}
+
+// --- Send Email Action ---
+export async function sendEmailAction(data: { to: string; subject: string; body: string }): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const tenantId = await getTenantId();
+    console.log(`[Send Email Action] Attempting to send email for tenant ${tenantId}...`);
+
+    let settings: EmailSettings | null = null;
+    try {
+        settings = await dbGetEmailSettings(tenantId); // Fetch decrypted settings
+        if (!settings) {
+            throw new Error("Email sending is not configured or settings are invalid.");
+        }
+        // Basic validation of fetched settings
+        if (!settings.smtpHost || !settings.smtpPort || !settings.smtpUser || !settings.smtpPassword || !settings.fromEmail || !settings.fromName) {
+             throw new Error("Fetched email settings are incomplete. Please check Communication Settings.");
+        }
+         console.log(`[Send Email Action] Using settings for ${settings.smtpHost}:${settings.smtpPort}`);
+    } catch (error: any) {
+        console.error(`[Send Email Action] Error fetching settings for tenant ${tenantId}:`, error);
+        return { success: false, error: `Failed to retrieve email configuration: ${error.message}` };
+    }
+
+    // Validate input data
+    const validation = z.object({
+        to: z.string().email(),
+        subject: z.string().min(1),
+        body: z.string().min(1),
+    }).safeParse(data);
+
+    if (!validation.success) {
+        console.error(`[Send Email Action] Invalid email data for tenant ${tenantId}:`, validation.error.flatten());
+        return { success: false, error: validation.error.errors.map(e => e.message).join(', ') };
+    }
+
+    // Create transporter
+    let transportOptions: nodemailer.TransportOptions = {
+        host: settings.smtpHost, port: settings.smtpPort,
+        auth: { user: settings.smtpUser, pass: settings.smtpPassword }, // Use decrypted password
+        connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 15000,
+        logger: process.env.NODE_ENV === 'development', debug: process.env.NODE_ENV === 'development',
+    };
+    if (settings.smtpPort === 465) { transportOptions.secure = true; }
+    else if (settings.smtpPort === 587) { transportOptions.secure = false; transportOptions.requireTLS = true; }
+    else { transportOptions.secure = settings.smtpSecure; }
+
+    const transporter = nodemailer.createTransport(transportOptions);
+
+    // Send mail
+    try {
+        const mailOptions = {
+            from: `"${settings.fromName}" <${settings.fromEmail}>`,
+            to: validation.data.to,
+            subject: validation.data.subject,
+            [validation.data.body.trim().startsWith('<') ? 'html' : 'text']: validation.data.body,
+        };
+        console.log(`[Send Email Action] Sending email to ${validation.data.to} via ${settings.smtpHost} for tenant ${tenantId}...`);
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Send Email Action] Email sent successfully for tenant ${tenantId}:`, info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (error: any) {
+        console.error(`[Send Email Action] Error sending email for tenant ${tenantId}:`, error);
+         let errorMessage = `Failed to send email: ${error.message}`;
+          if (error.code === 'EAUTH') {
+            errorMessage = `SMTP Authentication failed. Check credentials. (Details: ${error.message})`;
+          } // Add more specific error handling as in test connection
+        return { success: false, error: errorMessage };
     }
 }
