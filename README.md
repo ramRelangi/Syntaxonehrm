@@ -10,7 +10,7 @@ This is SyntaxHive Hrm.
     ```
 
 2.  **Configure Environment Variables:**
-    Copy the `.env.example` file (if it exists) to `.env`. **Crucially, you must first manually create a PostgreSQL database.** Then, fill in the connection details for your **existing** database in the `.env` file:
+    Copy the `.env.example` file to `.env`. **Crucially, you must first manually create a PostgreSQL database.** Then, fill in the connection details for your **existing** database and other configurations in the `.env` file:
     ```env
     # PostgreSQL Database Configuration (Ensure this database exists!)
     DB_HOST=your_db_host # Use '127.0.0.1' instead of 'localhost' if you encounter ECONNREFUSED errors
@@ -40,8 +40,14 @@ This is SyntaxHive Hrm.
 
     # Root Domain for constructing tenant URLs (e.g., your-company.syntaxhivehrm.app)
     NEXT_PUBLIC_ROOT_DOMAIN=localhost # Change in production to your actual root domain
+
+    # !!! IMPORTANT: Secret key for encrypting sensitive data (e.g., SMTP passwords) !!!
+    # Generate a strong, random 32-byte key (e.g., using Node.js crypto.randomBytes(32).toString('hex'))
+    # Keep this key secret and do NOT commit it to version control.
+    ENCRYPTION_KEY=YOUR_STRONG_SECRET_ENCRYPTION_KEY_HERE_CHANGE_ME
     ```
     **Important:**
+     - **`ENCRYPTION_KEY`**: This is crucial for encrypting sensitive data like SMTP passwords stored in the database. You **MUST** generate a strong, unique secret key (e.g., a 32-byte random string). **Do not use the placeholder value.** Keep this key absolutely secret and do not commit it to version control. You can generate one using Node.js: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
      - The database specified by `DB_NAME` must exist on your PostgreSQL server before proceeding. This application **does not** automatically create the root database itself, only tenant-specific tables upon registration.
      - For production, set `NEXT_PUBLIC_ROOT_DOMAIN` to your actual domain (e.g., `syntaxhivehrm.app`). For local development, `localhost` is usually sufficient.
      - **Troubleshooting `ECONNREFUSED` errors:** If you see database connection errors like `ECONNREFUSED ::1:5432` or similar, ensure your PostgreSQL server is running and listening for connections. Try setting `DB_HOST=127.0.0.1` in your `.env` file instead of `localhost`.
@@ -68,6 +74,7 @@ This is SyntaxHive Hrm.
 ## Development Notes
 
 -   The application uses `pg` to connect to a PostgreSQL database.
+-   Sensitive data (like SMTP passwords) is encrypted using `crypto-js` AES. Ensure `ENCRYPTION_KEY` is set correctly in your `.env`.
 -   Server Actions are used for backend logic (e.g., registration, CRUD operations).
 -   API routes handle interactions like data fetching for client components.
 -   ShadCN UI components are used for the user interface.
