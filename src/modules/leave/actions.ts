@@ -1,4 +1,3 @@
-
 'use server';
 
 import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus, LeaveBalance } from '@/modules/leave/types';
@@ -19,14 +18,15 @@ import {
 } from '@/modules/leave/lib/db'; // Import from the new DB file
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
-import { getTenantIdFromAuth, getUserIdFromAuth, isUserAdmin } from '@/lib/auth'; // Import auth helpers
+// Import new session helpers from auth actions
+import { getTenantIdFromSession, getUserIdFromSession, isAdminFromSession } from '@/modules/auth/actions';
 
 // --- Leave Request Actions ---
 
 export async function getLeaveRequests(filters?: { employeeId?: string, status?: LeaveRequestStatus }): Promise<LeaveRequest[]> {
-  const tenantId = await getTenantIdFromAuth();
+  const tenantId = await getTenantIdFromSession(); // Use new session helper
   if (!tenantId) {
-     console.error("[Action getLeaveRequests] Tenant ID could not be determined from auth.");
+     console.error("[Action getLeaveRequests] Tenant ID could not be determined from session.");
      throw new Error("Tenant context not found.");
   }
   console.log(`[Action getLeaveRequests] Fetching for tenant ${tenantId}, filters:`, filters);
@@ -35,7 +35,6 @@ export async function getLeaveRequests(filters?: { employeeId?: string, status?:
       return dbGetAllLeaveRequests(tenantId, filters);
   } catch (dbError: any) {
       console.error(`[Action getLeaveRequests] Database error for tenant ${tenantId}:`, dbError);
-      // Provide more specific error message for UUID errors
       if (dbError.code === '22P02' && dbError.message?.includes('uuid')) {
            throw new Error("Internal server error: Invalid identifier.");
       }
@@ -44,9 +43,9 @@ export async function getLeaveRequests(filters?: { employeeId?: string, status?:
 }
 
 export async function getLeaveRequestById(id: string): Promise<LeaveRequest | undefined> {
-  const tenantId = await getTenantIdFromAuth();
+  const tenantId = await getTenantIdFromSession(); // Use new session helper
   if (!tenantId) {
-      console.error("[Action getLeaveRequestById] Tenant ID could not be determined from auth.");
+      console.error("[Action getLeaveRequestById] Tenant ID could not be determined from session.");
       throw new Error("Tenant context not found.");
   }
   console.log(`[Action getLeaveRequestById] Fetching request ${id} for tenant ${tenantId}`);
@@ -60,20 +59,13 @@ export async function getLeaveRequestById(id: string): Promise<LeaveRequest | un
 }
 
 export async function addLeaveRequest(formData: Omit<LeaveRequestFormData, 'tenantId'>): Promise<{ success: boolean; request?: LeaveRequest; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
-  const tenantId = await getTenantIdFromAuth();
+  const tenantId = await getTenantIdFromSession(); // Use new session helper
   if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
 
-  // Employee ID should typically come from the session for the logged-in user submitting the request
-  const employeeId = await getUserIdFromAuth(); // Await the promise
+  const employeeId = await getUserIdFromSession(); // Use new session helper
   if (!employeeId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Could not identify employee.' }] };
 
-  // Ensure employeeId is a valid UUID (basic check)
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(employeeId)) {
-       console.error("[Action addLeaveRequest] Invalid employee ID format from session:", employeeId);
-       return { success: false, errors: [{ code: 'custom', path: [], message: 'Invalid employee identifier.' }] };
-  }
-
+  // UUID validation is handled inside the DB layer now
 
   const dataWithContext = { ...formData, tenantId, employeeId };
 
@@ -85,39 +77,29 @@ export async function addLeaveRequest(formData: Omit<LeaveRequestFormData, 'tena
   }
 
   try {
-    // The dbAddLeaveRequest now handles balance check and transaction
     const newRequest = await dbAddLeaveRequest(validation.data);
     revalidatePath(`/${tenantId}/leave`); // Revalidate tenant-specific leave page
     revalidatePath(`/api/leave/balances/${employeeId}`); // Revalidate balance endpoint for the user
     return { success: true, request: newRequest };
   } catch (error: any) {
     console.error("Error adding leave request (action):", error);
-    // Return specific error message (e.g., insufficient balance)
     return { success: false, errors: [{ code: 'custom', path: ['endDate'], message: error.message || 'Failed to add leave request.' }] };
   }
 }
 
 export async function updateLeaveRequestStatus(
     id: string,
-    status: 'Approved' | 'Rejected', // Only allow these via this action
+    status: 'Approved' | 'Rejected',
     comments?: string
 ): Promise<{ success: boolean; request?: LeaveRequest; errors?: { code: string; path: string[]; message: string }[] }> {
-  const tenantId = await getTenantIdFromAuth();
+  const tenantId = await getTenantIdFromSession(); // Use new session helper
   if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
 
-  const approverId = await getUserIdFromAuth(); // Await the promise
+  const approverId = await getUserIdFromSession(); // Use new session helper
   if (!approverId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Approver ID not found.' }] };
 
-   // Ensure approverId is a valid UUID (basic check)
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(approverId)) {
-       console.error("[Action updateLeaveRequestStatus] Invalid approver ID format from session:", approverId);
-       return { success: false, errors: [{ code: 'custom', path: [], message: 'Invalid approver identifier.' }] };
-  }
-
-
   // Authorization Check
-  const isAdmin = await isUserAdmin(); // Implement this check based on user role
+  const isAdmin = await isAdminFromSession(); // Use new session helper
   if (!isAdmin) {
       return { success: false, errors: [{ code: 'custom', path: [], message: 'Unauthorized to approve/reject requests.' }] };
   }
@@ -135,7 +117,6 @@ export async function updateLeaveRequestStatus(
       // TODO: Send notification email to employee
       return { success: true, request: updatedRequest };
     } else {
-      // This case might be handled by db throwing an error now
       return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Leave request not found or cannot be updated.' }] };
     }
   } catch (error: any) {
@@ -145,29 +126,18 @@ export async function updateLeaveRequestStatus(
 }
 
 export async function cancelLeaveRequest(id: string): Promise<{ success: boolean; error?: string }> {
-  const tenantId = await getTenantIdFromAuth();
+  const tenantId = await getTenantIdFromSession(); // Use new session helper
   if (!tenantId) return { success: false, error: 'Tenant context not found.' };
 
-  const userId = await getUserIdFromAuth(); // Await the promise
+  const userId = await getUserIdFromSession(); // Use new session helper
   if (!userId) return { success: false, error: 'Could not identify user.' };
 
-   // Ensure userId is a valid UUID (basic check)
-   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-   if (!uuidRegex.test(userId)) {
-        console.error("[Action cancelLeaveRequest] Invalid user ID format from session:", userId);
-        return { success: false, error: 'Invalid user identifier.' };
-   }
-
-
   try {
-    // Pass tenantId and userId to the DB function for validation
     const updatedRequest = await dbCancelLeaveRequest(id, tenantId, userId);
     if (updatedRequest) {
         revalidatePath(`/${tenantId}/leave`);
-        // Balance refund logic should be handled within dbCancelLeaveRequest if needed
         return { success: true };
     } else {
-        // Should not happen if checks pass in db function
         return { success: false, error: 'Failed to cancel request (unexpected).' };
     }
   } catch (error: any) {
@@ -180,9 +150,9 @@ export async function cancelLeaveRequest(id: string): Promise<{ success: boolean
 // --- Leave Type Actions ---
 
 export async function getLeaveTypes(): Promise<LeaveType[]> {
-  const tenantId = await getTenantIdFromAuth();
+  const tenantId = await getTenantIdFromSession(); // Use new session helper
   if (!tenantId) {
-      console.error("[Action getLeaveTypes] Tenant ID could not be determined from auth.");
+      console.error("[Action getLeaveTypes] Tenant ID could not be determined from session.");
       throw new Error("Tenant context not found.");
    }
   // TODO: Authorization check if needed
@@ -195,11 +165,11 @@ export async function getLeaveTypes(): Promise<LeaveType[]> {
 }
 
 export async function addLeaveTypeAction(formData: Omit<LeaveType, 'id' | 'tenantId'>): Promise<{ success: boolean; leaveType?: LeaveType; errors?: z.ZodIssue[] | { code: string; path: string[]; message: string }[] }> {
-  const tenantId = await getTenantIdFromAuth();
+  const tenantId = await getTenantIdFromSession(); // Use new session helper
   if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
 
   // Authorization Check
-  const isAdmin = await isUserAdmin();
+  const isAdmin = await isAdminFromSession(); // Use new session helper
   if (!isAdmin) return { success: false, errors: [{ code: 'custom', path: [], message: 'Unauthorized.' }] };
 
 
@@ -217,7 +187,7 @@ export async function addLeaveTypeAction(formData: Omit<LeaveType, 'id' | 'tenan
 
   try {
     const newLeaveType = await dbAddLeaveType(dataWithTenantId);
-    revalidatePath(`/${tenantId}/leave`); // Revalidate page where types are displayed/managed
+    revalidatePath(`/${tenantId}/leave`);
     return { success: true, leaveType: newLeaveType };
   } catch (error: any) {
     console.error("Error adding leave type (action):", error);
@@ -226,11 +196,11 @@ export async function addLeaveTypeAction(formData: Omit<LeaveType, 'id' | 'tenan
 }
 
 export async function updateLeaveTypeAction(id: string, formData: Partial<Omit<LeaveType, 'id' | 'tenantId'>>): Promise<{ success: boolean; leaveType?: LeaveType; errors?: { code: string; path: string[]; message: string }[] }> {
-  const tenantId = await getTenantIdFromAuth();
+  const tenantId = await getTenantIdFromSession(); // Use new session helper
   if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
 
    // Authorization Check
-   const isAdmin = await isUserAdmin();
+   const isAdmin = await isAdminFromSession(); // Use new session helper
    if (!isAdmin) return { success: false, errors: [{ code: 'custom', path: [], message: 'Unauthorized.' }] };
 
 
@@ -245,7 +215,6 @@ export async function updateLeaveTypeAction(id: string, formData: Partial<Omit<L
    }
 
   try {
-    // Pass tenantId to db function for verification
     const updatedLeaveType = await dbUpdateLeaveType(id, tenantId, formData);
     if (updatedLeaveType) {
       revalidatePath(`/${tenantId}/leave`);
@@ -260,22 +229,20 @@ export async function updateLeaveTypeAction(id: string, formData: Partial<Omit<L
 }
 
 export async function deleteLeaveTypeAction(id: string): Promise<{ success: boolean; error?: string }> {
-  const tenantId = await getTenantIdFromAuth();
+  const tenantId = await getTenantIdFromSession(); // Use new session helper
   if (!tenantId) return { success: false, error: 'Tenant context not found.' };
 
    // Authorization Check
-   const isAdmin = await isUserAdmin();
+   const isAdmin = await isAdminFromSession(); // Use new session helper
    if (!isAdmin) return { success: false, error: 'Unauthorized.' };
 
 
   try {
-    // dbDeleteLeaveType now includes usage checks and requires tenantId
     const deleted = await dbDeleteLeaveType(id, tenantId);
     if (deleted) {
       revalidatePath(`/${tenantId}/leave`);
       return { success: true };
     } else {
-       // Should be caught by db function throwing error if in use or not found
       return { success: false, error: 'Leave type not found.' };
     }
   } catch (error: any) {
@@ -287,19 +254,13 @@ export async function deleteLeaveTypeAction(id: string): Promise<{ success: bool
 
 // --- Leave Balance Actions ---
 export async function getEmployeeLeaveBalances(employeeId: string): Promise<LeaveBalance[]> {
-    const tenantId = await getTenantIdFromAuth();
+    const tenantId = await getTenantIdFromSession(); // Use new session helper
     if (!tenantId) {
-       console.error("[Action getEmployeeLeaveBalances] Tenant ID could not be determined from auth.");
+       console.error("[Action getEmployeeLeaveBalances] Tenant ID could not be determined from session.");
        throw new Error("Tenant context not found.");
     }
 
-     // Ensure employeeId is a valid UUID (basic check)
-     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-     if (!uuidRegex.test(employeeId)) {
-          console.error("[Action getEmployeeLeaveBalances] Invalid employee ID format:", employeeId);
-          throw new Error('Invalid employee identifier.');
-     }
-
+     // UUID validation handled in DB layer
 
     console.log(`[Action getEmployeeLeaveBalances] Fetching balances for employee ${employeeId}, tenant ${tenantId}`);
     // TODO: Authorization - Check if user can view this employee's balances
@@ -307,7 +268,6 @@ export async function getEmployeeLeaveBalances(employeeId: string): Promise<Leav
         return dbGetLeaveBalances(tenantId, employeeId);
     } catch (dbError: any) {
          console.error(`[Action getEmployeeLeaveBalances] Database error for employee ${employeeId}, tenant ${tenantId}:`, dbError);
-         // Provide more specific error message for UUID errors
          if (dbError.code === '22P02' && dbError.message?.includes('uuid')) {
              throw new Error("Internal server error: Invalid identifier.");
          }
@@ -318,17 +278,13 @@ export async function getEmployeeLeaveBalances(employeeId: string): Promise<Leav
 // --- Accrual Action ---
 export async function runAccrualProcess(): Promise<{ success: boolean; error?: string }> {
     // Authorization: Should only be run by an admin or system process
-    const isAdmin = await isUserAdmin();
+    const isAdmin = await isAdminFromSession(); // Use new session helper
     if (!isAdmin) return { success: false, error: 'Unauthorized.' };
 
     console.log("Triggering accrual process via server action...");
     try {
-        // The DB function should handle iterating through tenants if needed,
-        // or it operates on all tenants if designed that way.
-        // Let's assume dbRunMonthlyAccrual handles this logic.
         await dbRunMonthlyAccrual();
         revalidatePath('/leave', 'layout'); // Revalidate all leave pages across tenants
-        // Consider revalidating individual employee balance endpoints if they exist
         return { success: true };
     } catch (error: any) {
         console.error("Error running accrual process (action):", error);

@@ -1,36 +1,42 @@
+// This file can likely be removed or repurposed.
+// API routes cannot directly use `next/headers` like Server Components.
+// Tenant context for API routes should ideally be derived from:
+// 1. Session/Authentication: If the user is logged in, their session should contain the tenant ID.
+// 2. Explicit Parameter: If the API is designed to accept a tenant ID or domain as part of the URL path or query string.
+// 3. Custom Header (Set by Middleware?): If middleware adds a header like X-Tenant-Id based on the request host/session.
 
-import { NextRequest } from 'next/server';
-import { getTenantByDomain } from '@/modules/auth/lib/db'; // Import DB function
+// If using sessions, you would fetch the session within the API route handler.
+// Example (conceptual):
+/*
+import { getSession } from 'next-auth/react'; // Or your auth library's equivalent
 
-/**
- * Extracts the tenant ID from the request by resolving the domain
- * passed in the X-Tenant-Domain header (set by middleware).
- *
- * @param request The NextRequest object.
- * @returns The tenant ID string or null if not found/identifiable.
- */
-export async function getTenantId(request: NextRequest): Promise<string | null> {
-    // Get domain from the header set by middleware
-    const tenantDomain = request.headers.get('X-Tenant-Domain');
-    if (!tenantDomain) {
-        console.warn('[API Util - getTenantId] X-Tenant-Domain header not found.');
-        return null;
+export async function GET(request: NextRequest) {
+    const session = await getSession({ req: request }); // Get session associated with the request
+    if (!session?.user?.tenantId) {
+        return NextResponse.json({ error: 'Unauthorized or tenant context missing.' }, { status: 401 });
     }
+    const tenantId = session.user.tenantId;
+    // ... rest of your API logic using tenantId ...
+}
+*/
 
-    console.log(`[API Util - getTenantId] Found Tenant Domain in header: ${tenantDomain}`);
+// If using a custom header set by middleware:
+/*
+import { NextRequest, NextResponse } from 'next/server';
 
-    // Resolve tenant ID from the domain using the database
-    try {
-        const tenant = await getTenantByDomain(tenantDomain);
-        if (tenant) {
-            console.log(`[API Util - getTenantId] Resolved Tenant ID from domain: ${tenant.id}`);
-            return tenant.id;
-        } else {
-            console.warn(`[API Util - getTenantId] Tenant not found in DB for domain: ${tenantDomain}`);
-            return null; // Domain in header doesn't match a tenant
-        }
-    } catch (error) {
-        console.error(`[API Util - getTenantId] Error resolving tenant from domain ${tenantDomain}:`, error);
-        return null; // DB error, treat as tenant not found for API safety
+export async function GET(request: NextRequest) {
+    const tenantId = request.headers.get('X-Tenant-Id'); // Get header set by middleware
+    if (!tenantId) {
+         return NextResponse.json({ error: 'Tenant context header missing.' }, { status: 400 });
     }
+    // ... rest of your API logic using tenantId ...
+}
+*/
+
+// Removing the previous implementation as it's not applicable to standard API routes.
+console.warn("getTenantId utility in src/api/utils is deprecated for API routes. Use session or custom headers.");
+
+export async function getTenantId(request: any): Promise<string | null> {
+    console.error("getTenantId utility should not be used directly in API routes.");
+    return null;
 }

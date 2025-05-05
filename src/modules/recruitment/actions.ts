@@ -16,13 +16,14 @@ import {
 } from '@/modules/recruitment/lib/db';
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
-import { getTenantIdFromAuth, isUserAdmin } from '@/lib/auth'; // Import auth helpers
+// Import new session helpers from auth actions
+import { getTenantIdFromSession, isAdminFromSession } from '@/modules/auth/actions';
 
 // --- Helper Functions ---
 async function checkRecruitmentPermission(): Promise<string> {
-    const tenantId = await getTenantIdFromAuth();
+    const tenantId = await getTenantIdFromSession(); // Use new session helper
     if (!tenantId) throw new Error("Tenant context not found.");
-    const isAdmin = await isUserAdmin(); // Or check for specific Recruitment Manager role
+    const isAdmin = await isAdminFromSession(); // Use new session helper (or check specific role)
     if (!isAdmin) throw new Error("Unauthorized to manage recruitment.");
     return tenantId;
 }
@@ -31,14 +32,14 @@ async function checkRecruitmentPermission(): Promise<string> {
 // --- Job Posting Server Actions ---
 
 export async function getJobPostings(filters?: { status?: JobPosting['status'] }): Promise<JobPosting[]> {
-    const tenantId = await getTenantIdFromAuth();
+    const tenantId = await getTenantIdFromSession(); // Use new session helper
     if (!tenantId) {
-        console.error("[Action getJobPostings] Tenant ID could not be determined from auth.");
+        console.error("[Action getJobPostings] Tenant ID could not be determined from session.");
+        // For public job board, we might allow fetching 'Open' without tenantId
+        // Let the DB/API layer handle this based on context. Here, assume internal needs tenant.
         throw new Error("Tenant context not found.");
     }
     console.log(`[Action getJobPostings] Fetching for tenant ${tenantId}, filters:`, filters);
-    // Public job board might fetch 'Open' without auth, internal needs auth
-    // Let the API route handle this distinction based on request origin/authentication
     try {
         return dbGetAllJobPostings(tenantId, filters);
     } catch (dbError: any) {
@@ -48,10 +49,12 @@ export async function getJobPostings(filters?: { status?: JobPosting['status'] }
 }
 
 export async function getJobPostingById(id: string): Promise<JobPosting | undefined> {
-    const tenantId = await getTenantIdFromAuth();
+    const tenantId = await getTenantIdFromSession(); // Use new session helper
     if (!tenantId) {
-        console.error("[Action getJobPostingById] Tenant ID could not be determined from auth.");
-        throw new Error("Tenant context not found.");
+        console.error("[Action getJobPostingById] Tenant ID could not be determined from session.");
+        // Public job detail page might fetch without auth, DB layer handles tenant check if needed
+        // For internal access, require tenantId.
+         throw new Error("Tenant context not found.");
     }
      console.log(`[Action getJobPostingById] Fetching posting ${id} for tenant ${tenantId}`);
     // TODO: Auth check - Can the user view this posting?
@@ -97,19 +100,17 @@ export async function updateJobPostingAction(id: string, formData: Partial<Omit<
          return { success: false, errors: [{ code: 'custom', path: [], message: authError.message }] };
      }
 
-    // Use partial validation for updates
     const validation = jobPostingSchema.omit({ id: true, datePosted: true, tenantId: true }).partial().safeParse(formData);
     if (!validation.success) {
          console.error("Update Job Posting Validation Errors:", validation.error.flatten());
         return { success: false, errors: validation.error.errors };
     }
     try {
-        // Pass tenantId for verification in DB layer
         const updatedJobPosting = await dbUpdateJobPosting(id, tenantId, validation.data);
         if (updatedJobPosting) {
             revalidatePath(`/${tenantId}/recruitment`);
             revalidatePath(`/${tenantId}/recruitment/${id}`);
-            revalidatePath('/jobs'); // Revalidate public job board
+            revalidatePath('/jobs');
             revalidatePath(`/jobs/${id}`);
             return { success: true, jobPosting: updatedJobPosting };
         } else {
@@ -130,14 +131,12 @@ export async function deleteJobPostingAction(id: string): Promise<{ success: boo
      }
 
     try {
-        // Pass tenantId for verification in DB layer
         const deleted = await dbDeleteJobPosting(id, tenantId);
         if (deleted) {
             revalidatePath(`/${tenantId}/recruitment`);
-            revalidatePath('/jobs'); // Revalidate public job board
+            revalidatePath('/jobs');
             return { success: true };
         } else {
-            // Should be caught by db function error now if candidates exist or not found
              return { success: false, error: 'Job posting not found.' };
         }
     } catch (error: any) {
@@ -191,7 +190,6 @@ export async function addCandidateAction(formData: Omit<CandidateFormData, 'tena
      }
 
      const dataWithTenant = { ...formData, tenantId };
-     // Validate data including tenantId
      const validation = candidateSchema.omit({ id: true, applicationDate: true }).safeParse(dataWithTenant);
      if (!validation.success) {
          console.error("Add Candidate Validation Errors:", validation.error.flatten());
@@ -199,7 +197,7 @@ export async function addCandidateAction(formData: Omit<CandidateFormData, 'tena
     }
     try {
         const newCandidate = await dbAddCandidate(validation.data);
-        revalidatePath(`/${tenantId}/recruitment/${formData.jobPostingId}`); // Revalidate the specific job posting page
+        revalidatePath(`/${tenantId}/recruitment/${formData.jobPostingId}`);
         return { success: true, candidate: newCandidate };
     } catch (error: any) {
         console.error("Error adding candidate (action):", error);
@@ -215,17 +213,15 @@ export async function updateCandidateAction(id: string, formData: Partial<Omit<C
          return { success: false, errors: [{ code: 'custom', path: [], message: authError.message }] };
      }
 
-    // Use partial validation for updates
     const validation = candidateSchema.omit({ id: true, applicationDate: true, jobPostingId: true, tenantId: true }).partial().safeParse(formData);
      if (!validation.success) {
         console.error("Update Candidate Validation Errors:", validation.error.flatten());
         return { success: false, errors: validation.error.errors };
     }
     try {
-        // Pass tenantId for verification in DB layer
         const updatedCandidate = await dbUpdateCandidate(id, tenantId, validation.data);
         if (updatedCandidate) {
-             revalidatePath(`/${tenantId}/recruitment/${updatedCandidate.jobPostingId}`); // Revalidate the specific job posting page
+             revalidatePath(`/${tenantId}/recruitment/${updatedCandidate.jobPostingId}`);
             return { success: true, candidate: updatedCandidate };
         } else {
             return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Candidate not found.' }] };
@@ -245,7 +241,6 @@ export async function updateCandidateStatusAction(id: string, status: CandidateS
          return { success: false, errors: [{ code: 'custom', path: [], message: authError.message }] };
      }
     try {
-        // Pass tenantId for verification
         const updatedCandidate = await dbUpdateCandidate(id, tenantId, { status });
         if (updatedCandidate) {
              revalidatePath(`/${tenantId}/recruitment/${updatedCandidate.jobPostingId}`);
@@ -268,17 +263,15 @@ export async function deleteCandidateAction(id: string): Promise<{ success: bool
          return { success: false, error: authError.message };
      }
     try {
-        // Get posting ID before deleting (ensure candidate belongs to tenant)
         const candidate = await dbGetCandidateById(id, tenantId);
         if (!candidate) {
             return { success: false, error: 'Candidate not found.' };
         }
         const jobPostingId = candidate.jobPostingId;
 
-        // Pass tenantId for verification
         const deleted = await dbDeleteCandidate(id, tenantId);
         if (deleted) {
-            revalidatePath(`/${tenantId}/recruitment/${jobPostingId}`); // Revalidate the specific job posting page
+            revalidatePath(`/${tenantId}/recruitment/${jobPostingId}`);
             return { success: true, jobPostingId };
         } else {
              return { success: false, error: 'Candidate not found during deletion.' };

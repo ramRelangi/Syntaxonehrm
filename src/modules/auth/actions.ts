@@ -1,11 +1,12 @@
 'use server';
 
-
-// Removed runtime export as it causes issues with 'use server'
+// Force this module to use the Node.js runtime because bcrypt needs it
+// export const runtime = 'nodejs'; // This causes errors with 'use server'
 
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import nodemailer from 'nodemailer';
+import { cookies, headers } from 'next/headers'; // Import cookies and headers
 import {
     registrationSchema,
     type RegistrationFormData,
@@ -16,14 +17,16 @@ import {
     type TenantForgotPasswordFormInputs,
     tenantForgotPasswordSchema,
     rootForgotPasswordSchema,
-    type RootForgotPasswordFormInputs
+    type RootForgotPasswordFormInputs,
+    type SessionData, // Import SessionData type
 } from '@/modules/auth/types'; // Ensure all schemas are imported
-import { addTenant, getUserByEmail, addUser, getTenantByDomain } from '@/modules/auth/lib/db';
+import { addTenant, getUserByEmail, addUser, getTenantByDomain, getUserById as dbGetUserById } from '@/modules/auth/lib/db';
 import pool, { testDbConnection } from '@/lib/db'; // Import pool and test function
 import { redirect } from 'next/navigation'; // Import redirect
-import { headers } from 'next/headers';
 import { initializeDatabase } from '@/lib/init-db';
-import { setMockSession, clearMockSession } from '@/lib/auth'; // Import mock session helpers
+// Remove imports of now-unusable helpers from src/lib/auth.ts
+// import { setMockSession, clearMockSession } from '@/lib/auth';
+import { MOCK_SESSION_COOKIE } from '@/lib/auth'; // Keep constant import if needed
 
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
 
@@ -88,7 +91,7 @@ function createInternalTransporter(): nodemailer.Transporter | null {
 // Construct login URL based on tenant domain
 function constructLoginUrl(tenantDomain: string): string {
     const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-    const protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http:'; // Determine protocol
+    const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http'; // Use https in prod
     // Read port from NEXT_PUBLIC_BASE_URL or default, handle potential missing port
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `http://localhost:9002`;
     let port = '';
@@ -99,12 +102,13 @@ function constructLoginUrl(tenantDomain: string): string {
          }
      } catch (e) {
          console.warn("Could not parse NEXT_PUBLIC_BASE_URL to extract port, using default behavior.");
+         // Assume standard ports for prod, default dev port otherwise
          if (process.env.NODE_ENV !== 'production') {
               port = ':9002'; // Default dev port
          }
      }
     // Construct URL like http://subdomain.domain:port/login
-    const loginUrl = `${protocol}//${tenantDomain}.${rootDomain}${port}/login`;
+    const loginUrl = `${protocol}://${tenantDomain}.${rootDomain}${port}/login`;
     console.log(`[constructLoginUrl] Constructed: ${loginUrl}`);
     return loginUrl;
 }
@@ -158,7 +162,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     const { companyName, companyDomain, adminName, adminEmail, adminPassword } = validation.data;
     const lowerCaseDomain = companyDomain.toLowerCase();
 
-    // 3. Ensure DB Schema Initialization (Attempt Initialization if needed)
+    // 3. Ensure DB Schema Initialization
     try {
         console.log("[registerTenantAction] Checking if 'tenants' table exists...");
         await pool.query('SELECT 1 FROM tenants LIMIT 1');
@@ -256,7 +260,6 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
     const validation = tenantLoginSchema.safeParse(credentials);
     if (!validation.success) {
          console.warn("[loginAction] Invalid login credentials format:", validation.error);
-         // Return a generic error message for security
          return { success: false, error: "Invalid email or password format." };
     }
     const { email, password } = validation.data;
@@ -283,7 +286,7 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
         const tenant = await getTenantByDomain(tenantDomain);
         if (!tenant) {
             console.warn(`[loginAction] Tenant not found for domain: ${tenantDomain}`);
-            return { success: false, error: "Invalid company domain or login URL." }; // More specific error
+            return { success: false, error: "Invalid company domain or login URL." };
         }
         console.log(`[loginAction] Found tenant: ${tenant.id} (${tenant.name})`);
 
@@ -291,7 +294,7 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
         const user = await getUserByEmail(email, tenant.id);
         if (!user || !user.isActive) {
             console.warn(`[loginAction] User not found or inactive for email: ${email} in tenant: ${tenant.id}`);
-            return { success: false, error: "Invalid email or password." }; // Keep generic for failed login
+            return { success: false, error: "Invalid email or password." };
         }
         console.log(`[loginAction] Found active user: ${user.id} (${user.name})`);
 
@@ -300,23 +303,27 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
         const passwordMatch = await bcrypt.compare(password, user.passwordHash);
         if (!passwordMatch) {
             console.warn(`[loginAction] Password mismatch for user: ${user.id}`);
-            return { success: false, error: "Invalid email or password." }; // Keep generic
+            return { success: false, error: "Invalid email or password." };
         }
         console.log(`[loginAction] Password verified for user: ${user.id}`);
 
-        // 4. Login Success - **TODO: Implement Session Management**
-        //    - Generate session token (JWT or random string)
-        //    - Store session token in DB (linked to user ID, tenant ID, expiry)
-        //    - Set secure, HTTP-only cookie with session token
-        console.log(`[loginAction] Login successful for user: ${user.id}, tenant: ${tenant.id}`);
-
-        // Use mock session helper
-        await setMockSession({
+        // 4. Login Success - Set Session Cookie
+        const sessionData: SessionData = {
             userId: user.id,
             tenantId: user.tenantId,
             tenantDomain: tenant.domain,
             userRole: user.role,
+        };
+
+        // Set the session cookie using cookies() from next/headers
+        cookies().set(MOCK_SESSION_COOKIE, JSON.stringify(sessionData), {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            path: '/',
+            sameSite: 'lax',
+            maxAge: 60 * 60 * 24 * 7, // 1 week
         });
+        console.log("[loginAction] Mock session cookie set.");
 
 
         // Return safe user data (omit password hash)
@@ -334,8 +341,6 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
 // --- Logout Action ---
 export async function logoutAction() {
     console.log("[logoutAction] Logging out user...");
-    // Clear mock session helper
-    await clearMockSession();
 
     let tenantDomain: string | null = null;
     let redirectUrl = '/login'; // Default to root login page
@@ -351,8 +356,15 @@ export async function logoutAction() {
         if (tenantDomain) {
             redirectUrl = constructLoginUrl(tenantDomain); // Construct tenant-specific login URL
         }
+
+         // Clear the session cookie using cookies() from next/headers
+        cookies().delete(MOCK_SESSION_COOKIE);
+        console.log("[logoutAction] Mock session cookie cleared.");
+
     } catch (error) {
-        console.error("[logoutAction] Error retrieving tenant domain for redirect:", error);
+        console.error("[logoutAction] Error retrieving tenant domain or clearing cookie:", error);
+        // Attempt to clear cookie even if domain retrieval failed
+        try { cookies().delete(MOCK_SESSION_COOKIE); } catch {}
         // Keep default redirectUrl ('/login')
     }
 
@@ -452,4 +464,76 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
         // Don't reveal specific errors in the message
         return { success: false, message: 'An error occurred while processing the password reset request.' };
     }
+}
+
+
+// --- Helper to get session data within Server Actions ---
+// This encapsulates the cookie reading logic
+export async function getSessionData(): Promise<SessionData | null> {
+    try {
+        const cookieStore = cookies();
+        const sessionCookie = cookieStore.get(MOCK_SESSION_COOKIE);
+
+        if (sessionCookie?.value) {
+            const sessionData: SessionData = JSON.parse(sessionCookie.value);
+            // Add basic validation
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (
+                sessionData &&
+                sessionData.userId && uuidRegex.test(sessionData.userId) &&
+                sessionData.tenantId && uuidRegex.test(sessionData.tenantId) &&
+                sessionData.tenantDomain &&
+                sessionData.userRole
+            ) {
+                return sessionData;
+            }
+            console.warn("[getSessionData] Invalid session data found in cookie.");
+            // Optionally clear invalid cookie here
+            // cookieStore.delete(MOCK_SESSION_COOKIE);
+        }
+    } catch (error) {
+        console.error("[getSessionData] Error reading or parsing session cookie:", error);
+         // Optionally clear potentially corrupted cookie here
+        // cookies().delete(MOCK_SESSION_COOKIE);
+    }
+    return null;
+}
+
+// --- Helpers using getSessionData ---
+export async function getTenantIdFromSession(): Promise<string | null> {
+    const session = await getSessionData();
+    return session?.tenantId ?? null;
+}
+
+export async function getUserIdFromSession(): Promise<string | null> {
+    const session = await getSessionData();
+    return session?.userId ?? null;
+}
+
+export async function getUserRoleFromSession(): Promise<string | null> {
+    const session = await getSessionData();
+    return session?.userRole ?? null;
+}
+
+export async function isAdminFromSession(): Promise<boolean> {
+    const role = await getUserRoleFromSession();
+    return role === 'Admin';
+}
+
+export async function getUserFromSession(): Promise<Omit<User, 'passwordHash'> | null> {
+    const session = await getSessionData();
+    if (!session?.userId || !session.tenantId) {
+        return null;
+    }
+    try {
+        // Fetch user from DB using session info, ensuring tenant match
+        const user = await dbGetUserById(session.userId, session.tenantId);
+        if (user) {
+            const { passwordHash, ...safeUser } = user;
+            return safeUser;
+        }
+    } catch (error) {
+        console.error("[getUserFromSession] Error fetching user from DB:", error);
+    }
+    return null;
 }
