@@ -1,3 +1,4 @@
+
 // src/modules/recruitment/components/job-detail-content.tsx
 "use client";
 
@@ -139,20 +140,21 @@ export default function JobDetailContent({ jobId }: JobDetailContentProps) {
 
       <Card className="shadow-lg">
         <CardHeader>
-          <div className="flex justify-between items-start gap-4 mb-2">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-2">
             <CardTitle className="text-2xl md:text-3xl">{job.title}</CardTitle>
-            <Badge variant="secondary" className="shrink-0 mt-1">{job.location}</Badge>
+            <Badge variant="secondary" className="shrink-0 mt-1 sm:mt-0">{job.location}</Badge>
           </div>
+          {/* Improved responsive layout for details */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1.5"><Briefcase className="h-4 w-4" /> {job.department}</span>
-            {job.salaryRange && <span className="flex items-center gap-1.5"><DollarSign className="h-4 w-4" /> {job.salaryRange}</span>}
-            <span className="flex items-center gap-1.5"><Calendar className="h-4 w-4" /> Posted: {formatDateSafe(job.datePosted)}</span>
-            {job.closingDate && <span className="flex items-center gap-1.5"><Calendar className="h-4 w-4" /> Closes: {formatDateSafe(job.closingDate)}</span>}
+            <span className="flex items-center gap-1.5 whitespace-nowrap"><Briefcase className="h-4 w-4" /> {job.department}</span>
+            {job.salaryRange && <span className="flex items-center gap-1.5 whitespace-nowrap"><DollarSign className="h-4 w-4" /> {job.salaryRange}</span>}
+            <span className="flex items-center gap-1.5 whitespace-nowrap"><Calendar className="h-4 w-4" /> Posted: {formatDateSafe(job.datePosted)}</span>
+            {job.closingDate && <span className="flex items-center gap-1.5 whitespace-nowrap"><Calendar className="h-4 w-4" /> Closes: {formatDateSafe(job.closingDate)}</span>}
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Render description with whitespace preservation */}
-          <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">
+          {/* Render description with whitespace preservation and prose styling */}
+          <div className="prose prose-sm sm:prose-base dark:prose-invert max-w-none whitespace-pre-wrap break-words">
             {job.description}
           </div>
 
@@ -164,7 +166,7 @@ export default function JobDetailContent({ jobId }: JobDetailContentProps) {
                 Apply Now <ExternalLink className="ml-2 h-4 w-4" />
               </a>
             </Button>
-            <p className="mt-2 text-xs text-muted-foreground">Click "Apply Now" to submit your application through our external portal.</p>
+            <p className="mt-2 text-xs text-muted-foreground">Click "Apply Now" to submit your application.</p>
           </div>
         </CardContent>
       </Card>
@@ -178,13 +180,13 @@ export default function JobDetailContent({ jobId }: JobDetailContentProps) {
 const JobDetailSkeleton = () => (
   <>
     <div className="mb-6">
-      <Skeleton className="h-9 w-40" /> {/* Back button skeleton */}
+      <Skeleton className="h-9 w-40 rounded-md" /> {/* Back button skeleton */}
     </div>
     <Card className="shadow-lg">
       <CardHeader>
-        <div className="flex justify-between items-start gap-4 mb-2">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-2">
           <Skeleton className="h-8 w-3/5 rounded-md" />
-          <Skeleton className="h-6 w-24 rounded-full" />
+          <Skeleton className="h-6 w-24 rounded-full mt-1 sm:mt-0" />
         </div>
         <Skeleton className="h-4 w-full rounded-md" />
         <Skeleton className="h-4 w-3/4 rounded-md" />

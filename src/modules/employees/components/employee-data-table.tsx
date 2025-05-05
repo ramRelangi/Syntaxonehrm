@@ -201,7 +201,8 @@ export function EmployeeDataTable<TData extends Employee, TValue>({
 
 
       {/* Data Table */}
-      <div className="rounded-md border shadow-sm">
+      {/* Added overflow-auto for responsiveness */}
+      <div className="rounded-md border shadow-sm overflow-auto">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (

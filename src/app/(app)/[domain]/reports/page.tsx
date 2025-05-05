@@ -60,7 +60,9 @@ interface ReportsPageProps {
 }
 
 export default function TenantReportsPage({ params }: ReportsPageProps) {
-  const tenantDomain = params.domain;
+   // Use React.use() to safely access params in a Client Component context if needed
+   const safeParams = React.use(params);
+   const tenantDomain = safeParams?.domain;
   const [selectedDataSource, setSelectedDataSource] = React.useState<string | null>(null);
   const [selectedFields, setSelectedFields] = React.useState<string[]>([]);
 
@@ -83,8 +85,14 @@ export default function TenantReportsPage({ params }: ReportsPageProps) {
     alert("Report generation logic not implemented yet.");
   };
 
+  if (!tenantDomain) {
+       // Handle case where domain isn't available yet or is invalid
+       return <div>Error: Could not determine tenant context.</div>;
+   }
+
+
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6 md:gap-8"> {/* Increased gap */}
       <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
         <BarChart2 className="h-6 w-6" /> Reporting & Analytics for {tenantDomain}
       </h1>
@@ -95,7 +103,8 @@ export default function TenantReportsPage({ params }: ReportsPageProps) {
             <CardTitle>Pre-built Reports</CardTitle>
             <CardDescription>Quickly generate commonly used HR reports.</CardDescription>
          </CardHeader>
-         <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {/* Responsive grid */}
+         <CardContent className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
            {/* Add more pre-built report examples */}
            <PreBuiltReportCard title="Headcount Report" description="Current number of employees by department and status." icon={FileText} />
            <PreBuiltReportCard title="Turnover Analysis" description="Analyze employee turnover rates over a selected period." icon={FileText} />
@@ -117,7 +126,7 @@ export default function TenantReportsPage({ params }: ReportsPageProps) {
            <div className="space-y-2">
               <Label htmlFor="dataSource" className="font-semibold">1. Select Data Source</Label>
               <Select onValueChange={(value) => { setSelectedDataSource(value); setSelectedFields([]); }} value={selectedDataSource ?? ""}>
-                <SelectTrigger id="dataSource">
+                <SelectTrigger id="dataSource" className="w-full md:w-[300px]"> {/* Limit width on larger screens */}
                   <SelectValue placeholder="Choose data to report on..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -132,7 +141,8 @@ export default function TenantReportsPage({ params }: ReportsPageProps) {
            {selectedDataSource && (
              <div className="space-y-2">
                 <Label className="font-semibold">2. Select Fields</Label>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 border rounded-md bg-muted/50">
+                 {/* Responsive grid for fields */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 p-4 border rounded-md bg-muted/50">
                   {availableFields.length > 0 ? availableFields.map(field => (
                     <div key={field.id} className="flex items-center space-x-2">
                       <Checkbox
@@ -155,11 +165,11 @@ export default function TenantReportsPage({ params }: ReportsPageProps) {
                 <Label className="font-semibold">3. Filters & Grouping (Optional)</Label>
                  <div className="p-4 border rounded-md space-y-4 bg-muted/50">
                     <p className="text-sm text-muted-foreground italic">Advanced filtering, grouping, and sorting options will be available here.</p>
-                    {/* Example filter placeholder */}
-                    <div className="flex items-center gap-2">
-                        <Select disabled><SelectTrigger><SelectValue placeholder="Filter Field..." /></SelectTrigger></Select>
-                        <Select disabled><SelectTrigger><SelectValue placeholder="Operator..." /></SelectTrigger></Select>
-                        <Input disabled placeholder="Value..." />
+                    {/* Example filter placeholder - make it responsive */}
+                    <div className="flex flex-col sm:flex-row items-center gap-2">
+                        <Select disabled><SelectTrigger className="flex-1"><SelectValue placeholder="Filter Field..." /></SelectTrigger></Select>
+                        <Select disabled><SelectTrigger className="flex-1"><SelectValue placeholder="Operator..." /></SelectTrigger></Select>
+                        <Input disabled placeholder="Value..." className="flex-1"/>
                          <Button variant="ghost" size="sm" disabled><PlusCircle className="h-4 w-4" /></Button>
                     </div>
                  </div>

@@ -138,7 +138,8 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
   }
 
   return (
-    <div className="border rounded-md shadow-sm">
+    // Added overflow-auto for responsiveness
+    <div className="border rounded-md shadow-sm overflow-auto">
       <Table>
         <TableHeader>
           <TableRow>

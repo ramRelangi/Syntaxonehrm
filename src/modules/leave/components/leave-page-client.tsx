@@ -1,3 +1,4 @@
+
 // src/modules/leave/components/leave-page-client.tsx
 "use client";
 
@@ -13,44 +14,27 @@ import { HolidayManagement } from "@/modules/leave/components/holiday-management
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { LeaveType, LeaveRequest, LeaveBalance, Holiday } from "@/modules/leave/types"; // Added Holiday type
-import { getHolidaysAction } from '@/modules/leave/actions'; // Import holiday action
+import { getHolidaysAction, getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances } from '@/modules/leave/actions'; // Import all relevant actions
 import { getSessionData } from '@/modules/auth/actions'; // Import session helper
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Import Alert
-import { cn } from "@/lib/utils"; // Import cn utility
+import { cn } from '@/lib/utils'; // Import cn utility
 
-// Helper to fetch data from API routes - CLIENT SIDE VERSION
-async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
+// Helper to fetch data from API routes - CLIENT SIDE VERSION (Simplified - actions used directly now)
+async function fetchDataViaApi<T>(url: string, options?: RequestInit): Promise<T> {
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
-    console.log(`[Leave Page Client - fetchData] Fetching data from: ${fullUrl}`);
-
+    console.log(`[Leave Page Client - fetchDataViaApi] Fetching from: ${fullUrl}`);
     try {
-        // API routes use headers for tenant context
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
-        console.log(`[Leave Page Client - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
-
         if (!response.ok) {
             const errorText = await response.text();
-            console.error(`[Leave Page Client - fetchData] Fetch error response body for ${fullUrl}:`, errorText);
             let errorPayload: { message?: string; error?: string } = {};
-             try {
-                 errorPayload = JSON.parse(errorText || '{}');
-             } catch (parseError) {
-                 console.warn(`[Leave Page Client - fetchData] Failed to parse error response as JSON for ${fullUrl}. Raw text:`, errorText);
-                 errorPayload.message = errorText;
-             }
-             // Try to extract a more specific message
-             const specificError = errorPayload.error || errorPayload.message || `HTTP error! status: ${response.status}`;
-             throw new Error(specificError);
+            try { errorPayload = JSON.parse(errorText || '{}'); } catch {}
+            throw new Error(errorPayload.error || errorPayload.message || `HTTP error! status: ${response.status}`);
         }
         return await response.json() as T;
     } catch (error) {
-        console.error(`[Leave Page Client - fetchData] Error in fetchData for ${fullUrl}:`, error);
-        if (error instanceof Error) {
-           // Rethrow the extracted or original error message
-           throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
-        } else {
-           throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
-        }
+        if (error instanceof Error) { throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`); }
+        else { throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`); }
     }
 }
 
@@ -75,7 +59,6 @@ export default function LeavePageClient() {
         setIsLoading(true); // Start loading
         setAuthError(null);
         try {
-            // Use the server action to get session data
             const session = await getSessionData();
             if (!session || !session.userId || !session.tenantId || !session.tenantDomain) {
                 throw new Error("Could not verify user identity or tenant context.");
@@ -92,15 +75,13 @@ export default function LeavePageClient() {
                 description: err.message || "Failed to load user session.",
                 variant: "destructive",
             });
-        } finally {
-             // Don't set loading false here, let refetchData handle it
         }
     };
     fetchAuthContext();
   }, [toast]);
 
 
-  // Function to refetch all necessary data AFTER auth context is loaded
+  // Function to refetch all necessary data AFTER auth context is loaded using server actions
   const refetchData = React.useCallback(async () => {
       if (!userId || !tenantDomain) {
           console.log("[Leave Page Client] Skipping refetchData, userId or tenantDomain not available yet.");
@@ -111,12 +92,13 @@ export default function LeavePageClient() {
       setIsLoading(true);
       setFetchError(null);
       try {
+           // Use server actions directly instead of API calls
           const [typesData, allReqData, myReqData, balancesData, holidaysData] = await Promise.all([
-              fetchData<LeaveType[]>('/api/leave/types'),
-              isAdmin ? fetchData<LeaveRequest[]>('/api/leave/requests') : Promise.resolve([]),
-              fetchData<LeaveRequest[]>(`/api/leave/requests?employeeId=${userId}`),
-              fetchData<LeaveBalance[]>(`/api/leave/balances/${userId}`),
-              getHolidaysAction(),
+              getLeaveTypes(), // Action uses session context
+              isAdmin ? getLeaveRequests() : Promise.resolve([]), // Action uses session context
+              getLeaveRequests({ employeeId: userId }), // Action uses session context + filter
+              getEmployeeLeaveBalances(userId), // Action uses session context for tenant
+              getHolidaysAction(), // Action uses session context
           ]);
           setLeaveTypes(typesData);
           setAllRequests(allReqData);
@@ -124,7 +106,7 @@ export default function LeavePageClient() {
           setMyBalances(balancesData);
           setHolidays(holidaysData);
       } catch (err: any) {
-          console.error("[Leave Page Client] Error during refetchData:", err);
+          console.error("[Leave Page Client] Error during refetchData using actions:", err);
           const errorMsg = err.message || "Failed to load leave management data.";
           setFetchError(errorMsg);
           toast({
@@ -135,7 +117,7 @@ export default function LeavePageClient() {
       } finally {
           setIsLoading(false);
       }
-  }, [toast, userId, isAdmin, tenantDomain]);
+  }, [toast, userId, isAdmin, tenantDomain]); // Keep dependencies
 
   // Fetch data when userId and tenantDomain become available
   React.useEffect(() => {
@@ -174,13 +156,18 @@ export default function LeavePageClient() {
     }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 md:gap-8"> {/* Increased gap */}
       <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
           <Calendar className="h-6 w-6" /> Leave Management {tenantDomain ? `for ${tenantDomain}` : ''}
       </h1>
 
        {isLoading && !fetchError && (
-          <Card><CardContent className="p-4 text-center text-muted-foreground"><Skeleton className="h-64 w-full" /></CardContent></Card>
+          // Show multiple skeletons for better loading perception
+           <div className="space-y-6 md:space-y-8">
+              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-10 w-full max-w-lg" />
+              <Skeleton className="h-64 w-full" />
+           </div>
        )}
        {fetchError && !isLoading && (
            <Card><CardContent className="p-4 text-destructive text-center">{fetchError}</CardContent></Card>
@@ -189,22 +176,22 @@ export default function LeavePageClient() {
 
        {!isLoading && !fetchError && userId && (
            <>
-             {/* Leave Balances Section */}
+             {/* Leave Balances Section - Responsive Grid */}
               <Card className="shadow-sm">
                  <CardHeader>
                    <CardTitle>My Leave Balances</CardTitle>
                    <CardDescription>Your current available leave balances.</CardDescription>
                  </CardHeader>
-                 <CardContent className="flex flex-wrap gap-4">
+                 <CardContent className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                     {myBalances.length > 0 ? (
                        myBalances.map(balance => (
-                           <div key={balance.leaveTypeId} className="flex items-center gap-2 p-3 border rounded-md bg-secondary/50">
-                               <span className="font-medium">{balance.leaveTypeName || leaveTypeNameMap.get(balance.leaveTypeId) || 'Unknown Type'}:</span>
-                               <Badge variant="outline">{balance.balance} days</Badge>
+                           <div key={balance.leaveTypeId} className="flex flex-col items-start gap-1 p-3 border rounded-md bg-secondary/50">
+                               <span className="font-medium text-sm">{balance.leaveTypeName || leaveTypeNameMap.get(balance.leaveTypeId) || 'Unknown Type'}</span>
+                               <Badge variant="outline" className="text-lg">{balance.balance} days</Badge>
                            </div>
                        ))
                     ) : (
-                        <p className="text-muted-foreground">No leave balance information available.</p>
+                        <p className="text-muted-foreground col-span-full text-center py-4">No leave balance information available.</p>
                     )}
                  </CardContent>
               </Card>
@@ -213,29 +200,32 @@ export default function LeavePageClient() {
               {/* Tabs for Request Form, Lists, and Type/Holiday Management */}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="leave-tabs">
                  {/* Use a flex-wrap layout for the tabs list to handle different screen sizes better */}
-                 <TabsList className="h-auto flex flex-wrap justify-start">
-                   <TabsTrigger value="request" className="flex items-center gap-1">
-                        <PlusCircle className="h-4 w-4"/> Request Leave
-                    </TabsTrigger>
-                   <TabsTrigger value="my-requests" className="flex items-center gap-1">
-                       <ListChecks className="h-4 w-4"/> My Requests
-                    </TabsTrigger>
-                   {isAdmin && (
-                        <TabsTrigger value="all-requests" className="flex items-center gap-1">
-                           <ListChecks className="h-4 w-4"/> Manage Requests
+                 {/* Wrap TabsList in overflow-x-auto for small screens */}
+                 <div className="overflow-x-auto pb-2">
+                     <TabsList className="inline-flex h-auto w-max sm:w-full sm:grid sm:grid-cols-2 md:grid-cols-4">
+                       <TabsTrigger value="request" className="flex items-center gap-1">
+                            <PlusCircle className="h-4 w-4"/> Request Leave
                         </TabsTrigger>
-                   )}
-                   {isAdmin && (
-                       <TabsTrigger value="manage-types" className="flex items-center gap-1">
-                          <Settings className="h-4 w-4"/> Manage Types
-                       </TabsTrigger>
-                   )}
-                   {isAdmin && (
-                       <TabsTrigger value="manage-holidays" className="flex items-center gap-1">
-                          <LandPlot className="h-4 w-4"/> Manage Holidays
-                       </TabsTrigger>
-                   )}
-                 </TabsList>
+                       <TabsTrigger value="my-requests" className="flex items-center gap-1">
+                           <ListChecks className="h-4 w-4"/> My Requests
+                        </TabsTrigger>
+                       {isAdmin && (
+                            <TabsTrigger value="all-requests" className="flex items-center gap-1">
+                               <ListChecks className="h-4 w-4"/> Manage Requests
+                            </TabsTrigger>
+                       )}
+                       {isAdmin && (
+                           <TabsTrigger value="manage-types" className="flex items-center gap-1">
+                              <Settings className="h-4 w-4"/> Manage Types
+                           </TabsTrigger>
+                       )}
+                       {isAdmin && (
+                           <TabsTrigger value="manage-holidays" className="flex items-center gap-1">
+                              <LandPlot className="h-4 w-4"/> Manage Holidays
+                           </TabsTrigger>
+                       )}
+                     </TabsList>
+                 </div>
 
                 {/* Request Leave Tab */}
                 <TabsContent value="request">

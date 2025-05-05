@@ -16,23 +16,23 @@ export default function PublicJobBoardLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      {/* Remove bg-background and text-foreground as they are applied globally */}
       <body className="antialiased">
            {/* Simple Header */}
             <header className="border-b sticky top-0 bg-card z-10">
-                <nav className="container mx-auto px-4 h-16 flex items-center justify-between">
+                {/* Responsive container */}
+                <nav className="container mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
                      <a href="/" className="flex items-center gap-2 font-semibold text-lg text-primary">
                          {/* Re-use placeholder logo or add company logo */}
                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6"><path d="M12 3v18M3 12h18"/></svg>
                          <span className="">SyntaxHive Hrm Careers</span> {/* Or Company Name */}
                      </a>
                      {/* Optional: Add link back to main company site */}
-                     {/* <a href="https://yourcompany.com" target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline">Company Site</a> */}
+                     {/* <a href="https://yourcompany.com" target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline hidden sm:block">Company Site</a> */}
                 </nav>
             </header>
 
-            {/* Main Content Area */}
-            <main className="container mx-auto px-4 py-8 md:py-12">
+            {/* Main Content Area with responsive padding */}
+            <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
                  {children}
             </main>
 

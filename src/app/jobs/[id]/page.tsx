@@ -1,3 +1,4 @@
+
 // src/app/jobs/[id]/page.tsx (Server Component Wrapper)
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -43,7 +44,7 @@ export async function generateMetadata({ params }: Params) {
         return { title: 'Job Not Found' };
     }
     return {
-        title: `${job.title} - Careers`,
+        title: `${job.title} - Careers | SyntaxHive Hrm`, // Updated title
         description: job.description.substring(0, 160) + '...',
     };
 }
@@ -53,13 +54,13 @@ export function JobDetailSkeleton() {
   return (
     <>
       <div className="mb-6">
-        <Skeleton className="h-9 w-40" /> {/* Back button skeleton */}
+        <Skeleton className="h-9 w-40 rounded-md" /> {/* Back button skeleton */}
       </div>
       <Card className="shadow-lg">
         <CardHeader>
-          <div className="flex justify-between items-start gap-4 mb-2">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-2">
             <Skeleton className="h-8 w-3/5 rounded-md" />
-            <Skeleton className="h-6 w-24 rounded-full" />
+            <Skeleton className="h-6 w-24 rounded-full mt-1 sm:mt-0" />
           </div>
           <Skeleton className="h-4 w-full rounded-md" />
           <Skeleton className="h-4 w-3/4 rounded-md" />
@@ -85,7 +86,8 @@ export function JobDetailSkeleton() {
 export default function JobDetailPage({ params }: Params) {
   // The heavy lifting (fetching + rendering) is now done in the dynamically imported component
   return (
-    <div className="max-w-3xl mx-auto">
+    // Responsive max-width
+    <div className="max-w-xl lg:max-w-3xl mx-auto">
        {/* Pass the job ID to the client component */}
        <JobDetailContent jobId={params.id} />
     </div>

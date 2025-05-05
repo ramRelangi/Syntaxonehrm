@@ -98,7 +98,8 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
+    // Center content vertically and horizontally, add padding
+    <div className="flex min-h-screen items-center justify-center bg-background p-4 sm:p-6 lg:p-8">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold">Register for SyntaxHive Hrm</CardTitle>
@@ -116,8 +117,8 @@ export default function RegisterPage() {
                <AlertDescription className="text-green-700 dark:text-green-300 space-y-2">
                  <p>Your company account has been created. You should receive a welcome email shortly with your login details.</p>
                  <p>Your unique login URL is:</p>
-                 <div className="flex items-center gap-2 p-2 bg-background rounded border border-green-200 dark:border-green-800">
-                    <LinkIcon className="h-4 w-4 text-primary" />
+                 <div className="flex items-center gap-2 p-2 bg-background rounded border border-green-200 dark:border-green-800 overflow-x-auto">
+                    <LinkIcon className="h-4 w-4 text-primary flex-shrink-0" />
                     <a href={loginUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-sm text-primary hover:underline break-all">
                         {loginUrl}
                     </a>
@@ -229,4 +230,3 @@ export default function RegisterPage() {
     </div>
   );
 }
-

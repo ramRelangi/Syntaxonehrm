@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react';
@@ -334,65 +335,68 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
         </Dialog>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Default Balance</TableHead>
-              <TableHead>Accrual Rate</TableHead>
-              <TableHead>Needs Approval?</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {leaveTypes.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center">
-                  No leave types configured yet.
-                </TableCell>
-              </TableRow>
-            ) : (
-              leaveTypes.map((type) => (
-                <TableRow key={type.id}>
-                  <TableCell className="font-medium">{type.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{type.description || '-'}</TableCell>
-                  <TableCell>{type.defaultBalance ?? 0} days</TableCell>
-                  <TableCell>{type.accrualRate ?? 0} days/month</TableCell>
-                  <TableCell>{type.requiresApproval ? 'Yes' : 'No'}</TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(type)} className="mr-1 h-8 w-8">
-                      <Edit className="h-4 w-4" />
-                       <span className="sr-only">Edit</span>
-                    </Button>
-                     <AlertDialog>
-                       <AlertDialogTrigger asChild>
-                           <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8" disabled={isDeleting[type.id]}>
-                             {isDeleting[type.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                             <span className="sr-only">Delete</span>
-                           </Button>
-                       </AlertDialogTrigger>
-                       <AlertDialogContent>
-                         <AlertDialogHeader>
-                           <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                           <AlertDialogDescription>
-                             This will permanently delete the <strong>{type.name}</strong> leave type. This action cannot be undone and might fail if the type is currently in use.
-                           </AlertDialogDescription>
-                         </AlertDialogHeader>
-                         <AlertDialogFooter>
-                           <AlertDialogCancel disabled={isDeleting[type.id]}>Cancel</AlertDialogCancel>
-                           <AlertDialogAction onClick={() => handleDelete(type.id, type.name)} disabled={isDeleting[type.id]} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                              {isDeleting[type.id] ? "Deleting..." : "Delete"}
-                           </AlertDialogAction>
-                         </AlertDialogFooter>
-                       </AlertDialogContent>
-                     </AlertDialog>
-                  </TableCell>
+         {/* Added overflow-auto for responsiveness */}
+         <div className="overflow-auto">
+            <Table>
+            <TableHeader>
+                <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Default Balance</TableHead>
+                <TableHead>Accrual Rate</TableHead>
+                <TableHead>Needs Approval?</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+                {leaveTypes.length === 0 ? (
+                <TableRow>
+                    <TableCell colSpan={6} className="h-24 text-center">
+                    No leave types configured yet.
+                    </TableCell>
+                </TableRow>
+                ) : (
+                leaveTypes.map((type) => (
+                    <TableRow key={type.id}>
+                    <TableCell className="font-medium">{type.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{type.description || '-'}</TableCell>
+                    <TableCell>{type.defaultBalance ?? 0} days</TableCell>
+                    <TableCell>{type.accrualRate ?? 0} days/month</TableCell>
+                    <TableCell>{type.requiresApproval ? 'Yes' : 'No'}</TableCell>
+                    <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" onClick={() => openEditDialog(type)} className="mr-1 h-8 w-8">
+                        <Edit className="h-4 w-4" />
+                        <span className="sr-only">Edit</span>
+                        </Button>
+                        <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8" disabled={isDeleting[type.id]}>
+                                {isDeleting[type.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                <span className="sr-only">Delete</span>
+                            </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                This will permanently delete the <strong>{type.name}</strong> leave type. This action cannot be undone and might fail if the type is currently in use.
+                            </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                            <AlertDialogCancel disabled={isDeleting[type.id]}>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDelete(type.id, type.name)} disabled={isDeleting[type.id]} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                {isDeleting[type.id] ? "Deleting..." : "Delete"}
+                            </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                        </AlertDialog>
+                    </TableCell>
+                    </TableRow>
+                ))
+                )}
+            </TableBody>
+            </Table>
+         </div>
       </CardContent>
     </Card>
   );

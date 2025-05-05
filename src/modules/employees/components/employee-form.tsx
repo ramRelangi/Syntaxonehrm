@@ -24,7 +24,6 @@ interface EmployeeFormProps {
   submitButtonText?: string;
   formTitle: string;
   formDescription: string;
-  // tenantDomain is no longer explicitly needed if redirecting relatively
 }
 
 // Exclude tenantId from the form data type itself, as it's derived contextually
@@ -61,7 +60,6 @@ export function EmployeeForm({
   const form = useForm<EmployeeFormSubmitData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      // tenantId removed from form data
       name: employee?.name ?? "",
       email: employee?.email ?? "",
       phone: employee?.phone ?? "",
@@ -111,7 +109,9 @@ export function EmployeeForm({
         });
 
         // Redirect to the tenant-relative /employees path. Middleware handles the rest.
-        router.push('/employees');
+        // router.push('/employees'); // Correct relative path
+        router.push(`../${isEditMode ? employee.id : ''}`); // Navigate back or to detail view
+        router.refresh(); // Refresh data on the target page
 
     } catch (error: any) {
         console.error("[Employee Form] Submission error:", error);
@@ -156,7 +156,8 @@ export function EmployeeForm({
               </FormItem>
             )}
           />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Responsive Grid for Email and Phone */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
              <FormField
               control={form.control}
               name="email"
@@ -186,7 +187,8 @@ export function EmployeeForm({
           </div>
 
           {/* Job Information */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Responsive Grid for Position and Department */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
              <FormField
               control={form.control}
               name="position"
@@ -230,7 +232,8 @@ export function EmployeeForm({
           </div>
 
            {/* Hire Date and Status */}
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+           {/* Responsive Grid for Hire Date and Status */}
+           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
              <FormField
                control={form.control}
                name="hireDate"

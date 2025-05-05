@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react'; // Import React
@@ -14,8 +15,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
 import { tenantLoginSchema, type TenantLoginFormInputs } from '@/modules/auth/types';
-import { loginAction } from '@/modules/auth/actions';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { loginAction } from '@/modules/auth/actions'; // Assuming you have a login action
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Import Alert components
 
 export default function LoginPage() {
   const router = useRouter(); // Use useRouter hook
@@ -44,9 +45,9 @@ export default function LoginPage() {
            hostname === currentRootDomain ||
            hostname === 'localhost' ||
            hostname === '127.0.0.1' ||
-           hostname.match(/^192\.168\.\d+\.\d+$/) ||
-           hostname.match(/^10\.\d+\.\d+\.\d+$/) ||
-           hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/);
+           hostname.match(/^192\.168\.\d+\.\d+$/) || // Local IPs
+           hostname.match(/^10\.\d+\.\d+\.\d+$/) || // Local IPs
+           hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/); // Local IPs
 
         if (isRoot) {
             setIsRootLogin(true);
@@ -64,10 +65,11 @@ export default function LoginPage() {
                 setDisplayUrl(`${subdomain}.${currentRootDomain}${displayPortString}`);
                 console.log(`[LoginPage Effect] Tenant domain set to: ${subdomain}. Display URL: ${subdomain}.${currentRootDomain}${displayPortString}`);
             } else {
-                setIsRootLogin(true);
+                // Handle cases like www.localhost:9002 or invalid subdomains
+                setIsRootLogin(true); // Treat as root login if subdomain is invalid/ignored
                 setTenantDomain(null);
                 setDisplayUrl(`${hostname}${displayPortString}`);
-                console.log(`[LoginPage Effect] No valid tenant subdomain detected. Display URL: ${hostname}${displayPortString}`);
+                console.log(`[LoginPage Effect] Invalid/ignored subdomain or root equivalent. Treating as root login. Display URL: ${hostname}${displayPortString}`);
             }
         }
       }
@@ -108,7 +110,7 @@ export default function LoginPage() {
 
   // Construct forgot password link dynamically based on client-side detection
   const forgotPasswordHref = tenantDomain
-    ? `/forgot-password/${tenantDomain}`
+    ? `/forgot-password` // Now relative path, middleware handles context
     : '/forgot-password';
 
   const displayLocation = tenantDomain
@@ -116,7 +118,8 @@ export default function LoginPage() {
       : `the main portal`;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    // Center content vertically and horizontally, add padding
+    <div className="flex min-h-screen items-center justify-center bg-background p-4 sm:p-6 lg:p-8">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold">Login to SyntaxHive Hrm</CardTitle>
@@ -134,7 +137,7 @@ export default function LoginPage() {
                 <Alert variant="default" className="mb-4 bg-blue-50 border-blue-300 text-blue-800 [&>svg]:text-blue-600 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-300 dark:[&>svg]:text-blue-500">
                     <AlertTitle>Root Login</AlertTitle>
                     <AlertDescription>
-                         Please use your company's unique login URL (e.g., your-company.{rootDomain}) to access your account. If you don't have one, <Link href="/register" className='font-medium underline'>register here</Link>.
+                         Please use your company's unique login URL (e.g., <strong>your-company.{rootDomain}</strong>) to access your account. If you don't have one, <Link href="/register" className='font-medium underline'>register here</Link>.
                     </AlertDescription>
                 </Alert>
             )}

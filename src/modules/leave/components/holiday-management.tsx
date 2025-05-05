@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react';
@@ -295,61 +296,64 @@ export function HolidayManagement({ initialHolidays, onUpdate }: HolidayManageme
         </Dialog>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {holidays.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={4} className="h-24 text-center">
-                  No holidays configured yet.
-                </TableCell>
-              </TableRow>
-            ) : (
-              holidays.map((holiday) => (
-                <TableRow key={holiday.id}>
-                  <TableCell className="font-medium">{holiday.name}</TableCell>
-                  <TableCell>{format(parseISO(holiday.date), "PPP")}</TableCell>
-                  <TableCell className="text-muted-foreground">{holiday.description || '-'}</TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(holiday)} className="mr-1 h-8 w-8">
-                      <Edit className="h-4 w-4" />
-                      <span className="sr-only">Edit</span>
-                    </Button>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8" disabled={isDeleting[holiday.id!]}>
-                          {isDeleting[holiday.id!] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                          <span className="sr-only">Delete</span>
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will permanently delete the <strong>{holiday.name}</strong> holiday on {format(parseISO(holiday.date), "PPP")}. This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel disabled={isDeleting[holiday.id!]}>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDelete(holiday.id!, holiday.name)} disabled={isDeleting[holiday.id!]} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                            {isDeleting[holiday.id!] ? "Deleting..." : "Delete"}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </TableCell>
+         {/* Added overflow-auto for responsiveness */}
+         <div className="overflow-auto">
+            <Table>
+            <TableHeader>
+                <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+                {holidays.length === 0 ? (
+                <TableRow>
+                    <TableCell colSpan={4} className="h-24 text-center">
+                    No holidays configured yet.
+                    </TableCell>
+                </TableRow>
+                ) : (
+                holidays.map((holiday) => (
+                    <TableRow key={holiday.id}>
+                    <TableCell className="font-medium">{holiday.name}</TableCell>
+                    <TableCell>{format(parseISO(holiday.date), "PPP")}</TableCell>
+                    <TableCell className="text-muted-foreground">{holiday.description || '-'}</TableCell>
+                    <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" onClick={() => openEditDialog(holiday)} className="mr-1 h-8 w-8">
+                        <Edit className="h-4 w-4" />
+                        <span className="sr-only">Edit</span>
+                        </Button>
+                        <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8" disabled={isDeleting[holiday.id!]}>
+                            {isDeleting[holiday.id!] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                            <span className="sr-only">Delete</span>
+                            </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                This will permanently delete the <strong>{holiday.name}</strong> holiday on {format(parseISO(holiday.date), "PPP")}. This action cannot be undone.
+                            </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                            <AlertDialogCancel disabled={isDeleting[holiday.id!]}>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDelete(holiday.id!, holiday.name)} disabled={isDeleting[holiday.id!]} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                {isDeleting[holiday.id!] ? "Deleting..." : "Delete"}
+                            </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                        </AlertDialog>
+                    </TableCell>
+                    </TableRow>
+                ))
+                )}
+            </TableBody>
+            </Table>
+         </div>
       </CardContent>
     </Card>
   );

@@ -1,3 +1,4 @@
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -97,15 +98,16 @@ async function OpenJobPostingsComponent() {
             {openPostings.map((job) => (
                 <Card key={job.id} className="shadow-sm hover:shadow-md transition-shadow duration-200">
                     <CardHeader>
-                        <div className="flex justify-between items-start gap-2">
-                            <CardTitle className="text-xl">{job.title}</CardTitle>
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
+                            <CardTitle className="text-xl lg:text-2xl">{job.title}</CardTitle>
                             {/* Optional: Show location/remote status prominently */}
-                            <Badge variant="outline" className="shrink-0">{job.location}</Badge>
+                            <Badge variant="outline" className="shrink-0 mt-1 sm:mt-0">{job.location}</Badge>
                         </div>
-                         <CardDescription className="flex items-center gap-1 text-xs text-muted-foreground pt-1">
-                            <Briefcase className="h-3 w-3" /> {job.department}
-                            <span className="mx-1">|</span> <Calendar className="h-3 w-3" /> Posted: {formatDateSafe(job.datePosted)}
-                             {job.closingDate && <><span className="mx-1">|</span> Closing: {formatDateSafe(job.closingDate)}</>}
+                         <CardDescription className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground pt-1">
+                            <span className="flex items-center gap-1"><Briefcase className="h-3 w-3" /> {job.department}</span>
+                            <span className="hidden sm:inline">|</span>
+                            <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> Posted: {formatDateSafe(job.datePosted)}</span>
+                             {job.closingDate && <> <span className="hidden sm:inline">|</span> <span className="flex items-center gap-1">Closing: {formatDateSafe(job.closingDate)}</span> </>}
                          </CardDescription>
                     </CardHeader>
                     <CardContent>

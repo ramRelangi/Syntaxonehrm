@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -160,120 +161,123 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                  </CardDescription>
              </CardHeader>
              <CardContent>
-                 <Table>
-                 <TableHeader>
-                     <TableRow>
-                         {isAdminView && <TableHead>Employee</TableHead>}
-                         <TableHead>Type</TableHead>
-                         <TableHead>Dates</TableHead>
-                         <TableHead>Reason</TableHead>
-                         <TableHead>Requested</TableHead>
-                         <TableHead className="text-center">Status</TableHead>
-                         <TableHead className="text-right">Actions</TableHead>
-                     </TableRow>
-                 </TableHeader>
-                 <TableBody>
-                     {requests.length === 0 ? (
+                 {/* Added overflow-auto for responsiveness */}
+                 <div className="overflow-auto">
+                     <Table>
+                     <TableHeader>
                          <TableRow>
-                             <TableCell colSpan={isAdminView ? 7 : 6} className="h-24 text-center">
-                             No leave requests found.
-                             </TableCell>
+                             {isAdminView && <TableHead>Employee</TableHead>}
+                             <TableHead>Type</TableHead>
+                             <TableHead>Dates</TableHead>
+                             <TableHead>Reason</TableHead>
+                             <TableHead>Requested</TableHead>
+                             <TableHead className="text-center">Status</TableHead>
+                             <TableHead className="text-right">Actions</TableHead>
                          </TableRow>
-                     ) : (
-                     requests.map((req) => {
-                       const isLoadingApprove = actionLoading[`${req.id}-Approved`];
-                       const isLoadingReject = actionLoading[`${req.id}-Rejected`];
-                       const isLoadingCancel = actionLoading[`${req.id}-cancel`];
-                       const isAnyActionLoading = isLoadingApprove || isLoadingReject || isLoadingCancel;
+                     </TableHeader>
+                     <TableBody>
+                         {requests.length === 0 ? (
+                             <TableRow>
+                                 <TableCell colSpan={isAdminView ? 7 : 6} className="h-24 text-center">
+                                 No leave requests found.
+                                 </TableCell>
+                             </TableRow>
+                         ) : (
+                         requests.map((req) => {
+                           const isLoadingApprove = actionLoading[`${req.id}-Approved`];
+                           const isLoadingReject = actionLoading[`${req.id}-Rejected`];
+                           const isLoadingCancel = actionLoading[`${req.id}-cancel`];
+                           const isAnyActionLoading = isLoadingApprove || isLoadingReject || isLoadingCancel;
 
-                       return (
-                         <TableRow key={req.id}>
-                            {isAdminView && <TableCell>{req.employeeName}</TableCell>}
-                            <TableCell>{getLeaveTypeName(req.leaveTypeId)}</TableCell>
-                            <TableCell>
-                                {format(parseISO(req.startDate), "MMM d, yyyy")} - {format(parseISO(req.endDate), "MMM d, yyyy")}
-                            </TableCell>
-                            <TableCell>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <span className="truncate max-w-[150px] inline-block">{req.reason}</span>
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        <p className="max-w-xs">{req.reason}</p>
-                                        {req.comments && <p className="mt-2 border-t pt-2 text-muted-foreground"><strong>Approver Comment:</strong> {req.comments}</p>}
-                                    </TooltipContent>
-                                </Tooltip>
-                            </TableCell>
-                            <TableCell>{format(parseISO(req.requestDate), "MMM d, yyyy")}</TableCell>
-                            <TableCell className="text-center">
-                                <Badge variant={getStatusVariant(req.status)} className="flex items-center justify-center gap-1 w-24">
-                                    {getStatusIcon(req.status)}
-                                    {req.status}
-                                </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                                {isAdminView && req.status === 'Pending' && (
-                                    <div className="flex gap-1 justify-end">
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleStatusUpdate(req.id, 'Approved')}
-                                            disabled={isAnyActionLoading}
-                                            className="text-green-600 hover:text-green-700 hover:bg-green-100"
-                                        >
-                                            {isLoadingApprove ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <CheckCircle className="h-4 w-4 mr-1"/>}
-                                             Approve
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleStatusUpdate(req.id, 'Rejected')}
-                                            disabled={isAnyActionLoading}
-                                            className="text-red-600 hover:text-red-700 hover:bg-red-100"
-                                        >
-                                             {isLoadingReject ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <XCircle className="h-4 w-4 mr-1"/>}
-                                              Reject
-                                        </Button>
-                                    </div>
-                                )}
-                                {!isAdminView && req.employeeId === currentUserId && req.status === 'Pending' && (
-                                    <AlertDialog>
-                                        <AlertDialogTrigger asChild>
-                                            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={isAnyActionLoading}>
-                                                 {isLoadingCancel ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <Trash2 className="h-4 w-4 mr-1"/>}
-                                                  Cancel
+                           return (
+                             <TableRow key={req.id}>
+                                {isAdminView && <TableCell>{req.employeeName}</TableCell>}
+                                <TableCell>{getLeaveTypeName(req.leaveTypeId)}</TableCell>
+                                <TableCell>
+                                    {format(parseISO(req.startDate), "MMM d, yyyy")} - {format(parseISO(req.endDate), "MMM d, yyyy")}
+                                </TableCell>
+                                <TableCell>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <span className="truncate max-w-[150px] inline-block">{req.reason}</span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            <p className="max-w-xs">{req.reason}</p>
+                                            {req.comments && <p className="mt-2 border-t pt-2 text-muted-foreground"><strong>Approver Comment:</strong> {req.comments}</p>}
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </TableCell>
+                                <TableCell>{format(parseISO(req.requestDate), "MMM d, yyyy")}</TableCell>
+                                <TableCell className="text-center">
+                                    <Badge variant={getStatusVariant(req.status)} className="flex items-center justify-center gap-1 w-24">
+                                        {getStatusIcon(req.status)}
+                                        {req.status}
+                                    </Badge>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                    {isAdminView && req.status === 'Pending' && (
+                                        <div className="flex gap-1 justify-end">
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => handleStatusUpdate(req.id, 'Approved')}
+                                                disabled={isAnyActionLoading}
+                                                className="text-green-600 hover:text-green-700 hover:bg-green-100"
+                                            >
+                                                {isLoadingApprove ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <CheckCircle className="h-4 w-4 mr-1"/>}
+                                                 Approve
                                             </Button>
-                                        </AlertDialogTrigger>
-                                        <AlertDialogContent>
-                                            <AlertDialogHeader>
-                                                <AlertDialogTitle>Cancel Leave Request?</AlertDialogTitle>
-                                                <AlertDialogDescription>
-                                                    Are you sure you want to cancel your leave request for {getLeaveTypeName(req.leaveTypeId)} from {format(parseISO(req.startDate), "MMM d")} to {format(parseISO(req.endDate), "MMM d")}?
-                                                </AlertDialogDescription>
-                                            </AlertDialogHeader>
-                                            <AlertDialogFooter>
-                                                <AlertDialogCancel disabled={isLoadingCancel}>Back</AlertDialogCancel>
-                                                <AlertDialogAction onClick={() => handleCancel(req.id)} disabled={isLoadingCancel} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                                                    {isLoadingCancel ? "Cancelling..." : "Yes, Cancel Request"}
-                                                </AlertDialogAction>
-                                            </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                    </AlertDialog>
-                                )}
-                                {/* Add View Details placeholder */}
-                                {req.comments && (
-                                     <Tooltip>
-                                         <TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><Eye className="h-4 w-4 text-muted-foreground"/></Button></TooltipTrigger>
-                                         <TooltipContent><p><strong>Approver Comment:</strong> {req.comments}</p></TooltipContent>
-                                     </Tooltip>
-                                )}
-                            </TableCell>
-                         </TableRow>
-                       );
-                     })
-                     )}
-                 </TableBody>
-                 </Table>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => handleStatusUpdate(req.id, 'Rejected')}
+                                                disabled={isAnyActionLoading}
+                                                className="text-red-600 hover:text-red-700 hover:bg-red-100"
+                                            >
+                                                 {isLoadingReject ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <XCircle className="h-4 w-4 mr-1"/>}
+                                                  Reject
+                                            </Button>
+                                        </div>
+                                    )}
+                                    {!isAdminView && req.employeeId === currentUserId && req.status === 'Pending' && (
+                                        <AlertDialog>
+                                            <AlertDialogTrigger asChild>
+                                                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={isAnyActionLoading}>
+                                                     {isLoadingCancel ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <Trash2 className="h-4 w-4 mr-1"/>}
+                                                      Cancel
+                                                </Button>
+                                            </AlertDialogTrigger>
+                                            <AlertDialogContent>
+                                                <AlertDialogHeader>
+                                                    <AlertDialogTitle>Cancel Leave Request?</AlertDialogTitle>
+                                                    <AlertDialogDescription>
+                                                        Are you sure you want to cancel your leave request for {getLeaveTypeName(req.leaveTypeId)} from {format(parseISO(req.startDate), "MMM d")} to {format(parseISO(req.endDate), "MMM d")}?
+                                                    </AlertDialogDescription>
+                                                </AlertDialogHeader>
+                                                <AlertDialogFooter>
+                                                    <AlertDialogCancel disabled={isLoadingCancel}>Back</AlertDialogCancel>
+                                                    <AlertDialogAction onClick={() => handleCancel(req.id)} disabled={isLoadingCancel} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                                        {isLoadingCancel ? "Cancelling..." : "Yes, Cancel Request"}
+                                                    </AlertDialogAction>
+                                                </AlertDialogFooter>
+                                            </AlertDialogContent>
+                                        </AlertDialog>
+                                    )}
+                                    {/* Add View Details placeholder */}
+                                    {req.comments && (
+                                         <Tooltip>
+                                             <TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><Eye className="h-4 w-4 text-muted-foreground"/></Button></TooltipTrigger>
+                                             <TooltipContent><p><strong>Approver Comment:</strong> {req.comments}</p></TooltipContent>
+                                         </Tooltip>
+                                    )}
+                                </TableCell>
+                             </TableRow>
+                           );
+                         })
+                         )}
+                     </TableBody>
+                     </Table>
+                 </div>
              </CardContent>
          </Card>
      </TooltipProvider>

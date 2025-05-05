@@ -1,6 +1,5 @@
-// src/app/(app)/[domain]/dashboard/page.tsx
-// This is now a Server Component by default
 
+// src/app/(app)/[domain]/dashboard/page.tsx
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Users, Briefcase, FileText, Calendar, BarChart2, UploadCloud } from "lucide-react";
@@ -9,8 +8,8 @@ import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getTenantByDomain } from '@/modules/auth/lib/db';
 import { notFound } from 'next/navigation';
-import { headers, cookies } from 'next/headers'; // Import cookies
-import { MOCK_SESSION_COOKIE } from '@/lib/auth'; // Import cookie name
+import { cookies } from 'next/headers';
+import { MOCK_SESSION_COOKIE } from '@/lib/auth'; // Keep constant import
 
 // Import Server Actions directly - Actions derive context implicitly
 import { getEmployees } from '@/modules/employees/actions';
@@ -29,8 +28,6 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     const formattedUrl = url.startsWith('/') ? url.substring(1) : url;
     const fullUrl = `${baseUrl.replace(/\/$/, '')}/${formattedUrl}`;
 
-    const headersList = headers(); // Get current headers
-    const tenantDomain = headersList.get('X-Tenant-Domain'); // Get domain from middleware header
     const cookieStore = cookies(); // Get cookies instance
     const sessionCookie = cookieStore.get(MOCK_SESSION_COOKIE); // Get the session cookie
 
@@ -38,15 +35,6 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
 
     try {
         const fetchHeaders = new Headers(options?.headers);
-
-        // Add Tenant Domain Header
-        if (tenantDomain) {
-             fetchHeaders.set('X-Tenant-Domain', tenantDomain);
-             console.log(`[Dashboard Fetch] Added X-Tenant-Domain header: ${tenantDomain}`);
-        } else {
-            console.error(`[Dashboard Fetch] Critical: X-Tenant-Domain header missing for API call to ${fullUrl}.`);
-             throw new Error('Tenant context header is missing.');
-        }
 
         // Add Session Cookie Header
         if (sessionCookie) {
@@ -58,9 +46,8 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
              // throw new Error('Authentication cookie missing.');
         }
 
-
         const response = await fetch(fullUrl, {
-            cache: 'no-store',
+            cache: 'no-store', // Keep no-store for dynamic dashboard data
             ...options,
             headers: fetchHeaders, // Include modified headers
          });
@@ -145,14 +132,15 @@ async function getTotalEmployees() {
 
 async function getUpcomingLeavesCount() {
     const today = new Date();
+    // Action implicitly filters by tenant and only returns relevant requests
     const upcomingRequests = await getLeaveRequests({ status: 'Approved' });
     const count = upcomingRequests.filter(req => new Date(req.startDate) >= today).length;
     return count;
 }
 
 async function getOpenPositionsCount() {
-     // Use the fetchData helper which now includes auth cookies
-     const openPositions = await fetchData<any[]>('/api/recruitment/postings?status=Open');
+     // Action implicitly filters by tenant
+     const openPositions = await getJobPostings({ status: 'Open' });
      return openPositions.length;
  }
 
@@ -167,9 +155,9 @@ async function getPendingTasksCount() {
 export default async function TenantDashboardPage({ params }: DashboardPageProps) {
     const tenantDomain = params.domain;
 
-    // 1. Verify Tenant Domain Exists - Handled by Layout
+    // Tenant verification is now handled by the TenantAppLayout
 
-    // 2. Fetch tenant details for name display (optional, layout might handle)
+    // Fetch tenant details for name display (optional, layout might handle)
      let tenantName = tenantDomain; // Fallback to domain name
      try {
         const tenantDetails = await getTenantByDomain(tenantDomain);
@@ -192,11 +180,12 @@ export default async function TenantDashboardPage({ params }: DashboardPageProps
     ];
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 md:gap-8"> {/* Increased gap for better spacing */}
       <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Dashboard - {tenantName}</h1>
 
       {/* Key Metrics Section with Suspense */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* Responsive Grid: 1 col on small, 2 on md, 4 on lg */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
          <Suspense fallback={<Skeleton className="h-[110px] w-full" />}>
             {/* Pass the promise from the action call directly */}
             <MetricCard title="Total Employees" icon={Users} valuePromise={getTotalEmployees()} changeText="+2 since last month" />
@@ -218,7 +207,8 @@ export default async function TenantDashboardPage({ params }: DashboardPageProps
             <CardTitle>Quick Actions</CardTitle>
             <CardDescription>Access common HR tasks quickly.</CardDescription>
          </CardHeader>
-         <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+         {/* Responsive Grid: 1 col on small, 2 on sm, 4 on lg */}
+         <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             {quickLinks.map((link) => (
                  <Button key={link.href} variant="outline" asChild className="justify-start gap-3 text-left h-auto py-3">
                      <Link href={link.href}>
@@ -231,6 +221,7 @@ export default async function TenantDashboardPage({ params }: DashboardPageProps
       </Card>
 
       {/* Placeholder for other dashboard sections (e.g., charts, recent activity) */}
+       {/* Responsive Grid: 1 col on small, 2 on lg */}
       <div className="grid gap-6 lg:grid-cols-2">
            <Card className="shadow-sm">
               <CardHeader>
@@ -264,6 +255,3 @@ export default async function TenantDashboardPage({ params }: DashboardPageProps
     </div>
   );
 }
-
-
-    

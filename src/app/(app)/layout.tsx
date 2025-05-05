@@ -21,6 +21,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { logoutAction } from '@/modules/auth/actions'; // Import the logout action
 import { useToast } from '@/hooks/use-toast'; // Import useToast for feedback
+import { useIsMobile } from '@/hooks/use-mobile'; // Import mobile hook
 
 // TODO: Replace Mock user data with actual session/auth data from a context or hook
 // This data should include the tenant's domain or ID.
@@ -49,6 +50,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname(); // Get current path relative to the tenant rewrite (e.g., /dashboard)
   const router = useRouter();
   const { toast } = useToast();
+  const isMobile = useIsMobile(); // Use mobile hook
+
 
   const handleLogout = async () => {
     try {
@@ -56,7 +59,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
        toast({ title: "Logged Out", description: "You have been successfully logged out." });
        // Redirect might happen server-side in action, but client-side refresh can help.
        // router.push('/login'); // Not needed if action redirects correctly
-       // router.refresh(); // Potentially refresh to ensure state is cleared
+       router.refresh(); // Force refresh to clear client state and ensure middleware redirects correctly
     } catch (error) {
        console.error("Logout failed:", error);
        toast({ title: "Logout Failed", description: "Could not log out. Please try again.", variant: "destructive" });
@@ -69,7 +72,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {/* SidebarProvider is now in RootLayout */}
         <Sidebar
            variant="sidebar" // Choose variant: 'sidebar', 'floating', 'inset'
-           collapsible="icon" // Choose collapsible: 'offcanvas', 'icon', 'none'
+           collapsible={isMobile ? "offcanvas" : "icon"} // Use offcanvas on mobile, icon on desktop
            side="left"
         >
             <SidebarHeader className="items-center justify-between p-4">
@@ -79,20 +82,26 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6"><path d="M12 3v18M3 12h18"/></svg> {/* Simple cross as placeholder */}
                  <span className="hidden group-data-[state=expanded]:inline">SyntaxHive Hrm</span>
                  </Link>
-                <SidebarTrigger className="hidden md:flex" />
+                 {/* Hide trigger on larger screens unless needed */}
+                <SidebarTrigger className="md:hidden" />
             </SidebarHeader>
 
-            <SidebarContent className="flex-1 overflow-y-auto p-4">
+            <SidebarContent className="flex-1 overflow-y-auto p-2 md:p-4">
                 <SidebarMenu>
                     {navItems.map((item) => {
                         // Check if the current tenant-relative path starts with the item's href
-                        const isActive = pathname === item.href || (pathname.startsWith(item.href) && item.href !== '/dashboard');
+                        // Ensure dashboard only matches exactly
+                        const isActive = item.href === '/dashboard'
+                            ? pathname === item.href
+                            : pathname.startsWith(item.href);
                         return (
                             <SidebarMenuItem key={item.href}>
                                 <SidebarMenuButton
                                     asChild
                                     isActive={isActive}
                                     tooltip={item.label} // Tooltip shown when collapsed
+                                    // Adjust size for better touch targets on mobile?
+                                    // size={isMobile ? "lg" : "default"}
                                 >
                                     {/* Links are tenant-relative, middleware handles rewrite */}
                                     <Link href={item.href}>
@@ -145,17 +154,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </SidebarFooter>
         </Sidebar>
 
-        <SidebarInset className="flex-1 overflow-auto">
-            {/* Mobile Header (optional, can be part of page content) */}
-             <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4 md:hidden">
+        {/* Use SidebarInset to manage the main content area layout */}
+        <SidebarInset className="flex-1 overflow-y-auto">
+             {/* Mobile Header (optional, kept for consistency) */}
+              <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4 md:hidden">
                 <SidebarTrigger />
-                 {/* Potentially show tenant name here */}
                  <h1 className="flex-1 text-lg font-semibold">{user.tenantDomain || 'SyntaxHive Hrm'}</h1>
-                {/* Add mobile-specific header items if needed */}
-             </header>
+              </header>
 
-            {/* Main Content Area */}
-            <main className="flex-1 p-4 md:p-6 lg:p-8">
+            {/* Main Content Area with padding */}
+            {/* Adjusted padding for different screen sizes */}
+            <main className="flex-1 p-4 sm:p-6 lg:p-8">
                  {children}
             </main>
         </SidebarInset>
