@@ -17,12 +17,14 @@ export type EmailTemplateFormData = Omit<EmailTemplate, 'id' | 'tenantId'> & { t
 
 
 // --- Email Settings ---
+// This schema includes the plain-text password for validation in the form/actions,
+// but the DB layer will handle encryption/decryption and the DB stores smtp_password_encrypted
 export const emailSettingsSchema = z.object({
   tenantId: z.string().uuid(), // Add tenant ID
   smtpHost: z.string().min(1, "SMTP Host is required"),
   smtpPort: z.coerce.number().int().positive("SMTP Port must be a positive number"),
   smtpUser: z.string().min(1, "SMTP Username is required"),
-  smtpPassword: z.string().min(1, "SMTP Password is required"), // Mask input in UI
+  smtpPassword: z.string().min(1, "SMTP Password is required"), // Plain text for validation/input
   smtpSecure: z.boolean().default(true).describe("Use TLS/SSL"), // Typically true for ports 465/587
   fromEmail: z.string().email("Invalid 'From' email address"),
   fromName: z.string().min(1, "'From' Name is required"),

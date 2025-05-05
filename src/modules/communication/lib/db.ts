@@ -1,6 +1,7 @@
 
 import pool from '@/lib/db';
 import type { EmailTemplate, EmailSettings } from '@/modules/communication/types';
+import { encrypt, decrypt } from '@/lib/encryption'; // Import encryption utilities
 
 // --- Email Template Operations ---
 
@@ -120,7 +121,7 @@ export async function updateTemplate(id: string, tenantId: string, updates: Part
     values.push(tenantId); // tenantId for WHERE clause
     const query = `
         UPDATE email_templates
-        SET ${setClauses.join(', ')}
+        SET ${setClauses.join(', ')}, updated_at = NOW()
         WHERE id = $${valueIndex} AND tenant_id = $${valueIndex + 1}
         RETURNING *;
     `;
@@ -164,20 +165,29 @@ export async function deleteTemplate(id: string, tenantId: string): Promise<bool
 function mapRowToEmailSettings(row: any): EmailSettings | null {
      if (!row) return null;
      // Check if essential fields are non-null before returning
-     if (!row.smtp_host || !row.smtp_port || !row.smtp_user || !row.smtp_password || !row.from_email || !row.from_name) {
+     if (!row.smtp_host || !row.smtp_port || !row.smtp_user || !row.smtp_password_encrypted || !row.from_email || !row.from_name) {
          console.warn("[DB mapRowToEmailSettings] DB row exists but is missing essential fields. Treating as unconfigured.");
          return null;
      }
-     return {
-         tenantId: row.tenant_id, // Include tenantId
-         smtpHost: row.smtp_host,
-         smtpPort: parseInt(row.smtp_port, 10),
-         smtpUser: row.smtp_user,
-         smtpPassword: row.smtp_password, // Password will be stored encrypted ideally
-         smtpSecure: row.smtp_secure,
-         fromEmail: row.from_email,
-         fromName: row.from_name,
-     };
+     try {
+        // Decrypt password when retrieving
+        const decryptedPassword = decrypt(row.smtp_password_encrypted);
+        return {
+            tenantId: row.tenant_id, // Include tenantId
+            smtpHost: row.smtp_host,
+            smtpPort: parseInt(row.smtp_port, 10),
+            smtpUser: row.smtp_user,
+            smtpPassword: decryptedPassword, // Return decrypted password
+            smtpSecure: row.smtp_secure,
+            fromEmail: row.from_email,
+            fromName: row.from_name,
+        };
+     } catch (decryptionError) {
+          console.error(`[DB mapRowToEmailSettings] Failed to decrypt password for tenant ${row.tenant_id}:`, decryptionError);
+          // Handle decryption failure - maybe return null or settings without password?
+          // Returning null is safer as downstream functions might expect a password.
+          return null;
+     }
 }
 
 
@@ -192,13 +202,13 @@ export async function getEmailSettings(tenantId: string): Promise<EmailSettings 
     try {
         const res = await client.query('SELECT * FROM email_configuration WHERE tenant_id = $1', [tenantId]);
         if (res.rows.length > 0) {
-            console.log("[DB getEmailSettings] Settings row found:", JSON.stringify({...res.rows[0], smtp_password: '***'}));
+            console.log("[DB getEmailSettings] Settings row found (password encrypted).");
             const settings = mapRowToEmailSettings(res.rows[0]);
             if (settings) {
-                 console.log("[DB getEmailSettings] Successfully mapped row to settings object.");
+                 console.log("[DB getEmailSettings] Successfully mapped and decrypted settings object.");
                  return settings;
             } else {
-                console.log("[DB getEmailSettings] Settings row found but mapping failed (missing essential fields). Returning null.");
+                console.log("[DB getEmailSettings] Settings row found but mapping/decryption failed. Returning null.");
                 return null;
             }
         } else {
@@ -214,30 +224,37 @@ export async function getEmailSettings(tenantId: string): Promise<EmailSettings 
 }
 
 // Function to update/insert settings for a specific tenant
+// Returns settings *without* the password for security
 export async function updateEmailSettings(tenantId: string, settingsData: Omit<EmailSettings, 'tenantId'>): Promise<Omit<EmailSettings, 'smtpPassword'>> {
     const client = await pool.connect();
     if (!tenantId) {
         throw new Error("Tenant ID is required to update email settings.");
     }
-    // In a real app, encrypt smtpPassword before saving
-    const encryptedPassword = settingsData.smtpPassword; // Placeholder - use bcrypt or similar
+    // Encrypt the password before saving
+    let encryptedPassword = '';
+    try {
+        encryptedPassword = encrypt(settingsData.smtpPassword);
+    } catch (encryptionError) {
+        console.error(`[DB updateEmailSettings] Failed to encrypt password for tenant ${tenantId}:`, encryptionError);
+        throw new Error("Failed to secure password before saving.");
+    }
 
     const query = `
-        INSERT INTO email_configuration (tenant_id, smtp_host, smtp_port, smtp_user, smtp_password, smtp_secure, from_email, from_name, updated_at)
+        INSERT INTO email_configuration (tenant_id, smtp_host, smtp_port, smtp_user, smtp_password_encrypted, smtp_secure, from_email, from_name, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
         ON CONFLICT (tenant_id) DO UPDATE SET
             smtp_host = EXCLUDED.smtp_host,
             smtp_port = EXCLUDED.smtp_port,
             smtp_user = EXCLUDED.smtp_user,
-            smtp_password = EXCLUDED.smtp_password, -- Always update encrypted password
+            smtp_password_encrypted = EXCLUDED.smtp_password_encrypted, -- Always update encrypted password
             smtp_secure = EXCLUDED.smtp_secure,
             from_email = EXCLUDED.from_email,
             from_name = EXCLUDED.from_name,
             updated_at = NOW()
-        RETURNING *;
+        RETURNING *; -- Return the saved row
     `;
     const values = [
-        tenantId, // Use the explicit tenantId parameter
+        tenantId,
         settingsData.smtpHost,
         settingsData.smtpPort,
         settingsData.smtpUser,
@@ -247,20 +264,22 @@ export async function updateEmailSettings(tenantId: string, settingsData: Omit<E
         settingsData.fromName,
     ];
     try {
-        console.log("[DB updateEmailSettings] Attempting upsert with data for tenant:", tenantId, JSON.stringify({ ...settingsData, smtpPassword: '***' }));
+        console.log("[DB updateEmailSettings] Attempting upsert with encrypted password for tenant:", tenantId);
         const res = await client.query(query, values);
-        console.log("[DB updateEmailSettings] Upsert successful. Returning mapped settings.");
-        // Return the saved data, potentially decrypting password if needed (but generally don't return password)
-         const savedSettings = mapRowToEmailSettings(res.rows[0]);
-         if (!savedSettings) {
-              throw new Error("Failed to retrieve settings after update."); // Should not happen if query returns data
-         }
-         // DO NOT return the password, even encrypted
-         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-         const { smtpPassword, ...safeSettings } = savedSettings;
-         return safeSettings; // Return settings without password
+        console.log("[DB updateEmailSettings] Upsert successful.");
+
+        // Map the returned row (which contains encrypted password) and then remove password
+        const savedSettingsWithEncryptedPassword = mapRowToEmailSettings(res.rows[0]);
+        if (!savedSettingsWithEncryptedPassword) {
+             throw new Error("Failed to retrieve settings after update or decryption failed.");
+        }
+        // DO NOT return the password, even decrypted
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { smtpPassword, ...safeSettings } = savedSettingsWithEncryptedPassword;
+        console.log("[DB updateEmailSettings] Returning safe settings (no password).");
+        return safeSettings; // Return settings without password
     } catch (err) {
-        console.error('Error updating email settings:', err);
+        console.error('[DB updateEmailSettings] Error updating email settings:', err);
         throw err;
     } finally {
         client.release();
@@ -268,3 +287,4 @@ export async function updateEmailSettings(tenantId: string, settingsData: Omit<E
 }
 
 // Note: Schema definitions updated in init-db.ts
+

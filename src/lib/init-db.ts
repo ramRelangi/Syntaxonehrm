@@ -8,6 +8,11 @@ const schemaSQL = `
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 SELECT 'uuid-ossp extension ensured.';
 
+-- Drop potentially existing trigger functions first
+DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
+DROP FUNCTION IF EXISTS apply_update_trigger_if_not_exists(text) CASCADE;
+SELECT 'Existing trigger functions dropped (if they existed).';
+
 -- Drop existing tables in reverse dependency order (carefully!)
 -- Note: CASCADE will drop dependent objects like constraints, indexes, views, etc.
 DROP TABLE IF EXISTS holidays CASCADE;
@@ -30,11 +35,6 @@ DROP TYPE IF EXISTS leave_request_status CASCADE;
 DROP TYPE IF EXISTS employee_status CASCADE;
 DROP TYPE IF EXISTS user_role CASCADE;
 SELECT 'Existing custom types dropped (if they existed).';
-
--- Drop potentially existing trigger functions
-DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
-DROP FUNCTION IF EXISTS apply_update_trigger_if_not_exists(text) CASCADE;
-SELECT 'Existing trigger functions dropped (if they existed).';
 
 
 -- Recreate Types
@@ -248,7 +248,7 @@ CREATE TABLE IF NOT EXISTS email_configuration (
     smtp_host VARCHAR(255) NOT NULL,
     smtp_port INT NOT NULL,
     smtp_user VARCHAR(255) NOT NULL,
-    smtp_password TEXT NOT NULL, -- STORE ENCRYPTED!
+    smtp_password_encrypted TEXT NOT NULL, -- Renamed column
     smtp_secure BOOLEAN NOT NULL DEFAULT TRUE,
     from_email VARCHAR(255) NOT NULL,
     from_name VARCHAR(255) NOT NULL,
