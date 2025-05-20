@@ -5,6 +5,13 @@ import { z } from 'zod';
 export const jobPostingStatusSchema = z.enum(['Open', 'Closed', 'Draft', 'Archived']);
 export type JobPostingStatus = z.infer<typeof jobPostingStatusSchema>;
 
+export const employmentTypeSchema = z.enum(['Full-time', 'Part-time', 'Contract', 'Internship', 'Temporary']);
+export type EmploymentType = z.infer<typeof employmentTypeSchema>;
+
+export const experienceLevelSchema = z.enum(['Entry-Level', 'Mid-Level', 'Senior-Level', 'Lead', 'Principal', 'Manager', 'Director']);
+export type ExperienceLevel = z.infer<typeof experienceLevelSchema>;
+
+
 export const jobPostingSchema = z.object({
   id: z.string().optional(), // Optional for creation, present for existing
   tenantId: z.string().uuid(), // Add tenant ID
@@ -16,7 +23,8 @@ export const jobPostingSchema = z.object({
   status: jobPostingStatusSchema.default('Draft'),
   datePosted: z.string().optional(), // ISO string, set on creation/update status
   closingDate: z.string().optional(), // ISO string
-  // candidates: z.array(z.string()).optional(), // Array of candidate IDs associated, maybe added later
+  employmentType: employmentTypeSchema.optional().default('Full-time'),
+  experienceLevel: experienceLevelSchema.optional().default('Mid-Level'),
 });
 
 export type JobPosting = z.infer<typeof jobPostingSchema>;
@@ -45,9 +53,11 @@ export const candidateSchema = z.object({
   jobPostingId: z.string().min(1, "Associated job posting is required"), // Link to JobPosting
   applicationDate: z.string(), // ISO string
   status: candidateStatusSchema.default('Applied'),
-  resumeUrl: z.string().url().optional(), // Link to resume file (storage handled separately)
-  coverLetter: z.string().optional(),
-  notes: z.string().optional(),
+  resumeUrl: z.string().url("Invalid resume URL").optional().or(z.literal('')).nullable(),
+  coverLetter: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  source: z.string().optional().nullable(), // e.g., LinkedIn, Referral, Career Fair
+  expectedSalary: z.string().optional().nullable(), // Can be a range or specific number
 });
 
 export type Candidate = z.infer<typeof candidateSchema>;

@@ -30,27 +30,28 @@ export interface LeaveRequest {
   approverId?: string; // ID of the user who approved/rejected
   approvalDate?: string; // ISO string when action was taken
   comments?: string; // Approver comments
+  attachmentUrl?: string | null; // New field
 }
 
 // --- Zod Schema for Leave Request Form ---
-// FormData usually won't include tenantId directly, derived from context/session
 export const leaveRequestSchema = z.object({
-  employeeId: z.string().min(1, "Employee is required"), // In a real app, this might come from session
+  employeeId: z.string().min(1, "Employee is required"),
   leaveTypeId: z.string().min(1, "Leave type is required"),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date must be in YYYY-MM-DD format"),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format"),
   reason: z.string().min(5, "Reason must be at least 5 characters").max(200, "Reason cannot exceed 200 characters"),
+  attachmentUrl: z.string().url("Invalid URL format for attachment.").optional().or(z.literal('')).nullable(), // New field
 });
-// Refine needs to be added after object definition
+
 export const refinedLeaveRequestSchema = leaveRequestSchema.refine(data => {
     try {
         return new Date(data.endDate) >= new Date(data.startDate);
     } catch {
-        return false; // Invalid date format handled by regex, but catch errors just in case
+        return false;
     }
 }, {
   message: "End date cannot be earlier than start date",
-  path: ["endDate"], // Point the error to the endDate field
+  path: ["endDate"],
 });
 
 
@@ -80,5 +81,4 @@ export const holidaySchema = z.object({
 });
 
 export type Holiday = z.infer<typeof holidaySchema>;
-// FormData for adding/editing holidays
 export type HolidayFormData = Omit<Holiday, 'id' | 'tenantId' | 'createdAt' | 'updatedAt'>;

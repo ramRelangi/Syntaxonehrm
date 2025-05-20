@@ -34,6 +34,8 @@ DROP TYPE IF EXISTS candidate_status CASCADE;
 DROP TYPE IF EXISTS leave_request_status CASCADE;
 DROP TYPE IF EXISTS employee_status CASCADE;
 DROP TYPE IF EXISTS user_role CASCADE;
+DROP TYPE IF EXISTS employment_enum_type CASCADE; -- For job postings and employees
+DROP TYPE IF EXISTS experience_level_enum_type CASCADE; -- For job postings
 SELECT 'Existing custom types dropped (if they existed).';
 
 
@@ -56,6 +58,25 @@ EXCEPTION
     WHEN duplicate_object THEN
         RAISE NOTICE 'employee_status type already exists, skipping creation.';
 END $$;
+
+-- Employment Type Enum (shared)
+DO $$ BEGIN
+    CREATE TYPE employment_enum_type AS ENUM ('Full-time', 'Part-time', 'Contract', 'Internship', 'Temporary');
+    RAISE NOTICE 'employment_enum_type type created.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'employment_enum_type type already exists, skipping creation.';
+END $$;
+
+-- Experience Level Enum (for job postings)
+DO $$ BEGIN
+    CREATE TYPE experience_level_enum_type AS ENUM ('Entry-Level', 'Mid-Level', 'Senior-Level', 'Lead', 'Principal', 'Manager', 'Director');
+    RAISE NOTICE 'experience_level_enum_type type created.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'experience_level_enum_type type already exists, skipping creation.';
+END $$;
+
 
 -- Leave Request Status Enum
 DO $$ BEGIN
@@ -129,7 +150,7 @@ CREATE TABLE IF NOT EXISTS employees (
     date_of_birth DATE,
     reporting_manager_id UUID REFERENCES employees(id) ON DELETE SET NULL, -- Can be null if no manager or top-level
     work_location VARCHAR(255),
-    employment_type VARCHAR(50) DEFAULT 'Full-time' CHECK (employment_type IN ('Full-time', 'Part-time', 'Contract')),
+    employment_type employment_enum_type DEFAULT 'Full-time', -- Using the new enum type
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, email), -- Ensure email is unique within a tenant
@@ -137,7 +158,6 @@ CREATE TABLE IF NOT EXISTS employees (
 );
 SELECT 'employees table created.';
 CREATE INDEX IF NOT EXISTS idx_employees_tenant_id ON employees(tenant_id);
--- CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_tenant_id_employee_id ON employees(tenant_id, employee_id) WHERE employee_id IS NOT NULL;
 
 
 -- Leave Types Table
@@ -171,6 +191,7 @@ CREATE TABLE IF NOT EXISTS leave_requests (
     approver_id UUID REFERENCES users(id), -- Link to users table for approver
     approval_date TIMESTAMP WITH TIME ZONE,
     comments TEXT,
+    attachment_url TEXT, -- New field for attachments
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT check_leave_dates CHECK (end_date >= start_date)
@@ -205,6 +226,8 @@ CREATE TABLE IF NOT EXISTS job_postings (
     status job_posting_status NOT NULL DEFAULT 'Draft',
     date_posted TIMESTAMP WITH TIME ZONE,
     closing_date DATE,
+    employment_type employment_enum_type DEFAULT 'Full-time', -- New field
+    experience_level experience_level_enum_type DEFAULT 'Mid-Level', -- New field
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -225,6 +248,8 @@ CREATE TABLE IF NOT EXISTS candidates (
     resume_url TEXT,
     cover_letter TEXT,
     notes TEXT,
+    source TEXT, -- New field
+    expected_salary TEXT, -- New field
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, email, job_posting_id) -- Prevent duplicate applications within a tenant
@@ -241,6 +266,7 @@ CREATE TABLE IF NOT EXISTS email_templates (
     subject VARCHAR(255) NOT NULL,
     body TEXT NOT NULL,
     usage_context VARCHAR(100),
+    category VARCHAR(100), -- New field
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, name) -- Ensure name is unique within a tenant
@@ -255,7 +281,7 @@ CREATE TABLE IF NOT EXISTS email_configuration (
     smtp_host VARCHAR(255) NOT NULL,
     smtp_port INT NOT NULL,
     smtp_user VARCHAR(255) NOT NULL,
-    smtp_password_encrypted TEXT NOT NULL, -- Renamed column
+    smtp_password_encrypted TEXT NOT NULL,
     smtp_secure BOOLEAN NOT NULL DEFAULT TRUE,
     from_email VARCHAR(255) NOT NULL,
     from_name VARCHAR(255) NOT NULL,
@@ -320,7 +346,7 @@ SELECT apply_update_trigger_if_not_exists('job_postings');
 SELECT apply_update_trigger_if_not_exists('candidates');
 SELECT apply_update_trigger_if_not_exists('email_templates');
 SELECT apply_update_trigger_if_not_exists('email_configuration');
-SELECT apply_update_trigger_if_not_exists('holidays'); -- Apply to new holidays table
+SELECT apply_update_trigger_if_not_exists('holidays');
 
 SELECT 'All triggers checked/applied.';
 `;
@@ -354,10 +380,10 @@ export async function initializeDatabase() {
 if (require.main === module) {
   initializeDatabase().then(() => {
     console.log("Manual DB initialization complete.");
-    pool.end(() => console.log('Database pool closed after manual initialization.')); // Close pool when run manually
+    pool.end(() => console.log('Database pool closed after manual initialization.'));
   }).catch(err => {
     console.error("Manual DB initialization failed:", err);
-    pool.end(() => console.log('Database pool closed after failed manual initialization.')); // Close pool on manual failure
+    pool.end(() => console.log('Database pool closed after failed manual initialization.'));
     process.exit(1);
   });
 }
