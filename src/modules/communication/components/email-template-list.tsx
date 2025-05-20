@@ -1,11 +1,12 @@
+
 "use client";
 
 import * as React from 'react';
 import type { EmailTemplate } from '@/modules/communication/types';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"; // Added CardFooter
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Edit, Trash2, Loader2, Eye } from 'lucide-react';
+import { Edit, Trash2, Loader2, Eye, Tag } from 'lucide-react'; // Added Tag for category
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,7 +49,7 @@ export function EmailTemplateList({ templates, onEdit, onDeleteSuccess }: EmailT
                 if (responseText) result = JSON.parse(responseText);
             } catch (e) {
                 if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-                result = {}; // OK but no JSON body
+                result = {};
             }
 
             if (!response.ok) {
@@ -63,7 +64,7 @@ export function EmailTemplateList({ templates, onEdit, onDeleteSuccess }: EmailT
                 description: `Template "${name}" has been successfully deleted.`,
                 className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
             });
-            onDeleteSuccess(); // Trigger refetch in parent
+            onDeleteSuccess();
 
         } catch (error: any) {
             console.error("[Email Template List] Delete error:", error);
@@ -93,7 +94,7 @@ export function EmailTemplateList({ templates, onEdit, onDeleteSuccess }: EmailT
             <CardHeader>
                 <div className="flex justify-between items-start gap-2">
                     <CardTitle className="text-base">{template.name}</CardTitle>
-                    {template.usageContext && <Badge variant="outline">{template.usageContext}</Badge>}
+                    {template.usageContext && <Badge variant="outline" className="text-xs">{template.usageContext}</Badge>}
                 </div>
                 <CardDescription className="text-xs text-muted-foreground pt-1 line-clamp-1">
                   Subject: {template.subject}
@@ -109,8 +110,14 @@ export function EmailTemplateList({ templates, onEdit, onDeleteSuccess }: EmailT
                    </TooltipContent>
                </Tooltip>
             </CardContent>
-            <div className="flex items-center justify-end p-3 border-t">
-                <div className="flex gap-1">
+            <CardFooter className="flex items-center justify-between p-3 border-t">
+                {template.category && (
+                    <Badge variant="secondary" className="text-xs flex items-center gap-1">
+                        <Tag className="h-3 w-3" />
+                        {template.category}
+                    </Badge>
+                )}
+                <div className="flex gap-1 ml-auto"> {/* Ensure actions are to the right */}
                   <Button variant="ghost" size="icon" onClick={() => onEdit(template)} className="h-8 w-8">
                       <Edit className="h-4 w-4" />
                       <span className="sr-only">Edit</span>
@@ -138,7 +145,7 @@ export function EmailTemplateList({ templates, onEdit, onDeleteSuccess }: EmailT
                     </AlertDialogContent>
                     </AlertDialog>
                 </div>
-            </div>
+            </CardFooter>
             </Card>
         ))}
         </div>

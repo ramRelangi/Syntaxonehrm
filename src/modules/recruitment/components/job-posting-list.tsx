@@ -3,11 +3,11 @@
 
 import * as React from 'react';
 import type { JobPosting } from '@/modules/recruitment/types';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"; // Added CardFooter
 import { Badge } from "@/components/ui/badge";
 import { Button } from '@/components/ui/button';
 import { format, parseISO, differenceInDays } from 'date-fns';
-import { Briefcase, Calendar, MapPin, DollarSign, AlertCircle, CheckCircle, Archive, Users, Edit, Trash2, Loader2 } from 'lucide-react'; // Added Loader2
+import { Briefcase, Calendar, MapPin, DollarSign, AlertCircle, CheckCircle, Archive, Users, Edit, Trash2, Loader2, Type, BarChart } from 'lucide-react'; // Added Type and BarChart icons
 import Link from 'next/link';
 import {
   AlertDialog,
@@ -65,7 +65,7 @@ interface JobPostingListProps {
   jobPostings: JobPosting[];
   onEdit: (posting: JobPosting) => void;
   onDeleteSuccess: () => void;
-  tenantDomain: string; // Add tenantDomain prop
+  tenantDomain: string;
 }
 
 export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess, tenantDomain }: JobPostingListProps) {
@@ -76,7 +76,6 @@ export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess, tenantDom
         setDeletingId(id);
         console.log(`[Job Posting List] Deleting posting ${id} via API...`);
         try {
-            // API handles tenant context via header
             const response = await fetch(`/api/recruitment/postings/${id}`, { method: 'DELETE' });
 
              let result: any;
@@ -86,7 +85,7 @@ export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess, tenantDom
                  if(responseText) result = JSON.parse(responseText);
              } catch(e){
                 if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-                result = {}; // OK but no JSON body
+                result = {};
              }
 
             if (!response.ok) {
@@ -101,7 +100,7 @@ export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess, tenantDom
                 description: `${title} has been successfully deleted.`,
                 className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
             });
-            onDeleteSuccess(); // Trigger refetch in parent
+            onDeleteSuccess();
 
         } catch (error: any) {
              console.error("[Job Posting List] Delete error:", error);
@@ -124,7 +123,6 @@ export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess, tenantDom
   }
 
   return (
-    // Responsive grid layout
     <div className="grid gap-6 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
       {jobPostings.map((job) => {
         const daysRemainingText = getDaysRemaining(job.closingDate);
@@ -145,6 +143,16 @@ export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess, tenantDom
             <CardContent className="flex-grow">
               <p className="text-sm text-muted-foreground line-clamp-3 mb-4">{job.description}</p>
               <div className="space-y-1 text-xs text-muted-foreground">
+                 {job.employmentType && (
+                    <div className="flex items-center gap-1.5">
+                        <Type className="h-3.5 w-3.5" /> Type: {job.employmentType}
+                    </div>
+                 )}
+                  {job.experienceLevel && (
+                    <div className="flex items-center gap-1.5">
+                        <BarChart className="h-3.5 w-3.5" /> Level: {job.experienceLevel}
+                    </div>
+                 )}
                  {job.salaryRange && (
                     <div className="flex items-center gap-1.5">
                         <DollarSign className="h-3.5 w-3.5" /> Salary: {job.salaryRange}
@@ -161,11 +169,10 @@ export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess, tenantDom
                  )}
               </div>
             </CardContent>
-            <div className="flex items-center justify-between p-4 border-t">
-                {/* Link uses tenantDomain */}
+            <CardFooter className="flex items-center justify-between p-4 border-t"> {/* Use CardFooter for consistent padding */}
                 <Button variant="outline" size="sm" asChild>
                     <Link href={`/${tenantDomain}/recruitment/${job.id}`}>
-                        <Users className="mr-2 h-4 w-4" /> View Candidates {/* TODO: Add count */}
+                        <Users className="mr-2 h-4 w-4" /> View Candidates
                     </Link>
                 </Button>
                  <div className="flex gap-1">
@@ -196,7 +203,7 @@ export function JobPostingList({ jobPostings, onEdit, onDeleteSuccess, tenantDom
                        </AlertDialogContent>
                      </AlertDialog>
                  </div>
-            </div>
+            </CardFooter>
           </Card>
         );
       })}

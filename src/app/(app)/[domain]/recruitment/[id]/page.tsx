@@ -10,18 +10,18 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Briefcase, MapPin, DollarSign, Calendar, Users, PlusCircle } from 'lucide-react';
+import { ArrowLeft, Briefcase, MapPin, DollarSign, Calendar, Users, PlusCircle, Type, BarChart, Info } from 'lucide-react'; // Added Type, BarChart, Info icons
 import Link from 'next/link';
 import { format, parseISO } from 'date-fns';
-import { CandidateList } from '@/modules/recruitment/components/candidate-list'; // Assuming this exists
+import { CandidateList } from '@/modules/recruitment/components/candidate-list';
+import { JobDetailSkeleton } from '@/app/jobs/[id]/page'; // Use public job skeleton for consistency
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
     try {
-        // API route handles tenant context via header
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
-        if (response.status === 404) return undefined as T; // Handle not found specifically
+        if (response.status === 404) return undefined as T;
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ message: `HTTP error! status: ${response.status}` }));
             throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
@@ -32,7 +32,6 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     }
 }
 
-// Helper to format date or return 'N/A'
 const formatDateSafe = (dateString?: string): string => {
   if (!dateString) return 'N/A';
   try {
@@ -45,7 +44,7 @@ const formatDateSafe = (dateString?: string): string => {
 export default function JobPostingDetailPage() {
   const params = useParams();
   const jobId = params.id as string;
-  const tenantDomain = params.domain as string; // Get tenant domain
+  const tenantDomain = params.domain as string;
   const router = useRouter();
   const { toast } = useToast();
 
@@ -58,19 +57,18 @@ export default function JobPostingDetailPage() {
     setIsLoading(true);
     setError(null);
     try {
-      // API route handles tenant context via header
       const [postingData, candidatesData] = await Promise.all([
         fetchData<JobPosting | undefined>(`/api/recruitment/postings/${jobId}`),
         fetchData<Candidate[]>(`/api/recruitment/candidates?jobPostingId=${jobId}`)
       ]);
 
       if (!postingData) {
-        notFound(); // Trigger 404 if job posting not found
+        notFound();
         return;
       }
 
       setJobPosting(postingData);
-      setCandidates(candidatesData || []); // Handle case where candidates might be null/undefined
+      setCandidates(candidatesData || []);
 
     } catch (err: any) {
       setError("Failed to load job posting details or candidates.");
@@ -91,16 +89,7 @@ export default function JobPostingDetailPage() {
   }, [jobId, fetchDetails]);
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-10 w-10 rounded-md" />
-          <Skeleton className="h-8 w-1/2" />
-        </div>
-        <Card><CardHeader><Skeleton className="h-6 w-1/3" /><Skeleton className="h-4 w-2/3 mt-2" /></CardHeader><CardContent className="space-y-4"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></CardContent></Card>
-        <Card><CardHeader><Skeleton className="h-6 w-1/4" /></CardHeader><CardContent><Skeleton className="h-40 w-full" /></CardContent></Card>
-      </div>
-    );
+    return <JobDetailSkeleton />; // Use imported skeleton
   }
 
   if (error) {
@@ -108,16 +97,24 @@ export default function JobPostingDetailPage() {
   }
 
   if (!jobPosting) {
-     // Should be caught by notFound(), but as a fallback
      return <p className="text-center py-10">Job Posting not found.</p>;
   }
 
+  const InfoItem = ({ icon: Icon, label, value }: { icon: React.ElementType, label: string, value?: string | null }) => {
+    if (!value) return null;
+    return (
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <Icon className="h-4 w-4" />
+        <span>{label}:</span>
+        <span className="text-foreground font-medium">{value}</span>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
          <div className="flex items-center gap-2">
-           {/* Link uses tenantDomain */}
            <Button variant="outline" size="icon" asChild>
              <Link href={`/${tenantDomain}/recruitment`}>
                <ArrowLeft className="h-4 w-4" />
@@ -129,52 +126,44 @@ export default function JobPostingDetailPage() {
            </h1>
            <Badge variant="secondary">{jobPosting.status}</Badge>
          </div>
-          {/* TODO: Add "Add Candidate" Button using a Dialog */}
-          {/* <Dialog>
-              <DialogTrigger asChild>
-                  <Button>
-                      <PlusCircle className="mr-2 h-4 w-4" /> Add Candidate
-                  </Button>
-              </DialogTrigger>
-              <DialogContent>...</DialogContent>
-          </Dialog> */}
       </div>
 
-       {/* Job Posting Details */}
        <Card className="shadow-sm">
          <CardHeader>
            <CardTitle>Job Details</CardTitle>
            <CardDescription>Information about the "{jobPosting.title}" position.</CardDescription>
          </CardHeader>
          <CardContent className="space-y-4">
-            <p className="text-sm">{jobPosting.description}</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                <div className="flex items-center gap-2 text-muted-foreground"><Briefcase className="h-4 w-4" />Department: <span className="text-foreground">{jobPosting.department}</span></div>
-                <div className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-4 w-4" />Location: <span className="text-foreground">{jobPosting.location}</span></div>
-                {jobPosting.salaryRange && <div className="flex items-center gap-2 text-muted-foreground"><DollarSign className="h-4 w-4" />Salary: <span className="text-foreground">{jobPosting.salaryRange}</span></div>}
-                <div className="flex items-center gap-2 text-muted-foreground"><Calendar className="h-4 w-4" />Posted: <span className="text-foreground">{formatDateSafe(jobPosting.datePosted)}</span></div>
-                {jobPosting.closingDate && <div className="flex items-center gap-2 text-muted-foreground"><Calendar className="h-4 w-4" />Closes: <span className="text-foreground">{formatDateSafe(jobPosting.closingDate)}</span></div>}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                <InfoItem icon={Briefcase} label="Department" value={jobPosting.department} />
+                <InfoItem icon={MapPin} label="Location" value={jobPosting.location} />
+                <InfoItem icon={Type} label="Employment Type" value={jobPosting.employmentType} />
+                <InfoItem icon={BarChart} label="Experience Level" value={jobPosting.experienceLevel} />
+                <InfoItem icon={DollarSign} label="Salary" value={jobPosting.salaryRange} />
+                <InfoItem icon={Calendar} label="Posted" value={formatDateSafe(jobPosting.datePosted)} />
+                <InfoItem icon={Calendar} label="Closes" value={formatDateSafe(jobPosting.closingDate)} />
+            </div>
+            <div className="pt-4 border-t">
+              <h3 className="font-semibold mb-2 text-md flex items-center gap-2"><Info className="h-5 w-5 text-primary" />Description</h3>
+              <p className="text-sm whitespace-pre-wrap">{jobPosting.description}</p>
             </div>
          </CardContent>
        </Card>
 
-        {/* Candidate List */}
         <Card className="shadow-sm">
          <CardHeader>
            <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5" /> Candidates ({candidates.length})</CardTitle>
            <CardDescription>Applicants for the "{jobPosting.title}" position.</CardDescription>
          </CardHeader>
          <CardContent>
-            {/* Pass candidates, jobPostingId, and tenantDomain to CandidateList */}
             <CandidateList
                 candidates={candidates}
                 jobPostingId={jobId}
-                onUpdate={fetchDetails} // Refetch details if candidate status changes etc.
-                tenantDomain={tenantDomain} // Pass tenantDomain
+                onUpdate={fetchDetails}
+                tenantDomain={tenantDomain}
             />
          </CardContent>
        </Card>
-
     </div>
   );
 }

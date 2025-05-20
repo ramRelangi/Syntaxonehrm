@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle, XCircle, Hourglass, Trash2, Eye, Loader2 } from 'lucide-react'; // Added Loader2
+import { CheckCircle, XCircle, Hourglass, Trash2, Eye, Loader2, Paperclip } from 'lucide-react'; // Added Paperclip
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-
+import Link from "next/link"; // Import Link
 
 const getStatusVariant = (status: LeaveRequestStatus): "default" | "secondary" | "outline" | "destructive" => {
   switch (status) {
@@ -63,14 +63,13 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
   }, [leaveTypes]);
 
   const handleStatusUpdate = async (id: string, status: 'Approved' | 'Rejected') => {
-     setActionLoading(prev => ({ ...prev, [`${id}-${status}`]: true })); // Unique key per action
-     const comments = status === 'Rejected' ? 'Rejected by admin' : 'Approved by admin'; // Placeholder
+     setActionLoading(prev => ({ ...prev, [`${id}-${status}`]: true }));
+     const comments = status === 'Rejected' ? 'Rejected by admin' : 'Approved by admin';
 
      try {
          const response = await fetch(`/api/leave/requests/${id}/status`, {
              method: 'PATCH',
              headers: { 'Content-Type': 'application/json' },
-             // TODO: Get approverId from session on server-side in API route
              body: JSON.stringify({ status, comments }),
          });
 
@@ -81,7 +80,7 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
              if(responseText) result = JSON.parse(responseText);
          } catch (e) {
             if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-            result = {}; // OK but not JSON
+            result = {};
          }
 
          if (!response.ok) {
@@ -109,7 +108,6 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
   const handleCancel = async (id: string) => {
      setActionLoading(prev => ({ ...prev, [`${id}-cancel`]: true }));
      try {
-         // API route handles user auth check (should get user ID from session)
          const response = await fetch(`/api/leave/requests/${id}/cancel`, {
              method: 'PATCH',
          });
@@ -121,7 +119,7 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
             if(responseText) result = JSON.parse(responseText);
           } catch (e) {
             if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-            result = {}; // OK but not JSON
+            result = {};
           }
 
          if (!response.ok) {
@@ -131,7 +129,7 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
          toast({
              title: "Request Cancelled",
              description: `Your leave request has been cancelled.`,
-             className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100", // Use a warning/info color
+             className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100",
          });
          onUpdate();
 
@@ -150,10 +148,9 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
       return leaveTypeMap.get(leaveTypeId) || requests.find(r => r.leaveTypeId === leaveTypeId)?.leaveTypeName || 'Unknown Type';
   };
 
-
   return (
      <TooltipProvider>
-         <Card className="shadow-sm">
+         <Card className="shadow-sm mt-4"> {/* Added mt-4 for spacing consistency */}
              <CardHeader>
                  <CardTitle>{isAdminView ? 'All Leave Requests' : 'My Leave Requests'}</CardTitle>
                  <CardDescription>
@@ -161,7 +158,6 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                  </CardDescription>
              </CardHeader>
              <CardContent>
-                 {/* Added overflow-auto for responsiveness */}
                  <div className="overflow-auto">
                      <Table>
                      <TableHeader>
@@ -201,9 +197,17 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                                         <TooltipTrigger asChild>
                                             <span className="truncate max-w-[150px] inline-block">{req.reason}</span>
                                         </TooltipTrigger>
-                                        <TooltipContent>
-                                            <p className="max-w-xs">{req.reason}</p>
+                                        <TooltipContent className="max-w-xs whitespace-pre-wrap break-words">
+                                            <p>{req.reason}</p>
                                             {req.comments && <p className="mt-2 border-t pt-2 text-muted-foreground"><strong>Approver Comment:</strong> {req.comments}</p>}
+                                            {req.attachmentUrl && (
+                                                <p className="mt-2 border-t pt-2">
+                                                    <strong>Attachment: </strong>
+                                                    <Link href={req.attachmentUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                                                        View Attachment
+                                                    </Link>
+                                                </p>
+                                            )}
                                         </TooltipContent>
                                     </Tooltip>
                                 </TableCell>
@@ -263,12 +267,17 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                                             </AlertDialogContent>
                                         </AlertDialog>
                                     )}
-                                    {/* Add View Details placeholder */}
-                                    {req.comments && (
-                                         <Tooltip>
-                                             <TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><Eye className="h-4 w-4 text-muted-foreground"/></Button></TooltipTrigger>
-                                             <TooltipContent><p><strong>Approver Comment:</strong> {req.comments}</p></TooltipContent>
-                                         </Tooltip>
+                                    {req.attachmentUrl && (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
+                                                    <Link href={req.attachmentUrl} target="_blank" rel="noopener noreferrer">
+                                                        <Paperclip className="h-4 w-4 text-muted-foreground"/>
+                                                    </Link>
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent><p>View Attachment</p></TooltipContent>
+                                        </Tooltip>
                                     )}
                                 </TableCell>
                              </TableRow>

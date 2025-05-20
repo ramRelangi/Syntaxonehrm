@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { format, parseISO } from 'date-fns';
-import { MoreHorizontal, User, Mail, Phone, FileText, Trash2, Edit, Eye, Loader2 } from 'lucide-react'; // Added Loader2
+import { MoreHorizontal, User, Mail, Phone, FileText, Trash2, Edit, Eye, Loader2, Briefcase, Tag, DollarSign } from 'lucide-react'; // Added Briefcase, Tag, DollarSign
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +39,7 @@ interface CandidateListProps {
   candidates: Candidate[];
   jobPostingId: string;
   onUpdate: () => void;
-  tenantDomain: string; // Add tenantDomain prop
+  tenantDomain: string;
 }
 
 const candidateStatuses: CandidateStatus[] = [
@@ -66,7 +66,6 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
     setActionLoading(prev => ({ ...prev, [loadingKey]: true }));
     console.log(`[Candidate List] Updating status for ${candidateId} to ${newStatus} via API...`);
     try {
-      // API route handles tenant context via header
       const response = await fetch(`/api/recruitment/candidates/${candidateId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -80,7 +79,7 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
           if(responseText) result = JSON.parse(responseText);
       } catch(e){
           if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-          result = {}; // OK, no body
+          result = {};
       }
 
       if (!response.ok) {
@@ -89,7 +88,7 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
       }
       console.log("[Candidate List] API Status Update Success:", result);
       toast({ title: "Status Updated", description: `Candidate status changed to ${newStatus}.` });
-      onUpdate(); // Refresh list
+      onUpdate();
 
     } catch (error: any) {
        console.error("[Candidate List] Status update error:", error);
@@ -103,7 +102,6 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
     setDeletingId(candidateId);
     console.log(`[Candidate List] Deleting candidate ${candidateId} via API...`);
     try {
-      // API route handles tenant context via header
       const response = await fetch(`/api/recruitment/candidates/${candidateId}`, { method: 'DELETE' });
 
        let result: any;
@@ -113,7 +111,7 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
           if(responseText) result = JSON.parse(responseText);
        } catch(e){
           if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-          result = {}; // OK, no body
+          result = {};
        }
 
        if (!response.ok) {
@@ -122,7 +120,7 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
        }
         console.log("[Candidate List] API Delete Success:", result);
       toast({ title: "Candidate Deleted", description: `${candidateName} has been removed.` });
-      onUpdate(); // Refresh list
+      onUpdate();
 
     } catch (error: any) {
       console.error("[Candidate List] Delete error:", error);
@@ -132,19 +130,18 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
     }
   };
 
-
   if (candidates.length === 0) {
     return <p className="text-muted-foreground text-center py-6">No candidates found for this job posting.</p>;
   }
 
   return (
-    // Added overflow-auto for responsiveness
     <div className="border rounded-md shadow-sm overflow-auto">
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
             <TableHead>Contact</TableHead>
+            <TableHead>Details</TableHead> {/* Combined Source & Salary */}
             <TableHead>Applied</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
@@ -160,7 +157,7 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
                     <User className="h-4 w-4 text-muted-foreground" /> {candidate.name}
                 </TableCell>
                 <TableCell>
-                    <a href={`mailto:${candidate.email}`} className="text-primary hover:underline flex items-center gap-1">
+                    <a href={`mailto:${candidate.email}`} className="text-primary hover:underline flex items-center gap-1 text-sm">
                         <Mail className="h-4 w-4 text-muted-foreground" /> {candidate.email}
                     </a>
                     {candidate.phone && (
@@ -169,12 +166,25 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
                         </span>
                     )}
                 </TableCell>
-                <TableCell>{format(parseISO(candidate.applicationDate), 'MMM d, yyyy')}</TableCell>
+                 <TableCell className="text-xs">
+                    {candidate.source && (
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                           <Tag className="h-3 w-3" /> Source: <span className="text-foreground">{candidate.source}</span>
+                        </div>
+                    )}
+                    {candidate.expectedSalary && (
+                        <div className="flex items-center gap-1 text-muted-foreground mt-0.5">
+                           <DollarSign className="h-3 w-3" /> Expected: <span className="text-foreground">{candidate.expectedSalary}</span>
+                        </div>
+                    )}
+                     {(!candidate.source && !candidate.expectedSalary) && <span className="text-muted-foreground">-</span>}
+                </TableCell>
+                <TableCell className="text-sm">{format(parseISO(candidate.applicationDate), 'MMM d, yyyy')}</TableCell>
                 <TableCell>
                     <Badge variant={getStatusVariant(candidate.status)}>{candidate.status}</Badge>
                 </TableCell>
                 <TableCell className="text-right">
-                    <AlertDialog> {/* Wrap Dropdown and Dialog Trigger */}
+                    <AlertDialog>
                     <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="h-8 w-8" disabled={isLoadingStatus || isCurrentDeleting}>
@@ -191,6 +201,8 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
                             </a>
                             </DropdownMenuItem>
                         )}
+                        {/* Add View Candidate Details Link (placeholder) */}
+                        {/* <DropdownMenuItem asChild><Link href={`/${tenantDomain}/recruitment/candidates/${candidate.id}`}><Eye className="mr-2 h-4 w-4" /> View Details</Link></DropdownMenuItem> */}
                         <DropdownMenuSeparator />
                         <DropdownMenuSub>
                         <DropdownMenuSubTrigger disabled={isLoadingStatus}>
@@ -217,8 +229,6 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
                         </AlertDialogTrigger>
                     </DropdownMenuContent>
                     </DropdownMenu>
-
-                    {/* Delete Confirmation Dialog */}
                     <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>Are you sure?</AlertDialogTitle>
@@ -233,7 +243,7 @@ export function CandidateList({ candidates, jobPostingId, onUpdate, tenantDomain
                         </AlertDialogAction>
                     </AlertDialogFooter>
                     </AlertDialogContent>
-                    </AlertDialog> {/* End AlertDialog Wrapper */}
+                    </AlertDialog>
                 </TableCell>
                 </TableRow>
             );

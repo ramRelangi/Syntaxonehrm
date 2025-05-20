@@ -1,9 +1,10 @@
+
 "use client";
 
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useRouter } from 'next/navigation'; // Keep if needed for other actions
+import { useRouter } from 'next/navigation';
 import { leaveRequestSchema, type LeaveRequestFormData, type LeaveType } from '@/modules/leave/types';
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,10 +12,11 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, CalendarIcon, Send, X } from 'lucide-react';
+import { Loader2, CalendarIcon, Send, X, Paperclip } from 'lucide-react'; // Added Paperclip
 import { format, parseISO, isValid, differenceInDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input'; // Import Input
 
 interface LeaveRequestFormProps {
   employeeId: string;
@@ -40,6 +42,7 @@ export function LeaveRequestForm({
       startDate: "",
       endDate: "",
       reason: "",
+      attachmentUrl: "", // Initialize attachmentUrl
     },
   });
 
@@ -61,11 +64,17 @@ export function LeaveRequestForm({
     setIsLoading(true);
     console.log("[Leave Request Form] Submitting via API:", data);
 
+    // Ensure attachmentUrl is null if empty string before sending
+    const payload = {
+        ...data,
+        attachmentUrl: data.attachmentUrl === "" ? null : data.attachmentUrl,
+    };
+
     try {
         const response = await fetch('/api/leave/requests', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
+            body: JSON.stringify(payload), // Use payload
         });
 
         let result: any;
@@ -81,7 +90,7 @@ export function LeaveRequestForm({
                  throw new Error(responseText || `HTTP error! status: ${response.status}`);
              }
               console.warn("[Leave Request Form] OK response but non-JSON:", responseText);
-             result = {}; // Assume success based on status
+             result = {};
         }
 
 
@@ -98,15 +107,14 @@ export function LeaveRequestForm({
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
         form.reset();
-        onSuccess(); // Call the success callback to refresh parent state
+        onSuccess();
 
     } catch (error: any) {
         console.error("[Leave Request Form] Submission error:", error);
         let errorMessage = error.message || "An unexpected error occurred.";
-        // Display specific balance error
          if (error.message?.includes('Insufficient leave balance')) {
              errorMessage = 'Insufficient leave balance for the selected dates.';
-             form.setError("endDate", { type: "manual", message: errorMessage }); // Attach error to date field
+             form.setError("endDate", { type: "manual", message: errorMessage });
          } else {
              form.setError("root.serverError", { message: errorMessage });
          }
@@ -123,7 +131,7 @@ export function LeaveRequestForm({
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-        {form.formState.errors.root?.serverError && !form.formState.errors.endDate && ( // Avoid showing root error if specific field error exists
+        {form.formState.errors.root?.serverError && !form.formState.errors.endDate && (
           <FormMessage className="text-destructive text-center">
             {form.formState.errors.root.serverError.message}
           </FormMessage>
@@ -185,7 +193,7 @@ export function LeaveRequestForm({
                         onSelect={(date) => {
                             field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
                             setStartDatePickerOpen(false);
-                            form.trigger('endDate'); // Re-validate end date
+                            form.trigger('endDate');
                         }}
                         disabled={(date) => date < new Date(new Date().setHours(0,0,0,0)) }
                         initialFocus
@@ -225,7 +233,7 @@ export function LeaveRequestForm({
                         onSelect={(date) => {
                            field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
                            setEndDatePickerOpen(false);
-                           form.trigger('endDate'); // Re-validate end date itself
+                           form.trigger('endDate');
                         }}
                         disabled={(date) =>
                             date < (startDateValue && isValid(parseISO(startDateValue)) ? parseISO(startDateValue) : new Date(new Date().setHours(0,0,0,0)))
@@ -234,7 +242,7 @@ export function LeaveRequestForm({
                         />
                     </PopoverContent>
                     </Popover>
-                    <FormMessage /> {/* Shows validation errors including custom balance error */}
+                    <FormMessage />
                 </FormItem>
                 )}
             />
@@ -257,6 +265,28 @@ export function LeaveRequestForm({
                     placeholder="Briefly explain the reason for your leave..."
                     className="resize-none"
                     {...field}
+                />
+                </FormControl>
+                <FormMessage />
+            </FormItem>
+            )}
+        />
+
+        <FormField
+            control={form.control}
+            name="attachmentUrl"
+            render={({ field }) => (
+            <FormItem>
+                <FormLabel className="flex items-center gap-1">
+                    <Paperclip className="h-4 w-4 text-muted-foreground" />
+                    Attachment URL (Optional)
+                </FormLabel>
+                <FormControl>
+                <Input
+                    type="url"
+                    placeholder="e.g., https://example.com/medical_certificate.pdf"
+                    {...field}
+                    value={field.value ?? ""} // Handle null correctly
                 />
                 </FormControl>
                 <FormMessage />

@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react';
@@ -11,6 +12,10 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Save, PlusCircle } from 'lucide-react';
 import { DialogClose } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"; // Import Select components
+
+// Example categories
+const templateCategories = ["Onboarding", "Leave Management", "Recruitment", "System Notifications", "General"];
 
 interface EmailTemplateFormProps {
   template?: EmailTemplate;
@@ -25,12 +30,13 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
   const submitButtonText = isEditMode ? "Save Changes" : "Create Template";
 
   const form = useForm<EmailTemplateFormData>({
-    resolver: zodResolver(emailTemplateSchema.omit({ id: true })),
+    resolver: zodResolver(emailTemplateSchema.omit({ id: true, tenantId: true })), // tenantId is handled by action
     defaultValues: {
       name: template?.name ?? "",
       subject: template?.subject ?? "",
       body: template?.body ?? "",
       usageContext: template?.usageContext ?? "",
+      category: template?.category ?? "", // Initialize category
     },
   });
 
@@ -54,7 +60,7 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
             if(responseText) result = JSON.parse(responseText);
          } catch (e) {
             if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-            result = {}; // OK, no JSON
+            result = {};
          }
 
 
@@ -71,7 +77,7 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
-        onSuccess(); // Trigger callback (close dialog, refetch data)
+        onSuccess();
 
     } catch (error: any) {
         console.error("[Email Template Form] Submission error:", error);
@@ -144,21 +150,46 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
             </FormItem>
           )}
         />
-
-         <FormField
-           control={form.control}
-           name="usageContext"
-           render={({ field }) => (
-             <FormItem>
-               <FormLabel>Usage Context (Optional)</FormLabel>
-               <FormControl>
-                 <Input placeholder="e.g., onboarding, leave_approval, password_reset" {...field} />
-               </FormControl>
-               <FormMessage />
-             </FormItem>
-           )}
-         />
-
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+           <FormField
+             control={form.control}
+             name="usageContext"
+             render={({ field }) => (
+               <FormItem>
+                 <FormLabel>Usage Context (Optional)</FormLabel>
+                 <FormControl>
+                   <Input placeholder="e.g., onboarding, leave_approval" {...field} value={field.value ?? ""} />
+                 </FormControl>
+                 <FormMessage />
+               </FormItem>
+             )}
+           />
+            <FormField
+              control={form.control}
+              name="category"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Category (Optional)</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a category" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="">-- None --</SelectItem>
+                      {templateCategories.map(category => (
+                        <SelectItem key={category} value={category}>
+                          {category}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+        </div>
 
         <div className="flex justify-end gap-2 pt-4">
           <DialogClose asChild>
@@ -166,7 +197,7 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
                 Cancel
               </Button>
           </DialogClose>
-          <Button type="submit" disabled={isLoading || !form.formState.isDirty}> {/* Disable if not dirty */}
+          <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode)}>
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <PlusCircle className="mr-2 h-4 w-4" />)

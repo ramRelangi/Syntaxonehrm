@@ -4,8 +4,15 @@
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useRouter } from 'next/navigation'; // Keep if needed
-import { jobPostingSchema, type JobPostingFormData, type JobPosting, jobPostingStatusSchema } from '@/modules/recruitment/types';
+import { useRouter } from 'next/navigation';
+import {
+  jobPostingSchema,
+  type JobPostingFormData,
+  type JobPosting,
+  jobPostingStatusSchema,
+  employmentTypeSchema, // Import new enum
+  experienceLevelSchema, // Import new enum
+} from '@/modules/recruitment/types';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from '@/components/ui/textarea';
@@ -14,22 +21,18 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, CalendarIcon, Save, PlusCircle } from 'lucide-react'; // Removed Trash2, not needed here
+import { Loader2, CalendarIcon, Save, PlusCircle } from 'lucide-react';
 import { format, parseISO, isValid, formatISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { DialogClose } from '@/components/ui/dialog';
-// Import the server action
 import { addJobPostingAction, updateJobPostingAction } from '@/modules/recruitment/actions';
-
 
 interface JobPostingFormProps {
   jobPosting?: JobPosting;
   onSuccess: () => void;
-  // tenantDomain prop is no longer needed as actions derive context
 }
 
-// Form data type should match the action input (excluding tenantId)
-type JobPostingFormSubmitData = Omit<JobPostingFormData, 'tenantId'>;
+type JobPostingFormSubmitData = Omit<JobPostingFormData, 'tenantId' | 'datePosted'>;
 
 export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
   const { toast } = useToast();
@@ -39,7 +42,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
   const isEditMode = !!jobPosting;
   const submitButtonText = isEditMode ? "Save Changes" : "Create Job Posting";
 
-  const getFormattedDate = (dateString?: string): string => {
+  const getFormattedDate = (dateString?: string | null): string => {
     if (!dateString) return "";
     try {
       const parsedDate = parseISO(dateString);
@@ -48,7 +51,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
   };
 
   const form = useForm<JobPostingFormSubmitData>({
-    resolver: zodResolver(jobPostingSchema.omit({ id: true, datePosted: true, tenantId: true })), // Omit tenantId from form validation schema
+    resolver: zodResolver(jobPostingSchema.omit({ id: true, datePosted: true, tenantId: true })),
     defaultValues: {
       title: jobPosting?.title ?? "",
       description: jobPosting?.description ?? "",
@@ -57,34 +60,34 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
       salaryRange: jobPosting?.salaryRange ?? "",
       status: jobPosting?.status ?? "Draft",
       closingDate: getFormattedDate(jobPosting?.closingDate),
+      employmentType: jobPosting?.employmentType ?? "Full-time",
+      experienceLevel: jobPosting?.experienceLevel ?? "Mid-Level",
     },
   });
 
    const onSubmit = async (data: JobPostingFormSubmitData) => {
     setIsLoading(true);
-    form.clearErrors(); // Clear previous errors
+    form.clearErrors();
     console.log("[Job Posting Form] Attempting to submit data:", data);
 
-    // Ensure closingDate is formatted correctly or undefined
     const payload = {
          ...data,
          closingDate: data.closingDate && isValid(parseISO(data.closingDate))
-            ? formatISO(parseISO(data.closingDate), { representation: 'date' }) // Send as 'YYYY-MM-DD' string if valid
-            : undefined, // Send undefined if empty or invalid
-         salaryRange: data.salaryRange || undefined, // Ensure undefined for empty salary
+            ? formatISO(parseISO(data.closingDate), { representation: 'date' })
+            : undefined,
+         salaryRange: data.salaryRange || undefined,
      };
 
      console.log("[Job Posting Form] Sending payload to action:", payload);
-
 
     try {
         let result;
         if (isEditMode && jobPosting?.id) {
             console.log(`[Job Posting Form] Calling updateJobPostingAction for ID: ${jobPosting.id}`);
-            result = await updateJobPostingAction(jobPosting.id, payload); // Action derives tenantId
+            result = await updateJobPostingAction(jobPosting.id, payload);
         } else {
              console.log(`[Job Posting Form] Calling addJobPostingAction`);
-            result = await addJobPostingAction(payload); // Action derives tenantId
+            result = await addJobPostingAction(payload);
         }
 
         console.log("[Job Posting Form] Action Result:", result);
@@ -92,14 +95,13 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
         if (!result.success) {
              console.error("[Job Posting Form] Action Error:", result.errors);
              const errorMessage = result.errors?.[0]?.message || `Failed to ${isEditMode ? 'update' : 'create'} job posting.`;
-              // Set field-specific errors if path is available
               if (result.errors?.[0]?.path) {
                   const fieldPath = result.errors[0].path[0] as keyof JobPostingFormSubmitData;
                   form.setError(fieldPath, { message: errorMessage });
               } else {
                   form.setError("root.serverError", { message: errorMessage });
               }
-             throw new Error(errorMessage); // Throw to prevent success toast
+             throw new Error(errorMessage);
         }
 
          console.log("[Job Posting Form] Action Success:", result.jobPosting);
@@ -110,11 +112,10 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
-        onSuccess(); // Trigger callback (close dialog, refetch data)
+        onSuccess();
 
     } catch (error: any) {
         console.error("[Job Posting Form] Submission error catch block:", error);
-        // Avoid double-toasting if a specific error was already set
         if (!form.formState.errors.root?.serverError && !Object.keys(form.formState.errors).length) {
              toast({
                 title: `Error ${isEditMode ? 'Updating' : 'Creating'} Job Posting`,
@@ -131,7 +132,6 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
 
   return (
     <Form {...form}>
-      {/* Ensure form tag has onSubmit */}
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
          {form.formState.errors.root?.serverError && (
           <FormMessage className="text-destructive text-center bg-destructive/10 p-3 rounded-md">
@@ -211,6 +211,53 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+             <FormField
+              control={form.control}
+              name="employmentType"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Employment Type</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select employment type" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {employmentTypeSchema.options.map(type => (
+                         <SelectItem key={type} value={type}>{type}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="experienceLevel"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Experience Level</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select experience level" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {experienceLevelSchema.options.map(level => (
+                         <SelectItem key={level} value={level}>{level}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField
               control={form.control}
               name="salaryRange"
@@ -218,7 +265,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
                 <FormItem>
                   <FormLabel>Salary Range (Optional)</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. $100,000 - $120,000" {...field} />
+                    <Input placeholder="e.g. $100,000 - $120,000" {...field} value={field.value ?? ""} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -274,7 +321,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
                      mode="single"
                      selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
                      onSelect={(date) => {
-                       field.onChange(date ? format(date, 'yyyy-MM-dd') : ""); // Store as YYYY-MM-DD string
+                       field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
                        setClosingDatePickerOpen(false);
                      }}
                      disabled={(date) => date < new Date(new Date().setHours(0,0,0,0)) }
@@ -294,8 +341,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
                 Cancel
               </Button>
           </DialogClose>
-          {/* Ensure button type is submit */}
-          <Button type="submit" disabled={isLoading || !form.formState.isDirty}>
+          <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode)}>
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <PlusCircle className="mr-2 h-4 w-4" />)
