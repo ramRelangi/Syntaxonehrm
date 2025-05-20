@@ -1,3 +1,4 @@
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getEmailTemplatesAction, addEmailTemplateAction } from '@/modules/communication/actions';
 import { emailTemplateSchema } from '@/modules/communication/types';
@@ -15,15 +16,16 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    // Validate the request body against the schema (excluding 'id')
-    const validation = emailTemplateSchema.omit({ id: true }).safeParse(body);
+    // Validate the request body against the schema (excluding 'id' and 'tenantId')
+    // The action will add tenantId from the session.
+    const validation = emailTemplateSchema.omit({ id: true, tenantId: true }).safeParse(body);
 
     if (!validation.success) {
         console.error("POST /api/communication/templates Validation Error:", validation.error.flatten());
         return NextResponse.json({ error: 'Invalid input', details: validation.error.flatten().fieldErrors }, { status: 400 });
     }
 
-    // Call server action
+    // Call server action - it expects data without tenantId, and adds it internally
     const result = await addEmailTemplateAction(validation.data);
 
     if (result.success && result.template) {
