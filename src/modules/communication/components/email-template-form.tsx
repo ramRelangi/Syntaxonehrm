@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 // Example categories
 const templateCategories = ["Onboarding", "Leave Management", "Recruitment", "System Notifications", "General"];
+const NONE_CATEGORY_VALUE = "__NONE_CATEGORY_VALUE__"; // Special value for the "None" option
 
 interface EmailTemplateFormProps {
   template?: EmailTemplate;
@@ -36,7 +37,7 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
       subject: template?.subject ?? "",
       body: template?.body ?? "",
       usageContext: template?.usageContext ?? "",
-      category: template?.category ?? "", // Initialize category
+      category: template?.category || "", // Initialize category, handle undefined as empty string for form
     },
   });
 
@@ -46,11 +47,17 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
     const apiUrl = isEditMode ? `/api/communication/templates/${template!.id}` : '/api/communication/templates';
     const method = isEditMode ? 'PUT' : 'POST';
 
+    // Ensure category is sent as undefined or empty string if "None" was selected
+    const payload = {
+        ...data,
+        category: data.category === NONE_CATEGORY_VALUE ? "" : data.category,
+    };
+
     try {
         const response = await fetch(apiUrl, {
             method: method,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
+            body: JSON.stringify(payload),
         });
 
          let result: any;
@@ -170,17 +177,20 @@ export function EmailTemplateForm({ template, onSuccess }: EmailTemplateFormProp
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Category (Optional)</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select
+                    onValueChange={(value) => field.onChange(value === NONE_CATEGORY_VALUE ? "" : value)}
+                    value={field.value === "" || field.value === undefined ? NONE_CATEGORY_VALUE : field.value}
+                  >
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select a category" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="">-- None --</SelectItem>
-                      {templateCategories.map(category => (
-                        <SelectItem key={category} value={category}>
-                          {category}
+                      <SelectItem value={NONE_CATEGORY_VALUE}>-- None --</SelectItem>
+                      {templateCategories.map(categoryValue => (
+                        <SelectItem key={categoryValue} value={categoryValue}>
+                          {categoryValue}
                         </SelectItem>
                       ))}
                     </SelectContent>
