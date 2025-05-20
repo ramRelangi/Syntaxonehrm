@@ -12,8 +12,9 @@ import {
 } from '@/modules/employees/lib/db';
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
-import { getTenantIdFromSession, isAdminFromSession, addUser, sendEmployeeWelcomeEmail } from '@/modules/auth/actions';
-import { generateTemporaryPassword } from '@/modules/auth/lib/utils'; // Updated import path
+import { getTenantIdFromSession, isAdminFromSession, sendEmployeeWelcomeEmail } from '@/modules/auth/actions';
+import { addUser } from '@/modules/auth/lib/db'; // Corrected import path for addUser
+import { generateTemporaryPassword } from '@/modules/auth/lib/utils';
 import bcrypt from 'bcrypt';
 
 const SALT_ROUNDS = 10;
@@ -108,12 +109,15 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
 
     // 3. Send welcome email
     try {
-        await sendEmployeeWelcomeEmail(tenantId, newEmployee.name, newEmployee.email, newEmployee.employeeId!, temporaryPassword);
-        console.log(`[Action addEmployee] Welcome email initiated for ${newEmployee.email}`);
+        if (newEmployee.employeeId) {
+            await sendEmployeeWelcomeEmail(tenantId, newEmployee.name, newEmployee.email, newEmployee.id, newEmployee.employeeId, temporaryPassword);
+            console.log(`[Action addEmployee] Welcome email initiated for ${newEmployee.email}`);
+        } else {
+            console.error(`[Action addEmployee] Employee ID missing for new employee ${newEmployee.id}. Cannot send welcome email.`);
+        }
     } catch (emailError: any) {
         console.error(`[Action addEmployee] Failed to send welcome email to ${newEmployee.email}:`, emailError);
         // Log this error, but don't fail the whole operation if employee/user were created
-        // Admin notification might be good here too
     }
 
     revalidatePath(`/${tenantId}/employees`);
