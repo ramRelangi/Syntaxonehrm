@@ -1,5 +1,7 @@
+
 import pool from '@/lib/db';
 import type { Tenant, User } from '@/modules/auth/types';
+import type { Employee } from '@/modules/employees/types'; // Import Employee type
 
 // --- Tenant Operations ---
 
@@ -177,7 +179,44 @@ export async function getUserByEmail(email: string, tenantId: string): Promise<U
         }
         throw err;
     } finally {
-        client.release();
+         client.release();
          console.log('[DB getUserByEmail] Client released.');
+    }
+}
+
+// Get employee by Employee ID and Tenant ID
+// We need a way to map an Employee ID to a User for login
+export async function getEmployeeByEmployeeIdAndTenantId(employeeId: string, tenantId: string): Promise<Employee | undefined> {
+    const client = await pool.connect();
+    console.log(`[DB getEmployeeByEmployeeId] Fetching employee with Employee ID: ${employeeId} for tenant ${tenantId}`);
+    const query = 'SELECT * FROM employees WHERE tenant_id = $1 AND employee_id = $2';
+    const values = [tenantId, employeeId];
+    try {
+        const res = await client.query(query, values);
+        if (res.rows.length > 0) {
+            // Need to map row to Employee (simplified here, ensure Employee type and mapRowToEmployee exist in employees/lib/db)
+            return {
+                id: res.rows[0].id,
+                tenantId: res.rows[0].tenant_id,
+                userId: res.rows[0].user_id,
+                employeeId: res.rows[0].employee_id,
+                name: res.rows[0].name,
+                email: res.rows[0].email,
+                position: res.rows[0].position,
+                department: res.rows[0].department,
+                hireDate: new Date(res.rows[0].hire_date).toISOString().split('T')[0],
+                status: res.rows[0].status,
+                // ... other employee fields
+            } as Employee;
+        }
+        return undefined;
+    } catch (err: any) {
+        console.error(`[DB getEmployeeByEmployeeId] Error fetching employee by Employee ID ${employeeId} for tenant ${tenantId}:`, err);
+        if (err.code === '42P01') {
+            throw new Error('Database schema not initialized. Relation "employees" does not exist.');
+        }
+        throw err;
+    } finally {
+        client.release();
     }
 }

@@ -1,10 +1,10 @@
 
 "use client";
 
-import * as React from 'react'; // Import React
+import * as React from 'react';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation'; // Import useRouter for client-side redirection
+import { useRouter } from 'next/navigation';
 import { z } from 'zod';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -15,23 +15,23 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
 import { tenantLoginSchema, type TenantLoginFormInputs } from '@/modules/auth/types';
-import { loginAction } from '@/modules/auth/actions'; // Assuming you have a login action
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Import Alert components
+import { loginAction } from '@/modules/auth/actions';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 export default function LoginPage() {
-  const router = useRouter(); // Use useRouter hook
+  const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [tenantDomain, setTenantDomain] = useState<string | null>(null);
   const [rootDomain, setRootDomain] = useState<string>('localhost');
-  const [port, setPort] = useState<string>(''); // Store port correctly
+  const [port, setPort] = useState<string>('');
   const [displayUrl, setDisplayUrl] = useState<string | null>(null);
   const [isRootLogin, setIsRootLogin] = useState(false);
 
   useEffect(() => {
       if (typeof window !== 'undefined') {
         const currentRootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-        const currentPort = window.location.port; // Port can be empty string
+        const currentPort = window.location.port;
         const currentProtocol = window.location.protocol;
         const hostname = window.location.hostname;
         console.log(`[LoginPage Effect] Hostname: ${hostname}, Root Domain: ${currentRootDomain}, Port: ${currentPort}`);
@@ -45,9 +45,9 @@ export default function LoginPage() {
            hostname === currentRootDomain ||
            hostname === 'localhost' ||
            hostname === '127.0.0.1' ||
-           hostname.match(/^192\.168\.\d+\.\d+$/) || // Local IPs
-           hostname.match(/^10\.\d+\.\d+\.\d+$/) || // Local IPs
-           hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/); // Local IPs
+           hostname.match(/^192\.168\.\d+\.\d+$/) ||
+           hostname.match(/^10\.\d+\.\d+\.\d+$/) ||
+           hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/);
 
         if (isRoot) {
             setIsRootLogin(true);
@@ -65,32 +65,29 @@ export default function LoginPage() {
                 setDisplayUrl(`${subdomain}.${currentRootDomain}${displayPortString}`);
                 console.log(`[LoginPage Effect] Tenant domain set to: ${subdomain}. Display URL: ${subdomain}.${currentRootDomain}${displayPortString}`);
             } else {
-                // Handle cases like www.localhost:9002 or invalid subdomains
-                setIsRootLogin(true); // Treat as root login if subdomain is invalid/ignored
+                setIsRootLogin(true);
                 setTenantDomain(null);
-                setDisplayUrl(`${hostname}${displayPortString}`);
+                setDisplayUrl(`${hostname}${displayPortString}`); // Use actual hostname if subdomain is invalid/ignored
                 console.log(`[LoginPage Effect] Invalid/ignored subdomain or root equivalent. Treating as root login. Display URL: ${hostname}${displayPortString}`);
             }
         }
       }
-  }, []); // Empty dependency array, runs once on mount
+  }, []);
 
 
   const form = useForm<TenantLoginFormInputs>({
     resolver: zodResolver(tenantLoginSchema),
     defaultValues: {
-      email: "",
+      loginIdentifier: "",
       password: "",
     },
   });
 
   const onSubmit: SubmitHandler<TenantLoginFormInputs> = async (data) => {
     setIsLoading(true);
-    // The action determines tenant context from headers/domain implicitly
-    console.log(`Login attempt with email: ${data.email}`);
+    console.log(`Login attempt with identifier: ${data.loginIdentifier}`);
 
     try {
-      // Pass validated data to the action
       const result = await loginAction(data);
 
       if (!result.success) {
@@ -98,7 +95,6 @@ export default function LoginPage() {
         setIsLoading(false);
       } else {
         toast({ title: "Login Successful", description: "Welcome back!" });
-        // Redirect to tenant dashboard on the CLIENT side after successful login
         router.push('/dashboard'); // Relative path, middleware handles rewrite
       }
     } catch (error: any) {
@@ -108,9 +104,8 @@ export default function LoginPage() {
     }
   };
 
-  // Construct forgot password link dynamically based on client-side detection
   const forgotPasswordHref = tenantDomain
-    ? `/forgot-password` // Now relative path, middleware handles context
+    ? `/forgot-password`
     : '/forgot-password';
 
   const displayLocation = tenantDomain
@@ -118,18 +113,17 @@ export default function LoginPage() {
       : `the main portal`;
 
   return (
-    // Center content vertically and horizontally, add padding
     <div className="flex min-h-screen items-center justify-center bg-background p-4 sm:p-6 lg:p-8">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold">Login to SyntaxHive Hrm</CardTitle>
-           {displayUrl !== null ? ( // Render only when displayUrl is determined
+           {displayUrl !== null ? (
                 <CardDescription>
                     {`Enter your credentials for ${displayLocation}`}
                     <span className="block text-xs text-muted-foreground mt-1">({displayUrl})</span>
                 </CardDescription>
            ) : (
-                <CardDescription>Loading...</CardDescription> // Show loading state
+                <CardDescription>Loading...</CardDescription>
            )}
         </CardHeader>
         <CardContent>
@@ -137,7 +131,7 @@ export default function LoginPage() {
                 <Alert variant="default" className="mb-4 bg-blue-50 border-blue-300 text-blue-800 [&>svg]:text-blue-600 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-300 dark:[&>svg]:text-blue-500">
                     <AlertTitle>Root Login</AlertTitle>
                     <AlertDescription>
-                         Please use your company's unique login URL (e.g., <strong>your-company.{rootDomain}</strong>) to access your account. If you don't have one, <Link href="/register" className='font-medium underline'>register here</Link>.
+                         Please use your company's unique login URL (e.g., <strong>your-company.{rootDomain}</strong>) to access your account. If you are registering a new company, please go to the <Link href="/register" className='font-medium underline'>registration page</Link>.
                     </AlertDescription>
                 </Alert>
             )}
@@ -145,12 +139,12 @@ export default function LoginPage() {
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField
                 control={form.control}
-                name="email"
+                name="loginIdentifier"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Email</FormLabel>
+                    <FormLabel>Email or Employee ID</FormLabel>
                     <FormControl>
-                      <Input placeholder="m@example.com" {...field} type="email" />
+                      <Input placeholder="your.email@company.com or EMP-001" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -165,9 +159,9 @@ export default function LoginPage() {
                       <FormLabel>Password</FormLabel>
                       <Link
                         href={forgotPasswordHref}
-                        className={`text-sm font-medium text-primary hover:underline ${isRootLogin ? 'pointer-events-none opacity-50' : ''}`} // Disable on root
-                        aria-disabled={isRootLogin}
-                        tabIndex={isRootLogin ? -1 : undefined}
+                        className={`text-sm font-medium text-primary hover:underline ${isRootLogin && !tenantDomain ? 'pointer-events-none opacity-50' : ''}`}
+                        aria-disabled={isRootLogin && !tenantDomain}
+                        tabIndex={isRootLogin && !tenantDomain ? -1 : undefined}
                       >
                         Forgot password?
                       </Link>
@@ -179,7 +173,7 @@ export default function LoginPage() {
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full" disabled={isLoading || isRootLogin}>
+              <Button type="submit" className="w-full" disabled={isLoading || (isRootLogin && !tenantDomain) }>
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Please wait
@@ -190,12 +184,11 @@ export default function LoginPage() {
               </Button>
             </form>
           </Form>
-           {/* Link to root registration page */}
            <div className="mt-4 text-center text-sm">
-              Need an account?{' '}
-              <Link href="/register" className="font-medium text-primary hover:underline">
-                  Register your company
-              </Link>
+              Need to register a company?{' '}
+             <Link href="/register" className="font-medium text-primary hover:underline">
+                Register Here
+             </Link>
            </div>
         </CardContent>
       </Card>

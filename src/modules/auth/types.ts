@@ -12,19 +12,19 @@ export const tenantSchema = z.object({
 export type Tenant = z.infer<typeof tenantSchema>;
 
 // --- User ---
-export const userRoleSchema = z.enum(['Admin', 'Manager', 'Employee']); // Example roles
+export const userRoleSchema = z.enum(['Admin', 'Manager', 'Employee']);
 export type UserRole = z.infer<typeof userRoleSchema>;
 
 export const userSchema = z.object({
     id: z.string().uuid(),
     tenantId: z.string().uuid(),
     email: z.string().email(),
-    passwordHash: z.string(), // Store hashed password, never plaintext
+    passwordHash: z.string(),
     name: z.string().min(1, "User name is required"),
     role: userRoleSchema.default('Employee'),
     isActive: z.boolean().default(true),
     createdAt: z.string().datetime(),
-    updatedAt: z.string().datetime(), // Added for consistency with trigger
+    updatedAt: z.string().datetime(),
 });
 
 export type User = z.infer<typeof userSchema>;
@@ -41,13 +41,23 @@ export const registrationSchema = z.object({
 
 export type RegistrationFormData = z.infer<typeof registrationSchema>;
 
-// --- Tenant-Specific Login Form (No domain needed in form) ---
+// --- Tenant-Specific Login Form ---
 export const tenantLoginSchema = z.object({
-  email: z.string().email("Invalid email address"),
+  // loginIdentifier can be an email or an Employee ID
+  loginIdentifier: z.string().min(1, "Email or Employee ID is required"),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
 export type TenantLoginFormInputs = z.infer<typeof tenantLoginSchema>;
+
+// --- Session Data ---
+export interface SessionData {
+  userId: string;
+  tenantId: string;
+  tenantDomain: string;
+  userRole: UserRole;
+}
+
 
 // --- Tenant-Specific Forgot Password Form ---
 export const tenantForgotPasswordSchema = z.object({
