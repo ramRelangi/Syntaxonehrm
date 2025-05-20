@@ -13,8 +13,8 @@ import {
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getTenantIdFromSession, isAdminFromSession, sendEmployeeWelcomeEmail } from '@/modules/auth/actions';
-import { addUser } from '@/modules/auth/lib/db'; // Corrected import path for addUser
-import { generateTemporaryPassword } from '@/modules/auth/lib/utils';
+import { addUser } from '@/modules/auth/lib/db';
+import { generateTemporaryPassword } from '@/modules/auth/lib/utils'; // Updated import path
 import bcrypt from 'bcrypt';
 
 const SALT_ROUNDS = 10;
@@ -79,7 +79,8 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
     console.log("[Action addEmployee] Validation successful. Creating user and employee...");
 
     // 1. Create User account
-    const temporaryPassword = generateTemporaryPassword();
+    const temporaryPassword = generateTemporaryPassword(12); // Explicitly set length to 12
+    console.log('[Action addEmployee] Generated temporary password length:', temporaryPassword.length); // Log the length
     const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
     let newUser;
     try {
@@ -120,8 +121,8 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
         // Log this error, but don't fail the whole operation if employee/user were created
     }
 
-    revalidatePath(`/${tenantId}/employees`);
-    revalidatePath(`/${tenantId}/dashboard`);
+    revalidatePath(`/${tenantDomain}/employees`);
+    revalidatePath(`/${tenantDomain}/dashboard`);
     return { success: true, employee: newEmployee };
   } catch (error: any) {
     console.error("[Action addEmployee] Error calling dbAddEmployee or during overall process:", error);
@@ -157,10 +158,10 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
     const updatedEmployee = await dbUpdateEmployee(id, tenantId, validation.data);
     if (updatedEmployee) {
        console.log(`[Action updateEmployee] Employee ${id} updated successfully. Revalidating paths...`);
-      revalidatePath(`/${tenantId}/employees`);
-      revalidatePath(`/${tenantId}/employees/${id}`);
-      revalidatePath(`/${tenantId}/employees/${id}/edit`);
-      revalidatePath(`/${tenantId}/dashboard`);
+      revalidatePath(`/${tenantDomain}/employees`);
+      revalidatePath(`/${tenantDomain}/employees/${id}`);
+      revalidatePath(`/${tenantDomain}/employees/${id}/edit`);
+      revalidatePath(`/${tenantDomain}/dashboard`);
       return { success: true, employee: updatedEmployee };
     } else {
        console.warn(`[Action updateEmployee] Employee ${id} not found for tenant ${tenantId} during update.`);
@@ -192,8 +193,8 @@ export async function deleteEmployeeAction(id: string): Promise<{ success: boole
     const deleted = await dbDeleteEmployee(id, tenantId);
     if (deleted) {
        console.log(`[Action deleteEmployeeAction] Employee ${id} deleted successfully. Revalidating paths...`);
-      revalidatePath(`/${tenantId}/employees`);
-      revalidatePath(`/${tenantId}/dashboard`);
+      revalidatePath(`/${tenantDomain}/employees`);
+      revalidatePath(`/${tenantDomain}/dashboard`);
       return { success: true };
     } else {
        console.warn(`[Action deleteEmployeeAction] Employee ${id} not found for tenant ${tenantId} during deletion.`);
