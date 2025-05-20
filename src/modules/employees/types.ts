@@ -1,13 +1,14 @@
 
 import { z } from 'zod';
 
-export const employmentTypeSchema = z.enum(['Full-time', 'Part-time', 'Contract']);
+export const employmentTypeSchema = z.enum(['Full-time', 'Part-time', 'Contract', 'Internship', 'Temporary']); // Extended
 export type EmploymentType = z.infer<typeof employmentTypeSchema>;
 
 export interface Employee {
   id: string;
   tenantId: string;
-  employeeId?: string; // Official Employee ID, unique per tenant
+  userId?: string; // Link to the user account for login
+  employeeId?: string; // Official Employee ID, unique per tenant, dynamically generated
   name: string;
   email: string;
   phone?: string;
@@ -24,10 +25,11 @@ export interface Employee {
 // Define Zod schema for validation (aligned with Employee type)
 export const employeeSchema = z.object({
   tenantId: z.string().uuid(),
-  employeeId: z.string().min(1, "Employee ID is required").max(50, "Employee ID cannot exceed 50 characters").optional().or(z.literal("")),
+  userId: z.string().uuid().optional().nullable(), // user_id can be null if employee doesn't have login yet
+  employeeId: z.string().max(50, "Employee ID cannot exceed 50 characters").optional().nullable(), // Auto-generated, so optional in form
   name: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Invalid email address"),
-  phone: z.string().optional().or(z.literal("")),
+  phone: z.string().optional().or(z.literal("")).nullable(),
   position: z.string().min(1, "Position is required"),
   department: z.string().min(1, "Department is required"),
   hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Hire date must be in YYYY-MM-DD format"),
@@ -38,5 +40,6 @@ export const employeeSchema = z.object({
   employmentType: employmentTypeSchema.optional().default('Full-time'),
 });
 
-// FormData might not include ID, but needs tenantId
-export type EmployeeFormData = z.infer<typeof employeeSchema>;
+// FormData might not include ID, but needs tenantId for actions. employeeId is auto-generated.
+// userId will be associated during the addEmployee action.
+export type EmployeeFormData = Omit<z.infer<typeof employeeSchema>, 'id' | 'tenantId' | 'employeeId' | 'userId'>;

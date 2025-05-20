@@ -139,7 +139,8 @@ CREATE INDEX IF NOT EXISTS idx_users_tenant_id_email ON users(tenant_id, LOWER(e
 CREATE TABLE IF NOT EXISTS employees (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    employee_id VARCHAR(50), -- Official Employee ID, unique per tenant
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL UNIQUE, -- Link to the users table, can be null initially
+    employee_id VARCHAR(50), -- Official Employee ID, unique per tenant, generated dynamically
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL, -- Email uniqueness enforced per tenant
     phone VARCHAR(50),
@@ -148,30 +149,31 @@ CREATE TABLE IF NOT EXISTS employees (
     hire_date DATE NOT NULL,
     status employee_status NOT NULL DEFAULT 'Active',
     date_of_birth DATE,
-    reporting_manager_id UUID REFERENCES employees(id) ON DELETE SET NULL, -- Can be null if no manager or top-level
+    reporting_manager_id UUID REFERENCES employees(id) ON DELETE SET NULL,
     work_location VARCHAR(255),
-    employment_type employment_enum_type DEFAULT 'Full-time', -- Using the new enum type
+    employment_type employment_enum_type DEFAULT 'Full-time',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tenant_id, email), -- Ensure email is unique within a tenant
-    UNIQUE (tenant_id, employee_id) -- Ensure employee_id is unique within a tenant
+    UNIQUE (tenant_id, email),
+    UNIQUE (tenant_id, employee_id)
 );
 SELECT 'employees table created.';
 CREATE INDEX IF NOT EXISTS idx_employees_tenant_id ON employees(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_employees_user_id ON employees(user_id);
 
 
 -- Leave Types Table
 CREATE TABLE IF NOT EXISTS leave_types (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    name VARCHAR(100) NOT NULL, -- Name uniqueness enforced per tenant
+    name VARCHAR(100) NOT NULL,
     description TEXT,
     requires_approval BOOLEAN NOT NULL DEFAULT TRUE,
     default_balance NUMERIC(5, 2) DEFAULT 0,
     accrual_rate NUMERIC(5, 2) DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tenant_id, name) -- Ensure name is unique within a tenant
+    UNIQUE (tenant_id, name)
 );
 SELECT 'leave_types table created.';
 CREATE INDEX IF NOT EXISTS idx_leave_types_tenant_id ON leave_types(tenant_id);
@@ -188,10 +190,10 @@ CREATE TABLE IF NOT EXISTS leave_requests (
     reason TEXT,
     status leave_request_status NOT NULL DEFAULT 'Pending',
     request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    approver_id UUID REFERENCES users(id), -- Link to users table for approver
+    approver_id UUID REFERENCES users(id),
     approval_date TIMESTAMP WITH TIME ZONE,
     comments TEXT,
-    attachment_url TEXT, -- New field for attachments
+    attachment_url TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT check_leave_dates CHECK (end_date >= start_date)
@@ -208,7 +210,7 @@ CREATE TABLE IF NOT EXISTS leave_balances (
     leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE,
     balance NUMERIC(5, 2) NOT NULL DEFAULT 0,
     last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (tenant_id, employee_id, leave_type_id) -- Composite key including tenant
+    PRIMARY KEY (tenant_id, employee_id, leave_type_id)
 );
 SELECT 'leave_balances table created.';
 CREATE INDEX IF NOT EXISTS idx_leave_balances_tenant_id_employee_id ON leave_balances(tenant_id, employee_id);
@@ -226,8 +228,8 @@ CREATE TABLE IF NOT EXISTS job_postings (
     status job_posting_status NOT NULL DEFAULT 'Draft',
     date_posted TIMESTAMP WITH TIME ZONE,
     closing_date DATE,
-    employment_type employment_enum_type DEFAULT 'Full-time', -- New field
-    experience_level experience_level_enum_type DEFAULT 'Mid-Level', -- New field
+    employment_type employment_enum_type DEFAULT 'Full-time',
+    experience_level experience_level_enum_type DEFAULT 'Mid-Level',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -240,7 +242,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL, -- Unique per posting within a tenant
+    email VARCHAR(255) NOT NULL,
     phone VARCHAR(50),
     job_posting_id UUID NOT NULL REFERENCES job_postings(id) ON DELETE CASCADE,
     application_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -248,11 +250,11 @@ CREATE TABLE IF NOT EXISTS candidates (
     resume_url TEXT,
     cover_letter TEXT,
     notes TEXT,
-    source TEXT, -- New field
-    expected_salary TEXT, -- New field
+    source TEXT,
+    expected_salary TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tenant_id, email, job_posting_id) -- Prevent duplicate applications within a tenant
+    UNIQUE (tenant_id, email, job_posting_id)
 );
 SELECT 'candidates table created.';
 CREATE INDEX IF NOT EXISTS idx_candidates_tenant_id_job_posting_id ON candidates(tenant_id, job_posting_id);
@@ -262,14 +264,14 @@ CREATE INDEX IF NOT EXISTS idx_candidates_tenant_id_job_posting_id ON candidates
 CREATE TABLE IF NOT EXISTS email_templates (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL, -- Unique per tenant
+    name VARCHAR(255) NOT NULL,
     subject VARCHAR(255) NOT NULL,
     body TEXT NOT NULL,
     usage_context VARCHAR(100),
-    category VARCHAR(100), -- New field
+    category VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tenant_id, name) -- Ensure name is unique within a tenant
+    UNIQUE (tenant_id, name)
 );
 SELECT 'email_templates table created.';
 CREATE INDEX IF NOT EXISTS idx_email_templates_tenant_id ON email_templates(tenant_id);
@@ -298,7 +300,7 @@ CREATE TABLE IF NOT EXISTS holidays (
     description TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tenant_id, date) -- Prevent duplicate holiday entries for the same date within a tenant
+    UNIQUE (tenant_id, date)
 );
 SELECT 'holidays table created.';
 CREATE INDEX IF NOT EXISTS idx_holidays_tenant_id_date ON holidays(tenant_id, date);

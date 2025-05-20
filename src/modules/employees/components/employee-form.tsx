@@ -20,21 +20,22 @@ import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 interface EmployeeFormProps {
-  employee?: Employee;
+  employee?: Employee; // Includes employeeId and userId if editing
   submitButtonText?: string;
   formTitle: string;
   formDescription: string;
-  tenantDomain: string; // Keep tenantDomain for context in UI or future use
+  tenantDomain: string;
 }
 
-type EmployeeFormSubmitData = Omit<EmployeeFormData, 'tenantId'>;
+// Form data now excludes fields auto-generated or managed by actions (tenantId, employeeId, userId)
+type EmployeeFormShape = EmployeeFormData;
 
 export function EmployeeForm({
   employee,
   submitButtonText,
   formTitle,
   formDescription,
-  tenantDomain, // Keep for UI context
+  tenantDomain,
 }: EmployeeFormProps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -56,12 +57,12 @@ export function EmployeeForm({
     }
   };
 
-  const formSchema = employeeSchema.omit({ tenantId: true });
+  // Schema for form validation: omits tenantId, userId, and employeeId as they are handled server-side.
+  const formSchemaForValidation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true });
 
-  const form = useForm<EmployeeFormSubmitData>({
-    resolver: zodResolver(formSchema),
+  const form = useForm<EmployeeFormShape>({
+    resolver: zodResolver(formSchemaForValidation),
     defaultValues: {
-      employeeId: employee?.employeeId ?? "",
       name: employee?.name ?? "",
       email: employee?.email ?? "",
       phone: employee?.phone ?? "",
@@ -76,26 +77,25 @@ export function EmployeeForm({
     },
   });
 
-  const onSubmit = async (data: EmployeeFormSubmitData) => {
+  const onSubmit = async (data: EmployeeFormShape) => {
     setIsLoading(true);
     console.log("[Employee Form] Submitting data:", data);
 
-    // Ensure optional fields are null if empty string
     const payload = {
       ...data,
-      employeeId: data.employeeId || undefined, // Send undefined if empty
       phone: data.phone || undefined,
       dateOfBirth: data.dateOfBirth || null,
       reportingManagerId: data.reportingManagerId || null,
       workLocation: data.workLocation || undefined,
     };
 
-
     try {
         let result;
         if (isEditMode && employee?.id) {
             result = await updateEmployee(employee.id, payload);
         } else {
+            // For addEmployee, we send the EmployeeFormShape.
+            // The action `addEmployee` will handle creating user, getting userId, and then calling dbAddEmployee.
             result = await addEmployee(payload);
         }
 
@@ -104,9 +104,9 @@ export function EmployeeForm({
              let errorMessage = result.errors?.[0]?.message || `Failed to ${isEditMode ? 'update' : 'add'} employee.`;
              let errorSetOnField = false;
              result.errors?.forEach(err => {
-                const path = err.path?.[0] as keyof EmployeeFormSubmitData | 'root.serverError' | undefined;
-                if (path && form.getFieldState(path as keyof EmployeeFormSubmitData)) {
-                    form.setError(path as keyof EmployeeFormSubmitData, { type: "manual", message: err.message });
+                const path = err.path?.[0] as keyof EmployeeFormShape | 'root.serverError' | undefined;
+                if (path && form.getFieldState(path as keyof EmployeeFormShape)) {
+                    form.setError(path as keyof EmployeeFormShape, { type: "manual", message: err.message });
                     errorSetOnField = true;
                 }
              });
@@ -120,11 +120,10 @@ export function EmployeeForm({
 
         toast({
             title: `Employee ${isEditMode ? 'Updated' : 'Added'}`,
-            description: `${result.employee?.name || data.name} has been successfully ${isEditMode ? 'updated' : 'added'}.`,
+            description: `${result.employee?.name || data.name} has been successfully ${isEditMode ? 'updated' : 'added'}. ${!isEditMode && result.employee?.employeeId ? `Employee ID: ${result.employee.employeeId}` : ''}`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
-        
-        // Navigate to the employee detail page or list page
+
         const targetPath = isEditMode && result.employee?.id ? `/${tenantDomain}/employees/${result.employee.id}` : `/${tenantDomain}/employees`;
         router.push(targetPath);
         router.refresh();
@@ -144,7 +143,6 @@ export function EmployeeForm({
     }
   };
 
-
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -154,19 +152,14 @@ export function EmployeeForm({
           </FormMessage>
         )}
         <div className="space-y-4">
-          <FormField
-            control={form.control}
-            name="employeeId"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Employee ID</FormLabel>
-                <FormControl>
-                  <Input placeholder="e.g. EMP001" {...field} value={field.value ?? ""} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+          {isEditMode && employee?.employeeId && (
+            <FormItem>
+              <FormLabel>Employee ID</FormLabel>
+              <FormControl>
+                <Input value={employee.employeeId} readOnly disabled className="bg-muted" />
+              </FormControl>
+            </FormItem>
+          )}
           <FormField
             control={form.control}
             name="name"
@@ -251,7 +244,7 @@ export function EmployeeForm({
               )}
             />
           </div>
-          
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <FormField
               control={form.control}
@@ -292,7 +285,7 @@ export function EmployeeForm({
               control={form.control}
               name="reportingManagerId"
               render={({ field }) => (
-                <FormItem className="pt-2"> {/* Added pt-2 for alignment */}
+                <FormItem className="pt-2">
                   <FormLabel>Reporting Manager ID</FormLabel>
                    <FormDescription>Enter UUID of the manager. Select list coming soon.</FormDescription>
                   <FormControl>
@@ -407,7 +400,7 @@ export function EmployeeForm({
           <Button type="button" variant="outline" onClick={() => router.back()} disabled={isLoading}>
             Cancel
           </Button>
-          <Button type="submit" disabled={isLoading || !form.formState.isDirty && isEditMode}>
+          <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode)}>
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />)
