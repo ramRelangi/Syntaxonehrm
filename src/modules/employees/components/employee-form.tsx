@@ -5,28 +5,28 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
-import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types';
+import { employeeSchema, type EmployeeFormData, employmentTypeSchema } from '@/modules/employees/types';
 import type { Employee } from '@/modules/employees/types';
-import { addEmployee, updateEmployee } from '@/modules/employees/actions'; // Import server actions
+import { addEmployee, updateEmployee } from '@/modules/employees/actions';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, CalendarIcon, Save, UserPlus } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 interface EmployeeFormProps {
-  employee?: Employee; // Optional employee data for editing (includes tenantId)
+  employee?: Employee;
   submitButtonText?: string;
   formTitle: string;
   formDescription: string;
+  tenantDomain: string; // Keep tenantDomain for context in UI or future use
 }
 
-// Exclude tenantId from the form data type itself, as it's derived contextually
 type EmployeeFormSubmitData = Omit<EmployeeFormData, 'tenantId'>;
 
 export function EmployeeForm({
@@ -34,70 +34,86 @@ export function EmployeeForm({
   submitButtonText,
   formTitle,
   formDescription,
+  tenantDomain, // Keep for UI context
 }: EmployeeFormProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
-  const [datePickerOpen, setDatePickerOpen] = React.useState(false);
+  const [hireDatePickerOpen, setHireDatePickerOpen] = React.useState(false);
+  const [dobDatePickerOpen, setDobDatePickerOpen] = React.useState(false);
 
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
 
-  const getFormattedHireDate = (hireDate?: string): string => {
-    if (!hireDate) return "";
+  const getFormattedDate = (dateString?: string | null): string => {
+    if (!dateString) return "";
     try {
-      const parsedDate = parseISO(hireDate);
+      const parsedDate = parseISO(dateString);
       return isValid(parsedDate) ? format(parsedDate, 'yyyy-MM-dd') : "";
     } catch (e) {
-      console.error("Error parsing hire date:", e);
+      console.error("Error parsing date:", e);
       return "";
     }
   };
 
-  // Schema for validation doesn't need tenantId, action will add it.
   const formSchema = employeeSchema.omit({ tenantId: true });
 
   const form = useForm<EmployeeFormSubmitData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      employeeId: employee?.employeeId ?? "",
       name: employee?.name ?? "",
       email: employee?.email ?? "",
       phone: employee?.phone ?? "",
       position: employee?.position ?? "",
       department: employee?.department ?? "",
-      hireDate: getFormattedHireDate(employee?.hireDate),
+      hireDate: getFormattedDate(employee?.hireDate),
       status: employee?.status ?? "Active",
+      dateOfBirth: getFormattedDate(employee?.dateOfBirth),
+      reportingManagerId: employee?.reportingManagerId ?? "",
+      workLocation: employee?.workLocation ?? "",
+      employmentType: employee?.employmentType ?? "Full-time",
     },
   });
 
-  const hireDateValue = form.watch('hireDate');
-
   const onSubmit = async (data: EmployeeFormSubmitData) => {
     setIsLoading(true);
-    console.log("[Employee Form] Submitting data (tenantId will be added by action):", data);
+    console.log("[Employee Form] Submitting data:", data);
+
+    // Ensure optional fields are null if empty string
+    const payload = {
+      ...data,
+      employeeId: data.employeeId || undefined, // Send undefined if empty
+      phone: data.phone || undefined,
+      dateOfBirth: data.dateOfBirth || null,
+      reportingManagerId: data.reportingManagerId || null,
+      workLocation: data.workLocation || undefined,
+    };
+
 
     try {
         let result;
         if (isEditMode && employee?.id) {
-            result = await updateEmployee(employee.id, data); // Action derives tenantId
+            result = await updateEmployee(employee.id, payload);
         } else {
-            result = await addEmployee(data); // Action derives tenantId
+            result = await addEmployee(payload);
         }
 
         if (!result.success) {
              console.error("[Employee Form] Action Error:", result.errors);
              let errorMessage = result.errors?.[0]?.message || `Failed to ${isEditMode ? 'update' : 'add'} employee.`;
-             // Handle specific errors
-             if (errorMessage.includes('Email address already exists')) {
-                  errorMessage = 'This email address is already in use for this tenant.';
-                  form.setError("email", { type: "manual", message: errorMessage });
-             } else if (errorMessage.includes('Tenant ID is missing') || errorMessage.includes('Unauthorized')) {
-                 errorMessage = 'Authorization failed or tenant context missing.';
-                 form.setError("root.serverError", { message: errorMessage });
-             } else {
-                  form.setError("root.serverError", { message: errorMessage });
+             let errorSetOnField = false;
+             result.errors?.forEach(err => {
+                const path = err.path?.[0] as keyof EmployeeFormSubmitData | 'root.serverError' | undefined;
+                if (path && form.getFieldState(path as keyof EmployeeFormSubmitData)) {
+                    form.setError(path as keyof EmployeeFormSubmitData, { type: "manual", message: err.message });
+                    errorSetOnField = true;
+                }
+             });
+             if (!errorSetOnField) {
+                form.setError("root.serverError", { message: errorMessage });
              }
-             throw new Error(errorMessage); // Throw to prevent success toast
+             throw new Error(errorMessage);
         }
 
         console.log("[Employee Form] Action Success:", result);
@@ -107,23 +123,21 @@ export function EmployeeForm({
             description: `${result.employee?.name || data.name} has been successfully ${isEditMode ? 'updated' : 'added'}.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
-
-        // Redirect to the tenant-relative /employees path. Middleware handles the rest.
-        // router.push('/employees'); // Correct relative path
-        router.push(`../${isEditMode ? employee.id : ''}`); // Navigate back or to detail view
-        router.refresh(); // Refresh data on the target page
+        
+        // Navigate to the employee detail page or list page
+        const targetPath = isEditMode && result.employee?.id ? `/${tenantDomain}/employees/${result.employee.id}` : `/${tenantDomain}/employees`;
+        router.push(targetPath);
+        router.refresh();
 
     } catch (error: any) {
         console.error("[Employee Form] Submission error:", error);
-        // Errors are mostly handled inside the if (!result.success) block now
-        // Only toast if no specific field error was set
-         if (!form.formState.errors.email && !form.formState.errors.root?.serverError) {
+        if (!form.formState.errors.root?.serverError && !Object.keys(form.formState.errors).some(key => key !== 'root')) {
             toast({
                 title: `Error ${isEditMode ? 'Updating' : 'Adding'} Employee`,
                 description: error.message || "An unexpected error occurred.",
                 variant: "destructive",
             });
-             form.setError("root.serverError", { message: error.message || "An unexpected error occurred." });
+            form.setError("root.serverError", { message: error.message || "An unexpected error occurred." });
         }
     } finally {
         setIsLoading(false);
@@ -134,21 +148,31 @@ export function EmployeeForm({
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-         {/* No hidden tenantId field needed */}
-
-         {form.formState.errors.root?.serverError && !form.formState.errors.email && (
-          <FormMessage className="text-destructive text-center">
+         {form.formState.errors.root?.serverError && (
+          <FormMessage className="text-destructive text-center bg-destructive/10 p-3 rounded-md">
             {form.formState.errors.root.serverError.message}
           </FormMessage>
         )}
         <div className="space-y-4">
-          {/* Basic Information */}
+          <FormField
+            control={form.control}
+            name="employeeId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Employee ID</FormLabel>
+                <FormControl>
+                  <Input placeholder="e.g. EMP001" {...field} value={field.value ?? ""} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
           <FormField
             control={form.control}
             name="name"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Full Name</FormLabel>
+                <FormLabel>Full Name *</FormLabel>
                 <FormControl>
                   <Input placeholder="e.g. Jane Doe" {...field} />
                 </FormControl>
@@ -156,18 +180,17 @@ export function EmployeeForm({
               </FormItem>
             )}
           />
-          {/* Responsive Grid for Email and Phone */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
              <FormField
               control={form.control}
               name="email"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Email Address</FormLabel>
+                  <FormLabel>Email Address *</FormLabel>
                   <FormControl>
                     <Input type="email" placeholder="e.g. jane.doe@company.com" {...field} />
                   </FormControl>
-                  <FormMessage /> {/* Shows validation and server-set errors */}
+                  <FormMessage />
                 </FormItem>
               )}
             />
@@ -176,9 +199,9 @@ export function EmployeeForm({
               name="phone"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Phone Number (Optional)</FormLabel>
+                  <FormLabel>Phone Number</FormLabel>
                   <FormControl>
-                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} />
+                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -186,15 +209,13 @@ export function EmployeeForm({
             />
           </div>
 
-          {/* Job Information */}
-          {/* Responsive Grid for Position and Department */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
              <FormField
               control={form.control}
               name="position"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Position / Job Title</FormLabel>
+                  <FormLabel>Position / Job Title *</FormLabel>
                   <FormControl>
                     <Input placeholder="e.g. Software Engineer" {...field} />
                   </FormControl>
@@ -207,7 +228,7 @@ export function EmployeeForm({
               name="department"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Department</FormLabel>
+                  <FormLabel>Department *</FormLabel>
                    <Select onValueChange={field.onChange} defaultValue={field.value}>
                      <FormControl>
                        <SelectTrigger>
@@ -230,25 +251,110 @@ export function EmployeeForm({
               )}
             />
           </div>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField
+              control={form.control}
+              name="dateOfBirth"
+              render={({ field }) => (
+                <FormItem className="flex flex-col pt-2">
+                  <FormLabel>Date of Birth</FormLabel>
+                  <Popover open={dobDatePickerOpen} onOpenChange={setDobDatePickerOpen}>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant={"outline"}
+                          className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
+                        >
+                          {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
+                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
+                        onSelect={(date) => {
+                           field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
+                           setDobDatePickerOpen(false);
+                        }}
+                        captionLayout="dropdown-buttons" fromYear={1950} toYear={new Date().getFullYear() - 18}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="reportingManagerId"
+              render={({ field }) => (
+                <FormItem className="pt-2"> {/* Added pt-2 for alignment */}
+                  <FormLabel>Reporting Manager ID</FormLabel>
+                   <FormDescription>Enter UUID of the manager. Select list coming soon.</FormDescription>
+                  <FormControl>
+                    <Input placeholder="Manager's Employee UUID" {...field} value={field.value ?? ""} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
 
-           {/* Hire Date and Status */}
-           {/* Responsive Grid for Hire Date and Status */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+             <FormField
+              control={form.control}
+              name="workLocation"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Work Location</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. Main Office, Remote" {...field} value={field.value ?? ""} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="employmentType"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Employment Type *</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select employment type" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {employmentTypeSchema.options.map(type => (
+                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
              <FormField
                control={form.control}
                name="hireDate"
                render={({ field }) => (
                  <FormItem className="flex flex-col pt-2">
-                   <FormLabel>Hire Date</FormLabel>
-                   <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                   <FormLabel>Hire Date *</FormLabel>
+                   <Popover open={hireDatePickerOpen} onOpenChange={setHireDatePickerOpen}>
                      <PopoverTrigger asChild>
                        <FormControl>
                          <Button
                            variant={"outline"}
-                           className={cn(
-                             "w-full pl-3 text-left font-normal",
-                             !field.value && "text-muted-foreground"
-                           )}
+                           className={cn("w-full pl-3 text-left font-normal",!field.value && "text-muted-foreground")}
                          >
                            {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
@@ -261,11 +367,9 @@ export function EmployeeForm({
                          selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
                          onSelect={(date) => {
                             field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
-                            setDatePickerOpen(false);
+                            setHireDatePickerOpen(false);
                          }}
-                         disabled={(date) =>
-                           date > new Date() || date < new Date("1900-01-01")
-                         }
+                         disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
                          initialFocus
                        />
                      </PopoverContent>
@@ -279,7 +383,7 @@ export function EmployeeForm({
               name="status"
               render={({ field }) => (
                 <FormItem className="pt-2">
-                  <FormLabel>Status</FormLabel>
+                  <FormLabel>Status *</FormLabel>
                   <Select onValueChange={field.onChange} defaultValue={field.value}>
                     <FormControl>
                       <SelectTrigger>
@@ -299,11 +403,11 @@ export function EmployeeForm({
            </div>
         </div>
 
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2 pt-4 border-t">
           <Button type="button" variant="outline" onClick={() => router.back()} disabled={isLoading}>
             Cancel
           </Button>
-          <Button type="submit" disabled={isLoading}>
+          <Button type="submit" disabled={isLoading || !form.formState.isDirty && isEditMode}>
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />)

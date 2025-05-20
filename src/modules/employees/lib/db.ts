@@ -2,18 +2,23 @@
 import pool from '@/lib/db';
 import type { Employee, EmployeeFormData } from '@/modules/employees/types';
 
-// Function to map database row to Employee object (handles potential nulls/naming differences)
+// Function to map database row to Employee object
 function mapRowToEmployee(row: any): Employee {
     return {
         id: row.id,
-        tenantId: row.tenant_id, // Include tenantId
+        tenantId: row.tenant_id,
+        employeeId: row.employee_id ?? undefined,
         name: row.name,
         email: row.email,
-        phone: row.phone ?? undefined, // Handle null phone numbers
+        phone: row.phone ?? undefined,
         position: row.position,
         department: row.department,
-        hireDate: new Date(row.hire_date).toISOString().split('T')[0], // Format as YYYY-MM-DD
-        status: row.status as Employee['status'], // Assume status matches type
+        hireDate: new Date(row.hire_date).toISOString().split('T')[0],
+        status: row.status as Employee['status'],
+        dateOfBirth: row.date_of_birth ? new Date(row.date_of_birth).toISOString().split('T')[0] : undefined,
+        reportingManagerId: row.reporting_manager_id ?? null,
+        workLocation: row.work_location ?? undefined,
+        employmentType: row.employment_type as Employee['employmentType'] ?? 'Full-time',
     };
 }
 
@@ -25,7 +30,7 @@ export async function getAllEmployees(tenantId: string): Promise<Employee[]> {
         return res.rows.map(mapRowToEmployee);
     } catch (err) {
         console.error(`Error fetching all employees for tenant ${tenantId}:`, err);
-        throw err; // Re-throw the error for the caller to handle
+        throw err;
     } finally {
         client.release();
     }
@@ -54,32 +59,42 @@ export async function addEmployee(employeeData: EmployeeFormData): Promise<Emplo
     if (!employeeData.tenantId) {
         throw new Error("Tenant ID is required to add an employee.");
     }
-    // Note: Database should generate the ID (e.g., using UUID or SERIAL)
     const query = `
-        INSERT INTO employees (tenant_id, name, email, phone, position, department, hire_date, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO employees (
+            tenant_id, employee_id, name, email, phone, position, department, 
+            hire_date, status, date_of_birth, reporting_manager_id, 
+            work_location, employment_type
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING *;
     `;
-    // Ensure phone is null if empty string or undefined
-    const phoneValue = employeeData.phone || null;
     const values = [
         employeeData.tenantId,
+        employeeData.employeeId || null,
         employeeData.name,
         employeeData.email,
-        phoneValue,
+        employeeData.phone || null,
         employeeData.position,
         employeeData.department,
-        employeeData.hireDate, // Should be YYYY-MM-DD string
+        employeeData.hireDate,
         employeeData.status,
+        employeeData.dateOfBirth || null,
+        employeeData.reportingManagerId || null,
+        employeeData.workLocation || null,
+        employeeData.employmentType || 'Full-time',
     ];
     try {
         const res = await client.query(query, values);
         return mapRowToEmployee(res.rows[0]);
     } catch (err: any) {
         console.error('Error adding employee:', err);
-         // Check for specific DB errors like unique constraint violation
-        if (err.code === '23505' && err.constraint === 'employees_tenant_id_email_key') { // Adjust constraint name if different
-            throw new Error('Email address already exists for this tenant.');
+        if (err.code === '23505') { // Unique constraint violation
+            if (err.constraint === 'employees_tenant_id_email_key') {
+                throw new Error('Email address already exists for this tenant.');
+            }
+            if (err.constraint === 'employees_tenant_id_employee_id_key') {
+                throw new Error('Employee ID already exists for this tenant.');
+            }
         }
         throw err;
     } finally {
@@ -90,51 +105,53 @@ export async function addEmployee(employeeData: EmployeeFormData): Promise<Emplo
 // Update employee (ensure it belongs to the tenant)
 export async function updateEmployee(id: string, tenantId: string, updates: Partial<EmployeeFormData>): Promise<Employee | undefined> {
     const client = await pool.connect();
-    // Build the SET part of the query dynamically
     const setClauses: string[] = [];
     const values: any[] = [];
     let valueIndex = 1;
 
-    // Map keys to database columns and handle optional values
     const columnMap: { [K in keyof EmployeeFormData]?: string } = {
+        employeeId: 'employee_id',
         name: 'name',
         email: 'email',
         phone: 'phone',
         position: 'position',
         department: 'department',
         hireDate: 'hire_date',
-        status: 'status'
+        status: 'status',
+        dateOfBirth: 'date_of_birth',
+        reportingManagerId: 'reporting_manager_id',
+        workLocation: 'work_location',
+        employmentType: 'employment_type',
     };
 
     for (const key in updates) {
-        // Don't allow updating tenantId via this function
         if (key === 'tenantId') continue;
-
-        if (Object.prototype.hasOwnProperty.call(updates, key) && updates[key as keyof EmployeeFormData] !== undefined) {
+        if (Object.prototype.hasOwnProperty.call(updates, key)) {
             const dbKey = columnMap[key as keyof EmployeeFormData];
             if (dbKey) {
                 setClauses.push(`${dbKey} = $${valueIndex}`);
-                 // Handle phone: store null if empty string provided in update
-                if (key === 'phone') {
-                    values.push(updates[key] || null);
-                } else {
-                    values.push(updates[key as keyof EmployeeFormData]);
-                }
+                let value = updates[key as keyof EmployeeFormData];
+                // Handle null explicitly for optional fields if empty string is passed
+                if (key === 'phone' && value === '') value = null;
+                if (key === 'employeeId' && value === '') value = null;
+                if (key === 'dateOfBirth' && value === '') value = null;
+                if (key === 'reportingManagerId' && value === '') value = null;
+                if (key === 'workLocation' && value === '') value = null;
+                values.push(value);
                 valueIndex++;
             }
         }
     }
 
     if (setClauses.length === 0) {
-        // No valid fields to update, maybe just return the existing record?
         return getEmployeeById(id, tenantId);
     }
 
-    values.push(id); // Add the ID for the WHERE clause
-    values.push(tenantId); // Add the tenantId for the WHERE clause
+    values.push(id);
+    values.push(tenantId);
     const query = `
         UPDATE employees
-        SET ${setClauses.join(', ')}
+        SET ${setClauses.join(', ')}, updated_at = NOW()
         WHERE id = $${valueIndex} AND tenant_id = $${valueIndex + 1}
         RETURNING *;
     `;
@@ -144,11 +161,16 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
         if (res.rows.length > 0) {
             return mapRowToEmployee(res.rows[0]);
         }
-        return undefined; // Employee not found or tenant mismatch
+        return undefined;
     } catch (err: any) {
         console.error(`Error updating employee with id ${id} for tenant ${tenantId}:`, err);
-         if (err.code === '23505' && err.constraint === 'employees_tenant_id_email_key') {
-            throw new Error('Email address already exists for this tenant.');
+        if (err.code === '23505') {
+            if (err.constraint === 'employees_tenant_id_email_key') {
+                throw new Error('Email address already exists for this tenant.');
+            }
+            if (err.constraint === 'employees_tenant_id_employee_id_key') {
+                throw new Error('Employee ID already exists for this tenant.');
+            }
         }
         throw err;
     } finally {
@@ -162,7 +184,7 @@ export async function deleteEmployee(id: string, tenantId: string): Promise<bool
     const query = 'DELETE FROM employees WHERE id = $1 AND tenant_id = $2';
     try {
         const res = await client.query(query, [id, tenantId]);
-        return res.rowCount > 0; // Returns true if a row was deleted
+        return res.rowCount > 0;
     } catch (err) {
         console.error(`Error deleting employee with id ${id} for tenant ${tenantId}:`, err);
         throw err;
@@ -170,5 +192,3 @@ export async function deleteEmployee(id: string, tenantId: string): Promise<bool
         client.release();
     }
 }
-
-// Note: Schema updated in init-db.ts

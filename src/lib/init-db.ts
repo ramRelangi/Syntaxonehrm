@@ -23,7 +23,7 @@ DROP TABLE IF EXISTS job_postings CASCADE;
 DROP TABLE IF EXISTS leave_balances CASCADE;
 DROP TABLE IF EXISTS leave_requests CASCADE;
 DROP TABLE IF EXISTS leave_types CASCADE;
-DROP TABLE IF EXISTS employees CASCADE;
+DROP TABLE IF EXISTS employees CASCADE; -- Drop employees before users if reporting_manager_id references users
 DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS tenants CASCADE;
 SELECT 'Existing tables dropped (if they existed).';
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 SELECT 'tenants table created.';
-CREATE INDEX IF NOT EXISTS idx_tenants_domain ON tenants(domain);
+CREATE INDEX IF NOT EXISTS idx_tenants_domain ON tenants(LOWER(domain));
 
 -- Users Table
 CREATE TABLE IF NOT EXISTS users (
@@ -111,13 +111,14 @@ CREATE TABLE IF NOT EXISTS users (
     UNIQUE (tenant_id, email) -- Ensure email is unique within a tenant
 );
 SELECT 'users table created.';
-CREATE INDEX IF NOT EXISTS idx_users_tenant_id_email ON users(tenant_id, email);
+CREATE INDEX IF NOT EXISTS idx_users_tenant_id_email ON users(tenant_id, LOWER(email));
 
 
 -- Employees Table
 CREATE TABLE IF NOT EXISTS employees (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    employee_id VARCHAR(50), -- Official Employee ID, unique per tenant
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL, -- Email uniqueness enforced per tenant
     phone VARCHAR(50),
@@ -125,12 +126,18 @@ CREATE TABLE IF NOT EXISTS employees (
     department VARCHAR(255) NOT NULL,
     hire_date DATE NOT NULL,
     status employee_status NOT NULL DEFAULT 'Active',
+    date_of_birth DATE,
+    reporting_manager_id UUID REFERENCES employees(id) ON DELETE SET NULL, -- Can be null if no manager or top-level
+    work_location VARCHAR(255),
+    employment_type VARCHAR(50) DEFAULT 'Full-time' CHECK (employment_type IN ('Full-time', 'Part-time', 'Contract')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tenant_id, email) -- Ensure email is unique within a tenant
+    UNIQUE (tenant_id, email), -- Ensure email is unique within a tenant
+    UNIQUE (tenant_id, employee_id) -- Ensure employee_id is unique within a tenant
 );
 SELECT 'employees table created.';
 CREATE INDEX IF NOT EXISTS idx_employees_tenant_id ON employees(tenant_id);
+-- CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_tenant_id_employee_id ON employees(tenant_id, employee_id) WHERE employee_id IS NOT NULL;
 
 
 -- Leave Types Table

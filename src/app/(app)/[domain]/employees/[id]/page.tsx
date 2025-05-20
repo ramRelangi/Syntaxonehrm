@@ -1,3 +1,4 @@
+
 // src/app/(app)/[domain]/employees/[id]/page.tsx
 "use client";
 
@@ -6,15 +7,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { notFound, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { User, Mail, Phone, Briefcase, Building, Calendar, Activity, Pencil, ArrowLeft } from 'lucide-react';
+import { User, Mail, Phone, Briefcase, Building, Calendar, Activity, Pencil, ArrowLeft, UsersIcon, MapPin, Tag, UserCheck } from 'lucide-react'; // Added UsersIcon, MapPin, Tag, UserCheck
 import { Badge } from "@/components/ui/badge";
 import { format, parseISO, isValid } from 'date-fns';
-import type { Employee } from '@/modules/employees/types';
+import type { Employee, EmploymentType } from '@/modules/employees/types';
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface EmployeeDetailPageProps {
-  params: { domain: string; id: string };
+  // Params are accessed via hook
 }
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION (API handles tenant context)
@@ -23,20 +24,18 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     console.log(`[Employee Detail Page - fetchData] Fetching data from: ${fullUrl}`);
 
     try {
-        // API route handles tenant context via header
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
         console.log(`[Employee Detail Page - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
 
-        if (response.status === 404) return undefined as T; // Handle not found specifically
+        if (response.status === 404) return undefined as T;
          if (response.status === 400 && (await response.text()).includes('Tenant context')) {
               throw new Error('Tenant information is missing. Unable to load data.');
          }
 
-
         if (!response.ok) {
-            const errorText = await response.text(); // Get raw error text
+            const errorText = await response.text();
             console.error(`[Employee Detail Page - fetchData] Fetch error response body for ${fullUrl}:`, errorText);
-            const errorData = JSON.parse(errorText || '{}'); // Try parsing JSON, default to empty object
+            const errorData = JSON.parse(errorText || '{}');
             throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
         return await response.json() as T;
@@ -55,43 +54,54 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
 const getStatusVariant = (status?: Employee['status']): "default" | "secondary" | "outline" | "destructive" => {
   if (!status) return 'outline';
   switch (status) {
-    case 'Active':
-      return 'default';
-    case 'On Leave':
-      return 'secondary';
-    case 'Inactive':
-      return 'outline';
-    default:
-      return 'outline';
+    case 'Active': return 'default';
+    case 'On Leave': return 'secondary';
+    case 'Inactive': return 'outline';
+    default: return 'outline';
   }
 };
 
+const getEmploymentTypeVariant = (type?: EmploymentType): "default" | "secondary" | "outline" => {
+  switch (type) {
+    case 'Full-time': return 'default';
+    case 'Part-time': return 'secondary';
+    case 'Contract': return 'outline';
+    default: return 'outline';
+  }
+}
 
-export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageProps) {
-   // Correct way to access params in Client Component
-  const safeParams = React.use(params);
-  const tenantDomain = safeParams?.domain;
-  const employeeId = safeParams?.id;
+export default function TenantEmployeeDetailPage() {
+  const params = useParams();
+  const tenantDomain = params.domain as string;
+  const employeeId = params.id as string;
   const { toast } = useToast();
 
   const [employee, setEmployee] = React.useState<Employee | null>(null);
+  // Consider fetching manager's name if reportingManagerId exists
+  // const [managerName, setManagerName] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!employeeId || !tenantDomain) return;
 
-    const fetchEmployee = async () => {
+    const fetchEmployeeDetails = async () => {
       setIsLoading(true);
       setError(null);
       try {
-        // API route implicitly uses tenantId from header, path is relative to root
         const data = await fetchData<Employee | undefined>(`/api/employees/${employeeId}`);
         if (!data) {
-          notFound(); // Trigger 404 if API returns undefined/404 (or tenant mismatch)
+          notFound();
           return;
         }
         setEmployee(data);
+
+        // Optional: Fetch manager details if reportingManagerId exists
+        // if (data.reportingManagerId) {
+        //   const managerData = await fetchData<Employee | undefined>(`/api/employees/${data.reportingManagerId}`);
+        //   if (managerData) setManagerName(managerData.name);
+        // }
+
       } catch (err: any) {
         setError(err.message || "Failed to load employee data.");
         toast({
@@ -104,28 +114,20 @@ export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageP
       }
     };
 
-    fetchEmployee();
+    fetchEmployeeDetails();
   }, [employeeId, tenantDomain, toast]);
 
-   // Function to safely format date
-   const formatDate = (dateString?: string) => {
+   const formatDate = (dateString?: string | null) => {
      if (!dateString) return "N/A";
      try {
        const parsedDate = parseISO(dateString);
-       if (isValid(parsedDate)) {
-         return format(parsedDate, "MMMM d, yyyy");
-       }
-     } catch (e) {
-       console.error("Error formatting date:", e);
-     }
-     return "Invalid Date";
+       return isValid(parsedDate) ? format(parsedDate, "MMMM d, yyyy") : "Invalid Date";
+     } catch (e) { console.error("Error formatting date:", e); return "Invalid Date"; }
    };
 
    if (!tenantDomain || !employeeId) {
-      // Handle case where params aren't available yet
       return <div>Loading context...</div>;
    }
-
 
    if (isLoading) {
      return (
@@ -138,13 +140,11 @@ export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageP
                <Skeleton className="h-10 w-32" />
            </div>
            <Card className="shadow-sm">
-             <CardHeader>
-               <Skeleton className="h-6 w-1/3" />
-               <Skeleton className="h-4 w-1/2" />
-             </CardHeader>
-             <CardContent className="grid gap-4 md:grid-cols-2">
+             <CardHeader><Skeleton className="h-6 w-1/3" /><Skeleton className="h-4 w-1/2" /></CardHeader>
+             <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"> {/* Adjusted grid for more fields */}
                 <div className="space-y-4"> <Skeleton className="h-12 w-full" /> <Skeleton className="h-12 w-full" /> <Skeleton className="h-12 w-full" /></div>
                 <div className="space-y-4"> <Skeleton className="h-12 w-full" /> <Skeleton className="h-12 w-full" /> <Skeleton className="h-12 w-full" /></div>
+                <div className="space-y-4 md:col-span-2 lg:col-span-1"> <Skeleton className="h-12 w-full" /> <Skeleton className="h-12 w-full" /> </div>
              </CardContent>
            </Card>
             <div className="grid gap-6 md:grid-cols-2">
@@ -160,9 +160,25 @@ export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageP
   }
 
    if (!employee) {
-      // Should be caught by notFound(), but as a fallback
       return <p className="text-center py-10">Employee not found.</p>;
   }
+
+  const InfoItem = ({ icon: Icon, label, value, isLink = false, hrefPrefix = "" }: { icon: React.ElementType, label: string, value?: string | null, isLink?: boolean, hrefPrefix?: string }) => {
+    if (!value && value !== 0) return null; // Render nothing if value is undefined or null (except 0)
+    return (
+        <div className="flex items-start gap-3">
+            <Icon className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0"/>
+            <div>
+                <p className="text-sm font-medium text-foreground">{label}</p>
+                {isLink && value ? (
+                    <a href={`${hrefPrefix}${value}`} className="text-sm text-primary hover:underline break-all">{value}</a>
+                ) : (
+                    <p className="text-sm text-foreground break-words">{value}</p>
+                )}
+            </div>
+        </div>
+    );
+  };
 
 
   return (
@@ -170,8 +186,7 @@ export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageP
        <div className="flex items-center justify-between flex-wrap gap-4">
          <div className="flex items-center gap-2">
            <Button variant="outline" size="icon" asChild>
-             {/* Link back to tenant-relative employee list */}
-             <Link href={`/employees`}>
+             <Link href={`/${tenantDomain}/employees`}>
                <ArrowLeft className="h-4 w-4" />
                <span className="sr-only">Back to Employees</span>
              </Link>
@@ -179,10 +194,10 @@ export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageP
            <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
               <User className="h-6 w-6" /> {employee.name}
            </h1>
+           {employee.employeeId && <Badge variant="outline">ID: {employee.employeeId}</Badge>}
          </div>
           <Button asChild variant="outline">
-             {/* Link to tenant-relative edit page */}
-             <Link href={`/employees/${employee.id}/edit`}>
+             <Link href={`/${tenantDomain}/employees/${employee.id}/edit`}>
                  <Pencil className="mr-2 h-4 w-4"/> Edit Employee
              </Link>
          </Button>
@@ -192,82 +207,48 @@ export default function TenantEmployeeDetailPage({ params }: EmployeeDetailPageP
           <CardTitle>Employee Information</CardTitle>
           <CardDescription>Detailed view of the employee's record for {tenantDomain}.</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
-           {/* Column 1 */}
+        <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-3"> {/* Adjusted grid */}
            <div className="space-y-4">
-             <div className="flex items-center gap-3">
-                 <Mail className="h-5 w-5 text-muted-foreground"/>
-                 <div>
-                     <p className="text-sm font-medium">Email</p>
-                     <a href={`mailto:${employee.email}`} className="text-sm text-primary hover:underline">{employee.email}</a>
-                 </div>
-             </div>
-              {employee.phone && (
-                 <div className="flex items-center gap-3">
-                     <Phone className="h-5 w-5 text-muted-foreground"/>
-                     <div>
-                         <p className="text-sm font-medium">Phone</p>
-                         <p className="text-sm text-foreground">{employee.phone}</p>
-                     </div>
-                 </div>
-             )}
-             <div className="flex items-center gap-3">
-                 <Briefcase className="h-5 w-5 text-muted-foreground"/>
-                 <div>
-                     <p className="text-sm font-medium">Position</p>
-                     <p className="text-sm text-foreground">{employee.position}</p>
-                 </div>
-             </div>
+             <InfoItem icon={Mail} label="Email" value={employee.email} isLink hrefPrefix="mailto:" />
+             <InfoItem icon={Phone} label="Phone" value={employee.phone} isLink hrefPrefix="tel:" />
+             <InfoItem icon={UserCheck} label="Date of Birth" value={formatDate(employee.dateOfBirth)} />
            </div>
-
-           {/* Column 2 */}
            <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                     <Building className="h-5 w-5 text-muted-foreground"/>
-                     <div>
-                         <p className="text-sm font-medium">Department</p>
-                         <p className="text-sm text-foreground">{employee.department}</p>
-                     </div>
+             <InfoItem icon={Briefcase} label="Position" value={employee.position} />
+             <InfoItem icon={Building} label="Department" value={employee.department} />
+             <InfoItem icon={UsersIcon} label="Reporting Manager ID" value={employee.reportingManagerId} />
+             {/* TODO: Fetch and display manager's name instead of ID */}
+           </div>
+           <div className="space-y-4">
+             <InfoItem icon={Calendar} label="Hire Date" value={formatDate(employee.hireDate)} />
+             <InfoItem icon={MapPin} label="Work Location" value={employee.workLocation} />
+             <div className="flex items-start gap-3">
+                 <Tag className="h-5 w-5 text-muted-foreground mt-0.5"/>
+                 <div>
+                     <p className="text-sm font-medium">Employment Type</p>
+                     <Badge variant={getEmploymentTypeVariant(employee.employmentType)}>{employee.employmentType || 'N/A'}</Badge>
                  </div>
-                 <div className="flex items-center gap-3">
-                     <Calendar className="h-5 w-5 text-muted-foreground"/>
-                     <div>
-                         <p className="text-sm font-medium">Hire Date</p>
-                         <p className="text-sm text-foreground">{formatDate(employee.hireDate)}</p>
-                     </div>
+             </div>
+             <div className="flex items-start gap-3">
+                 <Activity className="h-5 w-5 text-muted-foreground mt-0.5"/>
+                 <div>
+                     <p className="text-sm font-medium">Status</p>
+                     <Badge variant={getStatusVariant(employee.status)}>{employee.status}</Badge>
                  </div>
-                  <div className="flex items-center gap-3">
-                     <Activity className="h-5 w-5 text-muted-foreground"/>
-                     <div>
-                         <p className="text-sm font-medium">Status</p>
-                         <Badge variant={getStatusVariant(employee.status)}>{employee.status}</Badge>
-                     </div>
-                 </div>
+             </div>
            </div>
         </CardContent>
-         {/* Can add CardFooter for additional actions if needed */}
       </Card>
 
-       {/* Placeholder for related information (e.g., Performance Reviews, Leave History) */}
        <div className="grid gap-6 md:grid-cols-2">
             <Card className="shadow-sm">
-                <CardHeader>
-                    <CardTitle>Performance Reviews</CardTitle>
-                    <CardDescription>Placeholder for review history.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <p className="text-muted-foreground">Review data will be displayed here.</p>
-                </CardContent>
+                <CardHeader><CardTitle>Performance Reviews</CardTitle><CardDescription>Placeholder for review history.</CardDescription></CardHeader>
+                <CardContent><p className="text-muted-foreground">Review data will be displayed here.</p></CardContent>
             </Card>
              <Card className="shadow-sm">
-                <CardHeader>
-                    <CardTitle>Leave History</CardTitle>
-                     {/* Link to tenant-relative leave page */}
-                     <CardDescription><Link href={`/leave?employeeId=${employeeId}`} className='text-primary hover:underline'>View leave history</Link></CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <p className="text-muted-foreground">Recent leave records will be displayed here.</p>
-                </CardContent>
+                <CardHeader><CardTitle>Leave History</CardTitle>
+                <CardDescription><Link href={`/${tenantDomain}/leave?employeeId=${employeeId}`} className='text-primary hover:underline'>View leave history</Link></CardDescription></CardHeader>
+                <CardContent><p className="text-muted-foreground">Recent leave records will be displayed here.</p></CardContent>
             </Card>
        </div>
     </div>
