@@ -33,14 +33,17 @@ export interface LeaveRequest {
   attachmentUrl?: string | null; // New field
 }
 
-// --- Zod Schema for Leave Request Form ---
+// --- Zod Schema for Leave Request API Payload & Form ---
+// This schema defines the complete data structure including server-added context (tenantId, employeeId)
+// and ensures all IDs are validated as UUIDs.
 export const leaveRequestSchema = z.object({
-  employeeId: z.string().min(1, "Employee is required"),
-  leaveTypeId: z.string().min(1, "Leave type is required"),
+  tenantId: z.string().uuid("Invalid tenant identifier."), // Added and validated as UUID
+  employeeId: z.string().uuid("Invalid employee identifier."), // Validated as UUID
+  leaveTypeId: z.string().uuid("Leave type must be a valid selection."), // Validated as UUID
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date must be in YYYY-MM-DD format"),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format"),
   reason: z.string().min(5, "Reason must be at least 5 characters").max(200, "Reason cannot exceed 200 characters"),
-  attachmentUrl: z.string().url("Invalid URL format for attachment.").optional().or(z.literal('')).nullable(), // New field
+  attachmentUrl: z.string().url("Invalid URL format for attachment.").optional().or(z.literal('')).nullable(),
 });
 
 export const refinedLeaveRequestSchema = leaveRequestSchema.refine(data => {

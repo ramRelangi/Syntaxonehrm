@@ -5,6 +5,8 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
+// Use a schema for the form that omits tenantId, as it's added server-side.
+// EmployeeId is passed as a prop and included in defaultValues.
 import { leaveRequestSchema, type LeaveRequestFormData, type LeaveType } from '@/modules/leave/types';
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -12,17 +14,20 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, CalendarIcon, Send, X, Paperclip } from 'lucide-react'; // Added Paperclip
+import { Loader2, CalendarIcon, Send, X, Paperclip } from 'lucide-react';
 import { format, parseISO, isValid, differenceInDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input'; // Import Input
+import { Input } from '@/components/ui/input';
 
 interface LeaveRequestFormProps {
-  employeeId: string;
+  employeeId: string; // This should be a valid UUID
   leaveTypes: LeaveType[];
   onSuccess: () => void;
 }
+
+// Define the type for the form's own data (excluding tenantId)
+type FormShape = Omit<LeaveRequestFormData, 'tenantId'>;
 
 export function LeaveRequestForm({
   employeeId,
@@ -34,15 +39,19 @@ export function LeaveRequestForm({
   const [startDatePickerOpen, setStartDatePickerOpen] = React.useState(false);
   const [endDatePickerOpen, setEndDatePickerOpen] = React.useState(false);
 
-  const form = useForm<LeaveRequestFormData>({
-    resolver: zodResolver(leaveRequestSchema),
+  // The form uses a schema that omits tenantId, as it's added by the API route.
+  // EmployeeId is part of the form's state and default values.
+  const formSchemaForResolver = leaveRequestSchema.omit({ tenantId: true });
+
+  const form = useForm<FormShape>({
+    resolver: zodResolver(formSchemaForResolver),
     defaultValues: {
-      employeeId: employeeId,
+      employeeId: employeeId, // employeeId from props
       leaveTypeId: "",
       startDate: "",
       endDate: "",
       reason: "",
-      attachmentUrl: "", // Initialize attachmentUrl
+      attachmentUrl: "",
     },
   });
 
@@ -60,11 +69,12 @@ export function LeaveRequestForm({
 
   const leaveDays = calculateLeaveDays();
 
-  const onSubmit = async (data: LeaveRequestFormData) => {
+  const onSubmit = async (data: FormShape) => {
     setIsLoading(true);
-    console.log("[Leave Request Form] Submitting via API:", data);
+    console.log("[Leave Request Form] Submitting via API (form data):", data);
 
-    // Ensure attachmentUrl is null if empty string before sending
+    // The API route will add tenantId from session.
+    // We send the form data which includes employeeId (already validated by form's schema).
     const payload = {
         ...data,
         attachmentUrl: data.attachmentUrl === "" ? null : data.attachmentUrl,
@@ -74,7 +84,7 @@ export function LeaveRequestForm({
         const response = await fetch('/api/leave/requests', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload), // Use payload
+            body: JSON.stringify(payload),
         });
 
         let result: any;
@@ -115,7 +125,12 @@ export function LeaveRequestForm({
          if (error.message?.includes('Insufficient leave balance')) {
              errorMessage = 'Insufficient leave balance for the selected dates.';
              form.setError("endDate", { type: "manual", message: errorMessage });
-         } else {
+         } else if (error.message?.includes('Invalid employee identifier') || error.message?.includes('Invalid leave type identifier')) {
+            // More specific error if the form somehow submits invalid UUIDs for these
+            errorMessage = 'There was an issue with the selected employee or leave type. Please try again.';
+            form.setError("root.serverError", { message: errorMessage });
+         }
+         else {
              form.setError("root.serverError", { message: errorMessage });
          }
         toast({
@@ -137,7 +152,8 @@ export function LeaveRequestForm({
           </FormMessage>
         )}
 
-         <input type="hidden" {...form.register("employeeId")} />
+         {/* employeeId is part of the form state but not a visible field if passed as prop */}
+         {/* <input type="hidden" {...form.register("employeeId")} /> */}
 
          <FormField
             control={form.control}
@@ -286,7 +302,7 @@ export function LeaveRequestForm({
                     type="url"
                     placeholder="e.g., https://example.com/medical_certificate.pdf"
                     {...field}
-                    value={field.value ?? ""} // Handle null correctly
+                    value={field.value ?? ""}
                 />
                 </FormControl>
                 <FormMessage />
