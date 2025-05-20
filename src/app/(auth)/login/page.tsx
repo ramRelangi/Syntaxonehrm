@@ -11,7 +11,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
 import { tenantLoginSchema, type TenantLoginFormInputs } from '@/modules/auth/types';
@@ -45,9 +45,9 @@ export default function LoginPage() {
            hostname === currentRootDomain ||
            hostname === 'localhost' ||
            hostname === '127.0.0.1' ||
-           hostname.match(/^192\.168\.\d+\.\d+$/) ||
-           hostname.match(/^10\.\d+\.\d+\.\d+$/) ||
-           hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/);
+           hostname.match(/^192\.168\.\d+\.\d+$/) || // Local IPs
+           hostname.match(/^10\.\d+\.\d+\.\d+$/) || // Local IPs
+           hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/); // Local IPs
 
         if (isRoot) {
             setIsRootLogin(true);
@@ -95,7 +95,9 @@ export default function LoginPage() {
         setIsLoading(false);
       } else {
         toast({ title: "Login Successful", description: "Welcome back!" });
-        router.push('/dashboard'); // Relative path, middleware handles rewrite
+        // The router.push will redirect to the dashboard *within the current tenant's domain*
+        // due to how the middleware and app layout are structured.
+        router.push('/dashboard');
       }
     } catch (error: any) {
         console.error("Login action error:", error);
@@ -105,8 +107,8 @@ export default function LoginPage() {
   };
 
   const forgotPasswordHref = tenantDomain
-    ? `/forgot-password`
-    : '/forgot-password';
+    ? `/forgot-password/${tenantDomain}` // Keep tenant domain in forgot password link
+    : '/forgot-password'; // Root forgot password page
 
   const displayLocation = tenantDomain
       ? `company: ${tenantDomain}`
@@ -169,6 +171,9 @@ export default function LoginPage() {
                     <FormControl>
                       <Input type="password" {...field} placeholder="••••••••" />
                     </FormControl>
+                    <FormDescription>
+                      Must be at least 6 characters.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -184,12 +189,14 @@ export default function LoginPage() {
               </Button>
             </form>
           </Form>
-           <div className="mt-4 text-center text-sm">
-              Need to register a company?{' '}
-             <Link href="/register" className="font-medium text-primary hover:underline">
-                Register Here
-             </Link>
-           </div>
+          {!tenantDomain && ( // Only show register link on root login or if tenant domain isn't determined
+            <div className="mt-4 text-center text-sm">
+                Need to register a company?{' '}
+                <Link href="/register" className="font-medium text-primary hover:underline">
+                    Register Here
+                </Link>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
