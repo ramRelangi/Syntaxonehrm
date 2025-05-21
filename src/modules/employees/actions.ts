@@ -1,7 +1,7 @@
 
 'use server';
 
-import type { Employee } from '@/modules/employees/types';
+import type { Employee, User } from '@/modules/employees/types'; // Ensure User type is imported if used for role
 import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types';
 import {
   getAllEmployees as dbGetAllEmployees,
@@ -29,7 +29,7 @@ import bcrypt from 'bcrypt';
 const SALT_ROUNDS = 10;
 
 export async function getEmployees(): Promise<Employee[]> {
-  console.log("[Action getEmployees] Verifying imported session functions...");
+  console.log("[Action getEmployees] Verifying session functions...");
   if (typeof getTenantIdFromSession !== 'function' || typeof getUserRoleFromSession !== 'function' || typeof getUserIdFromSession !== 'function' || typeof getEmployeeProfileForCurrentUser !== 'function') {
     const missing = [
         typeof getTenantIdFromSession !== 'function' && 'getTenantIdFromSession',
@@ -58,7 +58,7 @@ export async function getEmployees(): Promise<Employee[]> {
     console.log(`[Action getEmployees] Fetched userId: ${userId}`);
 
   } catch (e: any) {
-    console.error("[Action getEmployees] Error fetching session data:", e.message, e.stack);
+    console.error("[Action getEmployees] Error fetching session data:", e.message, e.stack ? e.stack : '(No stack trace)');
     throw new Error("Failed to retrieve session context: " + e.message);
   }
 
@@ -73,9 +73,9 @@ export async function getEmployees(): Promise<Employee[]> {
       console.log(`[Action getEmployees] Employee role, attempting to fetch own profile for user: ${userId}`);
       let employeeProfile: Employee | null = null;
       try {
-          employeeProfile = await getEmployeeProfileForCurrentUser(); // This already uses session internally
+          employeeProfile = await getEmployeeProfileForCurrentUser();
       } catch (e: any) {
-          console.error(`[Action getEmployees] Error calling getEmployeeProfileForCurrentUser for user ${userId}:`, e.message, e.stack);
+          console.error(`[Action getEmployees] Error calling getEmployeeProfileForCurrentUser for user ${userId}:`, e.message, e.stack ? e.stack : '(No stack trace)');
           throw new Error("Failed to retrieve your employee profile: " + e.message);
       }
       return employeeProfile ? [employeeProfile] : [];
@@ -93,7 +93,6 @@ export async function getEmployeeByIdAction(id: string): Promise<Employee | unde
    let tenantId: string | null = null;
    let userRole: User['role'] | null = null;
    let currentUserId: string | null = null;
-   let employeeProfile: Employee | undefined = undefined;
 
    try {
        const sessionData = await getSessionData();
@@ -109,56 +108,49 @@ export async function getEmployeeByIdAction(id: string): Promise<Employee | unde
        if (!userRole) throw new Error("User role missing from session data.");
        if (!currentUserId) throw new Error("User ID missing from session data.");
 
+       console.log(`[Action getEmployeeByIdAction] Received ID param: ${id}`);
+       console.log(`[Action getEmployeeByIdAction] Session - currentUserId: ${currentUserId}, tenantId: ${tenantId}, userRole: ${userRole}`);
+
    } catch (e: any) {
-       console.error("[Action getEmployeeByIdAction] Error fetching session data:", e.message, e.stack);
+       console.error("[Action getEmployeeByIdAction] Error fetching session data:", e.message, e.stack ? e.stack : '(No stack trace)');
        throw new Error("Failed to retrieve session context: " + e.message);
    }
 
-   console.log(`[Action getEmployeeByIdAction] Received ID param: ${id}`);
-   console.log(`[Action getEmployeeByIdAction] Session - currentUserId: ${currentUserId}, tenantId: ${tenantId}, userRole: ${userRole}`);
+   let employeeProfile: Employee | undefined = undefined;
 
    try {
-      if (userRole === 'Employee') {
-          if (id === currentUserId) {
-              console.log(`[Action getEmployeeByIdAction] Employee role. Matched ID. Fetching own profile using dbGetEmployeeByUserId with userId: ${id}, tenantId: ${tenantId}`);
-              employeeProfile = await dbGetEmployeeByUserId(id, tenantId); // id here is the userId
-              if (employeeProfile) {
-                  console.log(`[Action getEmployeeByIdAction] dbGetEmployeeByUserId SUCCESS for own profile. userId: ${id}, tenantId: ${tenantId}.`);
-              } else {
-                  console.warn(`[Action getEmployeeByIdAction] dbGetEmployeeByUserId FAILED to find own profile. userId: ${id}, tenantId: ${tenantId}. This user may not have a linked employee record or there's a data mismatch.`);
-              }
-          } else {
-              console.warn(`[Action getEmployeeByIdAction] Employee ${currentUserId} unauthorized attempt to fetch profile for employee.id/user.id ${id}.`);
-              throw new Error("Unauthorized to view this employee profile.");
-          }
-      } else { // Admin or Manager
-          console.log(`[Action getEmployeeByIdAction] Admin/Manager role. Fetching employee using dbGetEmployeeById with employee primary key id: ${id}, tenantId: ${tenantId}`);
-          employeeProfile = await dbGetEmployeeById(id, tenantId); // id here is the employee_table_pk
-          if (employeeProfile) {
-              console.log(`[Action getEmployeeByIdAction] dbGetEmployeeById SUCCESS for Admin/Manager. Employee ID: ${id}`);
-          } else {
-              console.warn(`[Action getEmployeeByIdAction] dbGetEmployeeById FAILED for Admin/Manager. Employee ID: ${id} not found in tenant ${tenantId}.`);
-          }
-      }
+      // First, always fetch the employee by their primary key (id from URL)
+      console.log(`[Action getEmployeeByIdAction] Attempting to fetch employee by primary key id: ${id}, tenantId: ${tenantId}`);
+      employeeProfile = await dbGetEmployeeById(id, tenantId);
 
       if (!employeeProfile) {
-        // This specific log for the "My Profile" case was already good.
-        if (userRole === 'Employee' && id === currentUserId) {
-             // Log already handled by the inner "FAILED" log.
-        } else if (userRole !== 'Employee') {
-            console.warn(`[Action getEmployeeByIdAction] Employee profile not found for id ${id} in tenant ${tenantId} (Admin/Manager view).`);
-        }
-        return undefined;
+          console.warn(`[Action getEmployeeByIdAction] Employee profile not found by primary key id ${id} in tenant ${tenantId}.`);
+          return undefined;
       }
+      console.log(`[Action getEmployeeByIdAction] Successfully fetched employee by primary key. Employee UserID: ${employeeProfile.userId}`);
+
+      // If the user is an 'Employee', verify they are accessing their own record
+      if (userRole === 'Employee') {
+          if (employeeProfile.userId !== currentUserId) {
+              console.warn(`[Action getEmployeeByIdAction] Authorization_Failed: Employee ${currentUserId} trying to access profile of employee with user_id ${employeeProfile.userId} (primary key ${id}).`);
+              throw new Error("Unauthorized to view this employee profile.");
+          }
+          console.log(`[Action getEmployeeByIdAction] Employee role accessing own profile. Access granted for employee.id ${id} (user_id ${currentUserId}).`);
+      } else {
+          // Admin or Manager role, access granted
+          console.log(`[Action getEmployeeByIdAction] Admin/Manager role. Access granted for employee.id ${id}.`);
+      }
+
       return employeeProfile;
 
    } catch (error: any) {
         console.error(`[Action getEmployeeByIdAction] Error processing request for employee ID ${id} (tenant: ${tenantId}):`, error.message, error.stack ? error.stack : '(No stack trace)');
         if (error.message === "Unauthorized to view this employee profile.") {
-            throw error;
+            throw error; // Re-throw specific auth error
         }
+        // Check for database-specific errors or provide a generic one
         let friendlyMessage = "Failed to fetch employee details.";
-        if (error.code && typeof error.code === 'string') { // e.g. DB errors
+        if (error.code && typeof error.code === 'string') { // e.g., DB errors
             friendlyMessage = `Database error (code ${error.code}) retrieving employee. Check server logs.`;
         } else if (error.message) {
             const prefix = "Error: ";
@@ -167,6 +159,7 @@ export async function getEmployeeByIdAction(id: string): Promise<Employee | unde
         throw new Error(friendlyMessage);
    }
 }
+
 
 export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 'userId' | 'employeeId'>): Promise<{ success: boolean; employee?: Employee; errors?: z.ZodIssue[] | { code: string; path: (string|number)[]; message: string }[] }> {
    let tenantId: string | null = null;
@@ -189,12 +182,12 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
        console.log(`[Action addEmployee] Session data retrieved: tenantId=${tenantId}, isAdminUser=${isAdminUser}, tenantDomain=${tenantDomain}`);
 
    } catch (e: any) {
-       console.error("[Action addEmployee] Error fetching session data:", e.message, e.stack);
+       console.error("[Action addEmployee] Error fetching session data:", e.message, e.stack ? e.stack : '(No stack trace)');
        return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'Failed to verify session: ' + e.message }] };
    }
 
    if (!isAdminUser) {
-        console.warn(`[Action addEmployee] Unauthorized attempt to add employee for tenant ${tenantId}. User role: ${await getUserRoleFromSession()}`); // Log the actual role
+        console.warn(`[Action addEmployee] Unauthorized attempt to add employee for tenant ${tenantId}. User role: ${await getUserRoleFromSession()}`);
         return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'Unauthorized to add employees.' }] };
    }
 
@@ -225,7 +218,7 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
             isActive: true,
         });
     } catch (userError: any) {
-        console.error("[Action addEmployee] Error creating user in users table:", userError.message, userError.stack);
+        console.error("[Action addEmployee] Error creating user in users table:", userError.message, userError.stack ? userError.stack : '(No stack trace)');
         return { success: false, errors: [{ code: 'custom', path: ['email'], message: userError.message || 'Failed to create user account for employee.' }] };
     }
     console.log(`[Action addEmployee] User account created with ID: ${newUser.id}`);
@@ -241,24 +234,25 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
 
     try {
         console.log(`[Action addEmployee] Attempting to queue welcome email for ${newEmployee.email}...`);
-        // const emailSent = await sendEmployeeWelcomeEmail( // This function is in auth/actions
+        // This relies on sendEmployeeWelcomeEmail being correctly defined in auth/actions.ts
+        // const emailSent = await sendEmployeeWelcomeEmail(
         //     tenantId,
         //     newEmployee.name,
         //     newEmployee.email,
-        //     newEmployee.id,
-        //     newEmployee.employeeId!,
-        //     temporaryPassword,
-        //     tenantDomain
+        //     newEmployee.id, // Employee's own primary key
+        //     newEmployee.employeeId!, // The generated EMP-ID
+        //     temporaryPassword
         // );
-        // For now, let's assume the auth/actions.sendEmployeeWelcomeEmail exists and works
-        // If not, this would be a separate integration step.
-        // Placeholder for actual call if it's moved back or refactored.
-        // For now, we'll assume it's handled elsewhere or log a TODO.
-        console.warn("[Action addEmployee] TODO: Ensure sendEmployeeWelcomeEmail from auth/actions is correctly invoked here if needed.");
+        // if (emailSent) {
+        //     console.log(`[Action addEmployee] Employee welcome email for ${newEmployee.email} queued successfully.`);
+        // } else {
+        //     console.error(`[Action addEmployee] Employee welcome email for ${newEmployee.email} failed to send (logged separately).`);
+        // }
+        console.warn("[Action addEmployee] TODO: Ensure sendEmployeeWelcomeEmail from auth/actions is correctly invoked here if needed and handles tenantDomain correctly.");
 
 
     } catch (emailError: any) {
-        console.error(`[Action addEmployee] Error calling sendEmployeeWelcomeEmail: ${emailError.message}`, emailError.stack);
+        console.error(`[Action addEmployee] Error calling sendEmployeeWelcomeEmail: ${emailError.message}`, emailError.stack ? emailError.stack : '(No stack trace)');
     }
 
     revalidatePath(`/${tenantDomain}/employees`);
@@ -300,14 +294,26 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
        if (!tenantDomain) throw new Error("Tenant domain missing from session data (updateEmployee).");
 
    } catch (e: any) {
-       console.error("[Action updateEmployee] Error fetching session data:", e.message, e.stack);
+       console.error("[Action updateEmployee] Error fetching session data:", e.message, e.stack ? e.stack : '(No stack trace)');
        return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'Failed to verify session: ' + e.message }] };
    }
 
-   if (!isAdminUser) {
-       console.warn(`[Action updateEmployee] Unauthorized attempt to update employee ${id} for tenant ${tenantId}`);
-       return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'Unauthorized to update employees.' }] };
-   }
+    // Authorization: Allow employee to update their own profile, or Admin/Manager to update any
+    const currentUserId = await getUserIdFromSession();
+    if (!isAdminUser && !currentUserId) {
+        // This should not happen if session validation above passed, but as a safeguard
+        return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'User identity could not be verified.' }] };
+    }
+
+    if (!isAdminUser) {
+        // If not admin/manager, check if they are trying to update their own profile
+        const employeeToUpdate = await dbGetEmployeeById(id, tenantId); // Fetch by employee.id
+        if (!employeeToUpdate || employeeToUpdate.userId !== currentUserId) {
+            console.warn(`[Action updateEmployee] Unauthorized attempt by user ${currentUserId} to update employee ${id}`);
+            return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'Unauthorized to update this employee.' }] };
+        }
+    }
+
 
    console.log(`[Action updateEmployee] Attempting to update employee ${id} for tenant: ${tenantId}`);
 
@@ -335,7 +341,7 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
       return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Employee not found for this tenant' }] };
     }
   } catch (error: any) {
-    console.error(`[Action updateEmployee] Error calling dbUpdateEmployee for ${id}:`, error.message, error.stack);
+    console.error(`[Action updateEmployee] Error calling dbUpdateEmployee for ${id}:`, error.message, error.stack ? error.stack : '(No stack trace)');
     let errorMessage = "Failed to update employee.";
     let errorPath: (string|number)[] = ['root'];
     if (error.message) {
@@ -365,7 +371,7 @@ export async function deleteEmployeeAction(id: string): Promise<{ success: boole
        if (!tenantDomain) throw new Error("Tenant domain missing from session data (deleteEmployeeAction).");
 
    } catch (e: any) {
-        console.error("[Action deleteEmployeeAction] Error fetching session data:", e.message, e.stack);
+        console.error("[Action deleteEmployeeAction] Error fetching session data:", e.message, e.stack ? e.stack : '(No stack trace)');
         return { success: false, error: 'Failed to verify session: ' + e.message };
    }
 
@@ -388,7 +394,7 @@ export async function deleteEmployeeAction(id: string): Promise<{ success: boole
       return { success: false, error: 'Employee not found for this tenant.' };
     }
   } catch (error: any) {
-    console.error(`[Action deleteEmployeeAction] Error calling dbDeleteEmployee for ${id}:`, error.message, error.stack);
+    console.error(`[Action deleteEmployeeAction] Error calling dbDeleteEmployee for ${id}:`, error.message, error.stack ? error.stack : '(No stack trace)');
     let errorMessage = "Failed to delete employee.";
     if (error.message) {
         const prefix = "Error: ";
