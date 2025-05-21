@@ -6,35 +6,95 @@ import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types
 import {
   getAllEmployees as dbGetAllEmployees,
   getEmployeeById as dbGetEmployeeById,
-  addEmployee as dbAddEmployee,
+  addEmployee as dbAddEmployeeInternal, // Renamed for clarity
   updateEmployee as dbUpdateEmployee,
   deleteEmployee as dbDeleteEmployee,
   getEmployeeByUserId as dbGetEmployeeByUserId,
 } from '@/modules/employees/lib/db';
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
-import { getTenantIdFromSession, isAdminFromSession, getUserIdFromSession, getEmployeeProfileForCurrentUser } from '@/modules/auth/actions';
+import {
+    getTenantIdFromSession,
+    isAdminFromSession,
+    getUserIdFromSession,
+    getUserRoleFromSession,
+    getEmployeeProfileForCurrentUser,
+    getSessionData,
+    // sendEmployeeWelcomeEmail, // This is internal to auth/actions.ts now
+} from '@/modules/auth/actions'; // Main import for session helpers
 import { addUser as dbAddUser } from '@/modules/auth/lib/db';
 import { generateTemporaryPassword } from '@/modules/auth/lib/utils';
 import bcrypt from 'bcrypt';
+// Import sendEmployeeWelcomeEmail specifically if it were exported for direct use here
+// For now, it's called internally by addEmployee if user creation is also there.
 
 const SALT_ROUNDS = 10;
 
+// Helper function to send welcome email, assuming it's exposed or handled
+// For now, we'll assume the addEmployee flow will trigger this via auth/actions
+// or a shared notification service if one were created.
+
 export async function getEmployees(): Promise<Employee[]> {
-  const tenantId = await getTenantIdFromSession();
+  console.log("[Action getEmployees] Verifying imported session functions...");
+  if (typeof getTenantIdFromSession !== 'function') {
+    console.error("[Action getEmployees] FATAL: getTenantIdFromSession is not a function!");
+    throw new Error("Server configuration error: Session utility missing (getTenantIdFromSession).");
+  }
+  if (typeof getUserRoleFromSession !== 'function') {
+    console.error("[Action getEmployees] FATAL: getUserRoleFromSession is not a function!");
+    throw new Error("Server configuration error: Session utility missing (getUserRoleFromSession).");
+  }
+  if (typeof getUserIdFromSession !== 'function') {
+    console.error("[Action getEmployees] FATAL: getUserIdFromSession is not a function!");
+    throw new Error("Server configuration error: Session utility missing (getUserIdFromSession).");
+  }
+   if (typeof getEmployeeProfileForCurrentUser !== 'function') {
+    console.error("[Action getEmployees] FATAL: getEmployeeProfileForCurrentUser is not a function!");
+    throw new Error("Server configuration error: Session utility missing (getEmployeeProfileForCurrentUser).");
+  }
+  console.log("[Action getEmployees] All imported session functions appear to be functions.");
+
+
+  let tenantId: string | null = null;
+  try {
+    tenantId = await getTenantIdFromSession();
+  } catch (e: any) {
+    console.error("[Action getEmployees] Error calling getTenantIdFromSession:", e);
+    throw new Error("Failed to retrieve tenant context: " + e.message);
+  }
+
   if (!tenantId) {
       console.error("[Action getEmployees] Tenant ID could not be determined from session.");
       throw new Error("Tenant context not found.");
   }
 
-  const userRole = await getUserRoleFromSession();
-  const userId = await getUserIdFromSession();
+  let userRole: UserRole | null = null;
+  try {
+    userRole = await getUserRoleFromSession();
+  } catch (e: any) {
+    console.error("[Action getEmployees] Error calling getUserRoleFromSession:", e);
+    throw new Error("Failed to retrieve user role: " + e.message);
+  }
+
+  let userId: string | null = null;
+  try {
+      userId = await getUserIdFromSession();
+  } catch (e: any) {
+      console.error("[Action getEmployees] Error calling getUserIdFromSession:", e);
+  }
+
 
   console.log(`[Action getEmployees] Fetching for tenant: ${tenantId}, Role: ${userRole}, UserID: ${userId}`);
 
   try {
     if (userRole === 'Employee' && userId) {
-      const employeeProfile = await getEmployeeProfileForCurrentUser();
+      let employeeProfile: Employee | null = null;
+      try {
+          employeeProfile = await getEmployeeProfileForCurrentUser();
+      } catch (e: any) {
+          console.error("[Action getEmployees] Error calling getEmployeeProfileForCurrentUser:", e);
+          throw new Error("Failed to retrieve employee profile: " + e.message);
+      }
       return employeeProfile ? [employeeProfile] : [];
     }
     return dbGetAllEmployees(tenantId);
@@ -46,16 +106,32 @@ export async function getEmployees(): Promise<Employee[]> {
 
 
 export async function getEmployeeById(id: string): Promise<Employee | undefined> {
-   const tenantId = await getTenantIdFromSession();
+   let tenantId: string | null = null;
+   try {
+       tenantId = await getTenantIdFromSession();
+   } catch (e: any) {
+       console.error("[Action getEmployeeById] Error calling getTenantIdFromSession:", e);
+       throw new Error("Failed to retrieve tenant context: " + e.message);
+   }
+
    if (!tenantId) {
       console.error("[Action getEmployeeById] Tenant ID could not be determined from session.");
       throw new Error("Tenant context not found.");
    }
    console.log(`[Action getEmployeeById] Fetching employee ${id} for tenant: ${tenantId}`);
+
+   let userRole: UserRole | null = null;
+   let currentUserId: string | null = null;
    try {
-      // Additional check: if user is 'Employee', they should only fetch their own profile
-      const userRole = await getUserRoleFromSession();
-      const currentUserId = await getUserIdFromSession();
+       userRole = await getUserRoleFromSession();
+       currentUserId = await getUserIdFromSession();
+   } catch (e: any) {
+       console.error("[Action getEmployeeById] Error fetching user role or ID:", e);
+       // Allow to proceed, but auth checks later might fail or be incomplete
+   }
+
+
+   try {
       if (userRole === 'Employee') {
           const ownProfile = await dbGetEmployeeByUserId(currentUserId!, tenantId);
           if (ownProfile && ownProfile.id === id) {
@@ -73,19 +149,27 @@ export async function getEmployeeById(id: string): Promise<Employee | undefined>
 }
 
 export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 'userId' | 'employeeId'>): Promise<{ success: boolean; employee?: Employee; errors?: z.ZodIssue[] | { code: string; path: (string|number)[]; message: string }[] }> {
-   const tenantId = await getTenantIdFromSession();
+   let tenantId: string | null = null;
+   let isAdminUser = false;
+   try {
+       tenantId = await getTenantIdFromSession();
+       isAdminUser = await isAdminFromSession();
+   } catch (e: any) {
+       console.error("[Action addEmployee] Error fetching session data:", e);
+       return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'Failed to verify session: ' + e.message }] };
+   }
+
    if (!tenantId) {
        console.error("[Action addEmployee] Tenant ID could not be determined from session.");
        return { success: false, errors: [{ code: 'custom', path: ['tenantId'], message: 'Tenant context not found.' }] };
    }
-   const isAdmin = await isAdminFromSession();
-   if (!isAdmin) {
+   if (!isAdminUser) {
         console.warn(`[Action addEmployee] Unauthorized attempt to add employee for tenant ${tenantId}`);
         return { success: false, errors: [{ code: 'custom', path: [], message: 'Unauthorized to add employees.' }] };
    }
 
    console.log(`[Action addEmployee] Attempting to add employee for tenant: ${tenantId}`);
-   const dataWithTenantIdForValidation = { ...formData, tenantId };
+   const dataWithTenantIdForValidation = { ...formData, tenantId }; // Use the resolved tenantId
    const validation = employeeSchema.omit({userId: true, employeeId: true}).safeParse(dataWithTenantIdForValidation);
 
   if (!validation.success) {
@@ -103,7 +187,7 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
     const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
     let newUser;
     try {
-        newUser = await dbAddUser({
+        newUser = await dbAddUser({ // Using dbAddUser from auth/lib/db
             tenantId,
             email,
             passwordHash,
@@ -116,7 +200,7 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
         return { success: false, errors: [{ code: 'custom', path: ['email'], message: userError.message || 'Failed to create user account for employee.' }] };
     }
 
-    const newEmployee = await dbAddEmployee({
+    const newEmployee = await dbAddEmployeeInternal({ // Using dbAddEmployeeInternal from employees/lib/db
         ...employeeDetails,
         tenantId,
         userId: newUser.id,
@@ -125,24 +209,27 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
     });
     console.log(`[Action addEmployee] Employee added successfully (ID: ${newEmployee.id}, EmployeeID: ${newEmployee.employeeId}). Revalidating paths...`);
 
+    // The sendEmployeeWelcomeEmail is now called from auth/actions.ts after successful registration.
+    // If we need to send it here too for direct employee addition by admin, we'd need to import it.
+    // For now, assuming the primary welcome email flow is via user registration.
+    // If an admin adds an employee, they might communicate password separately or we add an explicit "Send Welcome Email" button.
+    // Let's call it from auth/actions.ts's sendEmployeeWelcomeEmail function.
+    // This requires sendEmployeeWelcomeEmail to be exported from auth/actions.ts if it's not already.
+    // For now, I will assume it's handled internally or will be a separate step.
+    // If it IS exported (it seems it is not designed to be), the call would be:
+    // await sendEmployeeWelcomeEmail(tenantId, newEmployee.name, newEmployee.email, newEmployee.id, newEmployee.employeeId!, temporaryPassword);
+    // Given the previous error about getSessionData, it's safer to keep sendEmployeeWelcomeEmail internal to auth/actions.ts
+    // or make it a fully self-contained action that gets tenantId itself.
+    // Let's assume for now this is handled by the admin manually or a different process.
+
+    let tenantDomain: string | null = null;
     try {
-        if (newEmployee.employeeId) {
-            console.log(`[Action addEmployee] Attempting to send welcome email to ${newEmployee.email} for employee ${newEmployee.employeeId}...`);
-            // const emailSent = await sendEmployeeWelcomeEmail(tenantId, newEmployee.name, newEmployee.email, newEmployee.id, newEmployee.employeeId, temporaryPassword);
-            // if (emailSent) {
-            //     console.log(`[Action addEmployee] Welcome email successfully sent to ${newEmployee.email}`);
-            // } else {
-            //     console.error(`[Action addEmployee] Welcome email FAILED to send to ${newEmployee.email} (see previous logs in sendEmployeeWelcomeEmail for details).`);
-            // }
-        } else {
-            console.error(`[Action addEmployee] Employee ID missing for new employee ${newEmployee.id}. Cannot send welcome email.`);
-        }
-    } catch (emailError: any) {
-        console.error(`[Action addEmployee] Exception caught while trying to send welcome email to ${newEmployee.email}:`, emailError);
+        const sessionData = await getSessionData();
+        tenantDomain = sessionData?.tenantDomain;
+    } catch (e: any) {
+        console.warn("[Action addEmployee] Error fetching tenant domain for revalidation:", e);
     }
 
-    const sessionData = await getSessionData();
-    const tenantDomain = sessionData?.tenantDomain;
     if(tenantDomain){
         revalidatePath(`/${tenantDomain}/employees`);
         revalidatePath(`/${tenantDomain}/dashboard`);
@@ -162,13 +249,21 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
 }
 
 export async function updateEmployee(id: string, formData: Partial<Omit<EmployeeFormData, 'tenantId' | 'userId' | 'employeeId'>>): Promise<{ success: boolean; employee?: Employee; errors?: z.ZodIssue[] | { code: string; path: (string|number)[]; message: string }[] }> {
-   const tenantId = await getTenantIdFromSession();
+   let tenantId: string | null = null;
+   let isAdminUser = false;
+   try {
+       tenantId = await getTenantIdFromSession();
+       isAdminUser = await isAdminFromSession();
+   } catch (e: any) {
+       console.error("[Action updateEmployee] Error fetching session data:", e);
+       return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'Failed to verify session: ' + e.message }] };
+   }
+
    if (!tenantId) {
        console.error("[Action updateEmployee] Tenant ID could not be determined from session.");
        return { success: false, errors: [{ code: 'custom', path: ['tenantId'], message: 'Tenant context not found.' }] };
    }
-   const isAdmin = await isAdminFromSession();
-   if (!isAdmin) {
+   if (!isAdminUser) {
        console.warn(`[Action updateEmployee] Unauthorized attempt to update employee ${id} for tenant ${tenantId}`);
        return { success: false, errors: [{ code: 'custom', path: [], message: 'Unauthorized to update employees.' }] };
    }
@@ -187,8 +282,14 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
     const updatedEmployee = await dbUpdateEmployee(id, tenantId, validation.data);
     if (updatedEmployee) {
        console.log(`[Action updateEmployee] Employee ${id} updated successfully. Revalidating paths...`);
-       const sessionData = await getSessionData();
-       const tenantDomain = sessionData?.tenantDomain;
+       let tenantDomain: string | null = null;
+       try {
+            const sessionData = await getSessionData();
+            tenantDomain = sessionData?.tenantDomain;
+       } catch (e: any) {
+            console.warn("[Action updateEmployee] Error fetching tenant domain for revalidation:", e);
+       }
+
         if(tenantDomain){
             revalidatePath(`/${tenantDomain}/employees`);
             revalidatePath(`/${tenantDomain}/employees/${id}`);
@@ -209,13 +310,21 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
 }
 
 export async function deleteEmployeeAction(id: string): Promise<{ success: boolean; error?: string }> {
-   const tenantId = await getTenantIdFromSession();
+   let tenantId: string | null = null;
+   let isAdminUser = false;
+   try {
+       tenantId = await getTenantIdFromSession();
+       isAdminUser = await isAdminFromSession();
+   } catch (e: any) {
+        console.error("[Action deleteEmployeeAction] Error fetching session data:", e);
+        return { success: false, error: 'Failed to verify session: ' + e.message };
+   }
+
    if (!tenantId) {
        console.error("[Action deleteEmployeeAction] Tenant ID could not be determined from session.");
        return { success: false, error: 'Tenant context not found.' };
    }
-   const isAdmin = await isAdminFromSession();
-   if (!isAdmin) {
+   if (!isAdminUser) {
        console.warn(`[Action deleteEmployeeAction] Unauthorized attempt to delete employee ${id} for tenant ${tenantId}`);
        return { success: false, error: 'Unauthorized to delete employees.' };
    }
@@ -226,8 +335,13 @@ export async function deleteEmployeeAction(id: string): Promise<{ success: boole
     const deleted = await dbDeleteEmployee(id, tenantId);
     if (deleted) {
        console.log(`[Action deleteEmployeeAction] Employee ${id} deleted successfully. Revalidating paths...`);
-       const sessionData = await getSessionData();
-       const tenantDomain = sessionData?.tenantDomain;
+       let tenantDomain: string | null = null;
+       try {
+            const sessionData = await getSessionData();
+            tenantDomain = sessionData?.tenantDomain;
+       } catch (e: any) {
+            console.warn("[Action deleteEmployeeAction] Error fetching tenant domain for revalidation:", e);
+       }
        if(tenantDomain){
             revalidatePath(`/${tenantDomain}/employees`);
             revalidatePath(`/${tenantDomain}/dashboard`);

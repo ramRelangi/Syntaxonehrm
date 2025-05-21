@@ -4,31 +4,27 @@
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import nodemailer from 'nodemailer';
-import crypto from 'crypto';
 import { cookies, headers } from 'next/headers';
-import {
-    registrationSchema,
-    type RegistrationFormData,
-    type Tenant,
-    type User,
-    type UserRole,
-    type TenantLoginFormInputs,
-    tenantLoginSchema,
-    type TenantForgotPasswordFormInputs,
-    tenantForgotPasswordSchema,
-    rootForgotPasswordSchema,
-    type RootForgotPasswordFormInputs,
-    type SessionData,
+import type {
+    RegistrationFormData,
+    Tenant,
+    User,
+    UserRole,
+    TenantLoginFormInputs,
+    TenantForgotPasswordFormInputs,
+    RootForgotPasswordFormInputs,
+    SessionData,
 } from '@/modules/auth/types';
+import { registrationSchema, tenantLoginSchema, tenantForgotPasswordSchema, rootForgotPasswordSchema } from '@/modules/auth/types';
 import {
     addTenant,
-    getUserByEmail,
-    addUser as dbAddUser, // Renamed to avoid conflict with auth/actions#addUser
+    getUserByEmail as dbGetUserByEmail,
+    addUser as dbAddUserInternal,
     getTenantByDomain,
-    getUserById as dbGetUserById,
+    getUserById as dbGetUserByIdInternal,
     getEmployeeByEmployeeIdAndTenantId,
-    getEmployeeByUserId as dbGetEmployeeByUserId, // Renamed for clarity
-    deleteUserById as dbDeleteUserById
+    getEmployeeByUserId as dbGetEmployeeByUserIdInternal,
+    deleteUserById as dbDeleteUserByIdInternal,
 } from '@/modules/auth/lib/db';
 import pool, { testDbConnection } from '@/lib/db';
 import { initializeDatabase } from '@/lib/init-db';
@@ -36,7 +32,8 @@ import { MOCK_SESSION_COOKIE } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { getEmailSettings as dbGetEmailSettings } from '@/modules/communication/lib/db';
 import type { EmailSettings } from '@/modules/communication/types';
-import type { Employee } from '@/modules/employees/types'; // For getEmployeeProfileForCurrentUser
+import type { Employee } from '@/modules/employees/types';
+import { generateTemporaryPassword } from '@/modules/auth/lib/utils'; // Ensure this is correctly imported
 
 const SALT_ROUNDS = 10;
 
@@ -130,7 +127,7 @@ function constructLoginUrl(tenantDomain: string): string {
     } catch (e) {
         console.warn(`[constructLoginUrl] Could not parse NEXT_PUBLIC_BASE_URL (${baseUrl}) to extract port.`);
         if (process.env.NODE_ENV !== 'production' && rootDomain === 'localhost') {
-            const defaultPort = '9002';
+            const defaultPort = new URL(baseUrl).port || '9002';
              if (defaultPort && defaultPort !== '80' && defaultPort !== '443') {
                  portSection = `:${defaultPort}`;
              }
@@ -214,7 +211,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         if (!newTenant?.id) throw new Error("Failed to create tenant or retrieve tenant ID.");
         console.log(`[registerTenantAction] Tenant '${companyName}' created with ID: ${newTenant.id}. Adding admin user...`);
         const passwordHash = await bcrypt.hash(adminPassword, SALT_ROUNDS);
-        const newUser = await dbAddUser({
+        const newUser = await dbAddUserInternal({
             tenantId: newTenant.id, email: adminEmail, passwordHash, name: adminName, role: 'Admin', isActive: true,
         });
         console.log(`[registerTenantAction] Admin user '${adminName}' added with ID: ${newUser.id}.`);
@@ -225,6 +222,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
             })
             .catch(err => console.error("[registerTenantAction] Async admin welcome email sending failed after successful registration:", err));
         const loginUrl = constructLoginUrl(newTenant.domain);
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash: _, ...safeUser } = newUser;
         return { success: true, tenant: newTenant, user: safeUser, loginUrl };
     } catch (error: any) {
@@ -274,11 +272,13 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
     const normalizedHost = host.split(':')[0];
     const match = normalizedHost.match(`^(.*)\\.${rootDomain}$`);
     let tenantDomainFromHost = match ? match[1] : null;
-    if (normalizedHost === rootDomain || normalizedHost === 'localhost' || normalizedHost === '127.0.0.1') {
-        tenantDomainFromHost = null;
+
+    if (normalizedHost === rootDomain || normalizedHost === 'localhost' || normalizedHost === '127.0.0.1' || normalizedHost.match(/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/)) { // Catch general IPs too
+        tenantDomainFromHost = null; // On root domain or direct IP access
     }
+
     if (!tenantDomainFromHost) {
-        return { success: false, error: "Login not allowed on the root domain. Please use your company's specific login URL." };
+        return { success: false, error: "Login not allowed directly on the root domain or IP. Please use your company's specific login URL (e.g., your-company.localhost)." };
     }
     try {
         const tenant = await getTenantByDomain(tenantDomainFromHost);
@@ -291,17 +291,17 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
 
         if (loginIdentifier.includes('@')) {
             console.log(`[loginAction] Attempting to find user by email: ${loginIdentifier} for tenant ${tenant.id}`);
-            user = await getUserByEmail(loginIdentifier, tenant.id);
+            user = await dbGetUserByEmail(loginIdentifier, tenant.id);
             if (user) {
-                employeeForStatusCheck = await dbGetEmployeeByUserId(user.id, tenant.id);
+                employeeForStatusCheck = await dbGetEmployeeByUserIdInternal(user.id, tenant.id);
             }
         } else {
             console.log(`[loginAction] Attempting by Employee ID: ${loginIdentifier} for tenant ${tenant.id}`);
             const employeeProfile = await getEmployeeByEmployeeIdAndTenantId(loginIdentifier, tenant.id);
             if (employeeProfile && employeeProfile.userId) {
-                user = await dbGetUserById(employeeProfile.userId);
+                user = await dbGetUserByIdInternal(employeeProfile.userId);
                 if (user && user.tenantId !== tenant.id) {
-                    user = undefined; // Security check
+                    user = undefined;
                 }
                 employeeForStatusCheck = employeeProfile;
             }
@@ -312,7 +312,6 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
             return { success: false, error: "Invalid credentials or inactive account." };
         }
 
-        // Check employee status if applicable
         if (employeeForStatusCheck && employeeForStatusCheck.status === 'Inactive') {
             console.log(`[loginAction] Employee ${employeeForStatusCheck.id} (User: ${user.id}) is Inactive. Denying login.`);
             return { success: false, error: "This employee account is Inactive. Please contact your administrator." };
@@ -321,7 +320,6 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
             console.log(`[loginAction] User ${user.id} has 'Employee' role but no linked active employee profile found. Denying login.`);
             return { success: false, error: "Employee profile not found or inactive. Please contact your administrator." };
         }
-
 
         console.log(`[loginAction] User found: ${user.id}. Comparing password...`);
         const passwordMatch = await bcrypt.compare(password, user.passwordHash);
@@ -336,17 +334,19 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
             tenantDomain: tenant.domain,
             userRole: user.role,
         };
-        const cookieOptions: any = {
+        const cookieOptions: any = { // Let TypeScript infer for simplicity, relies on set method's typing
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             path: '/',
             sameSite: 'lax' as const,
             maxAge: 60 * 60 * 24 * 7, // 1 week
         };
-        if (rootDomain !== 'localhost' && !normalizedHost.match(/^(127\.0\.0\.1|::1|(\d{1,3}\.){3}\d{1,3})$/)) {
+        // Only set domain for actual root domains, not localhost or IPs
+        if (rootDomain && rootDomain !== 'localhost' && !normalizedHost.match(/^(localhost|127\.0\.0\.1|::1|(\d{1,3}\.){3}\d{1,3})$/)) {
             cookieOptions.domain = `.${rootDomain}`;
         }
         cookies().set(MOCK_SESSION_COOKIE, JSON.stringify(sessionData), cookieOptions);
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash: _, ...safeUser } = user;
         return { success: true, user: safeUser };
     } catch (error: any) {
@@ -373,7 +373,7 @@ export async function logoutAction() {
              name: MOCK_SESSION_COOKIE,
              path: '/',
         };
-        if (rootDomain !== 'localhost' && !currentHost.match(/^(127\.0\.0\.1|::1|(\d{1,3}\.){3}\d{1,3})$/)) {
+        if (rootDomain && rootDomain !== 'localhost' && !currentHost.match(/^(localhost|127\.0\.0\.1|::1|(\d{1,3}\.){3}\d{1,3})$/)) {
             cookieDeleteOptions.domain = `.${rootDomain}`;
         }
         cookies().delete(cookieDeleteOptions);
@@ -384,10 +384,9 @@ export async function logoutAction() {
     redirect(redirectUrl);
 }
 
-
-async function _getSessionDataUnsafe(): Promise<SessionData | null> {
-  // This is an internal helper. External callers should use the specific getters.
+async function _parseSessionCookie(): Promise<SessionData | null> {
   try {
+    console.log("[_parseSessionCookie] Attempting to get and parse session cookie...");
     const cookieStore = cookies();
     const sessionCookie = cookieStore.get(MOCK_SESSION_COOKIE);
     if (sessionCookie?.value) {
@@ -400,12 +399,15 @@ async function _getSessionDataUnsafe(): Promise<SessionData | null> {
         sessionData.tenantDomain &&
         sessionData.userRole
       ) {
+        console.log("[_parseSessionCookie] Session data parsed successfully:", sessionData);
         return sessionData;
       }
-      console.warn("[_getSessionDataUnsafe] Invalid session data structure in cookie.");
+      console.warn("[_parseSessionCookie] Invalid session data structure in cookie.");
+    } else {
+      console.log("[_parseSessionCookie] Session cookie not found.");
     }
   } catch (error: any) {
-    console.error("[_getSessionDataUnsafe] Error reading/parsing session cookie:", error.name, error.message);
+    console.error("[_parseSessionCookie] Error reading/parsing session cookie:", error.name, error.message);
   }
   return null;
 }
@@ -414,12 +416,12 @@ async function _getSessionDataUnsafe(): Promise<SessionData | null> {
 export async function getTenantIdFromSession(): Promise<string | null> {
     console.log("[getTenantIdFromSession] Attempting to get tenantId...");
     try {
-        const session = await _getSessionDataUnsafe();
+        const session = await _parseSessionCookie();
         const tenantId = session?.tenantId ?? null;
         console.log(`[getTenantIdFromSession] Resolved tenantId: ${tenantId}`);
         return tenantId;
     } catch (error: any) {
-        console.error(`[getTenantIdFromSession] Error: ${error.message}`);
+        console.error(`[getTenantIdFromSession] Error: ${error.message}`, error);
         return null;
     }
 }
@@ -427,12 +429,12 @@ export async function getTenantIdFromSession(): Promise<string | null> {
 export async function getUserIdFromSession(): Promise<string | null> {
      console.log("[getUserIdFromSession] Attempting to get userId...");
     try {
-        const session = await _getSessionDataUnsafe();
+        const session = await _parseSessionCookie();
         const userId = session?.userId ?? null;
         console.log(`[getUserIdFromSession] Resolved userId: ${userId}`);
         return userId;
     } catch (error: any) {
-        console.error(`[getUserIdFromSession] Error: ${error.message}`);
+        console.error(`[getUserIdFromSession] Error: ${error.message}`, error);
         return null;
     }
 }
@@ -440,12 +442,12 @@ export async function getUserIdFromSession(): Promise<string | null> {
 export async function getUserRoleFromSession(): Promise<UserRole | null> {
     console.log("[getUserRoleFromSession] Attempting to get userRole...");
     try {
-        const session = await _getSessionDataUnsafe();
+        const session = await _parseSessionCookie();
         const userRole = session?.userRole ?? null;
         console.log(`[getUserRoleFromSession] Resolved userRole: ${userRole}`);
         return userRole;
     } catch (error: any) {
-        console.error(`[getUserRoleFromSession] Error: ${error.message}`);
+        console.error(`[getUserRoleFromSession] Error: ${error.message}`, error);
         return null;
     }
 }
@@ -458,20 +460,21 @@ export async function isAdminFromSession(): Promise<boolean> {
 export async function getUserFromSession(): Promise<Omit<User, 'passwordHash'> | null> {
     console.log("[getUserFromSession] Attempting to get full user from session...");
     try {
-        const session = await _getSessionDataUnsafe();
+        const session = await _parseSessionCookie();
         if (!session?.userId || !session.tenantId) {
             console.log("[getUserFromSession] Incomplete session data (userId or tenantId missing).");
             return null;
         }
-        const user = await dbGetUserById(session.userId);
+        const user = await dbGetUserByIdInternal(session.userId);
         if (user && user.tenantId === session.tenantId) {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { passwordHash, ...safeUser } = user;
             console.log(`[getUserFromSession] User ${safeUser.id} found.`);
             return safeUser;
         }
         console.log("[getUserFromSession] User not found or tenant mismatch.");
     } catch (error: any) {
-        console.error(`[getUserFromSession] Error: ${error.message}`);
+        console.error(`[getUserFromSession] Error: ${error.message}`, error);
     }
     return null;
 }
@@ -479,11 +482,11 @@ export async function getUserFromSession(): Promise<Omit<User, 'passwordHash'> |
 export async function getSessionData(): Promise<SessionData | null> {
     console.log("[getSessionData action] Attempting to get full session data...");
     try {
-        const session = await _getSessionDataUnsafe();
+        const session = await _parseSessionCookie();
         console.log(`[getSessionData action] Resolved session data:`, session);
         return session;
     } catch (error: any) {
-        console.error(`[getSessionData action] Error: ${error.message}`);
+        console.error(`[getSessionData action] Error: ${error.message}`, error);
         return null;
     }
 }
@@ -498,7 +501,7 @@ export async function getEmployeeProfileForCurrentUser(): Promise<Employee | nul
             console.log("[getEmployeeProfileForCurrentUser] userId or tenantId missing from session.");
             return null;
         }
-        const employee = await dbGetEmployeeByUserId(userId, tenantId);
+        const employee = await dbGetEmployeeByUserIdInternal(userId, tenantId);
         if (employee) {
             console.log(`[getEmployeeProfileForCurrentUser] Employee profile found for user ${userId}.`);
             return employee;
@@ -507,23 +510,23 @@ export async function getEmployeeProfileForCurrentUser(): Promise<Employee | nul
             return null;
         }
     } catch (error: any) {
-        console.error(`[getEmployeeProfileForCurrentUser] Error: ${error.message}`);
+        console.error(`[getEmployeeProfileForCurrentUser] Error: ${error.message}`, error);
         return null;
     }
 }
 
-
+// Internal function to send welcome email to new employees
 async function sendEmployeeWelcomeEmail(
   tenantId: string,
   employeeName: string,
   employeeEmail: string,
-  employeeSystemId: string,
-  employeeLoginId: string,
+  employeeSystemId: string, // This is the Employee.id (UUID)
+  employeeLoginId: string, // This is the Employee.employee_id (e.g., EMP-001)
   temporaryPassword?: string
 ): Promise<boolean> {
     console.log(`[sendEmployeeWelcomeEmail] Initiating for ${employeeEmail} (Employee Login ID: ${employeeLoginId}, System ID: ${employeeSystemId})`);
 
-    const tenant = await getTenantById(tenantId);
+    const tenant = await getTenantById(tenantId); // Use internal getTenantById
     if (!tenant) {
         console.error(`[sendEmployeeWelcomeEmail] Tenant not found for ID: ${tenantId}. Cannot send welcome email to ${employeeEmail}.`);
         await sendAdminNotification(
@@ -650,13 +653,15 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
             return { success: true, message: userMessage };
         }
 
-        const user = await getUserByEmail(email, tenant.id);
+        const user = await dbGetUserByEmail(email, tenant.id);
         if (!user || !user.isActive) {
             console.log(`[forgotPasswordLogic] User not found or inactive for email ${email} in tenant ${tenant.id}.`);
             return { success: true, message: userMessage };
         }
 
-        const resetToken = crypto.randomBytes(32).toString('hex');
+        // TODO: Implement actual token generation, storage (with expiry), and validation
+        // const resetToken = crypto.randomBytes(32).toString('hex');
+        const resetToken = "mockResetToken123"; // MOCK: Replace with actual token generation and storage
         console.log(`[forgotPasswordLogic] Generated reset token for ${user.email}: ${resetToken} (this is a mock, implement DB storage)`);
 
         const transporter = createInternalTransporter();
@@ -670,7 +675,7 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
         }
 
         const resetUrlBase = constructLoginUrl(tenantDomain).replace('/login', '/reset-password');
-        const resetUrl = `${resetUrlBase}?token=${resetToken}`;
+        const resetUrl = `${resetUrlBase}?token=${resetToken}&tenant=${tenantDomain}`; // Add tenant for reset page context
 
         const internalConfig = getInternalSmtpConfig();
 
@@ -696,6 +701,7 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
     }
 }
 
+// Internal helper, not exported. Used by sendEmployeeWelcomeEmail
 async function getTenantById(id: string): Promise<Tenant | undefined> {
     const client = await pool.connect();
     try {
@@ -707,8 +713,8 @@ async function getTenantById(id: string): Promise<Tenant | undefined> {
             createdAt: new Date(res.rows[0].created_at).toISOString(),
         } : undefined;
     } catch (error) {
-        console.error(`[getTenantById - auth/actions] Error fetching tenant ${id}:`, error);
-        throw error;
+        console.error(`[getTenantById - auth/actions internal] Error fetching tenant ${id}:`, error);
+        throw error; // Re-throw to be caught by caller
     } finally {
         client.release();
     }

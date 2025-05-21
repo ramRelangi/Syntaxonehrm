@@ -12,16 +12,16 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarTrigger,
+  SidebarInset, // Ensure SidebarInset is imported
 } from '@/components/ui/sidebar';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Home, Users, FileText, Briefcase, Calendar, BarChart2, LogOut, UploadCloud, Settings, Mail, UserCog } from 'lucide-react'; // Added UserCog
+import { Home, Users, FileText, Briefcase, Calendar, BarChart2, LogOut, UploadCloud, Settings, Mail, UserCog } from 'lucide-react';
 import Link from 'next/link';
 import { logoutAction } from '@/modules/auth/actions';
 import { useToast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { UserRole } from '@/modules/auth/types';
 
-// User data would ideally come from a session context or prop
 interface AppLayoutProps {
   children: React.ReactNode;
   tenantId: string;
@@ -37,18 +37,20 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
   const isMobile = useIsMobile();
 
   // TODO: Replace Mock user data with actual session/auth data from props or context
+  // For now, we'll assume props contain the necessary info for conditional rendering.
   const user = {
-    name: 'User', // Fetch from session or pass as prop
-    email: 'user@example.com', // Fetch from session or pass as prop
-    initials: 'U', // Generate from name
-    avatarUrl: '', // Optional
+    name: userId || 'User', // Display userId if name isn't readily available from session props
+    email: 'user@example.com', // This should ideally come from session props too
+    initials: userId ? userId.substring(0, 1).toUpperCase() : 'U',
+    avatarUrl: '',
   };
 
   const handleLogout = async () => {
     try {
       await logoutAction();
       toast({ title: "Logged Out", description: "You have been successfully logged out." });
-      router.refresh();
+      // router.refresh() might not be enough, a full page navigation might be better.
+      // The logoutAction itself handles redirection.
     } catch (error) {
       console.error("Logout failed:", error);
       toast({ title: "Logout Failed", description: "Could not log out. Please try again.", variant: "destructive" });
@@ -57,7 +59,6 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
 
   const baseNavItems = [
     { href: `/${tenantDomain}/dashboard`, label: 'Dashboard', icon: Home, roles: ['Admin', 'Manager', 'Employee'] },
-    // Employee link logic will be dynamic
     { href: `/${tenantDomain}/recruitment`, label: 'Recruitment', icon: Briefcase, roles: ['Admin', 'Manager'] },
     { href: `/${tenantDomain}/payroll`, label: 'Payroll', icon: FileText, roles: ['Admin', 'Manager'] },
     { href: `/${tenantDomain}/leave`, label: 'Leave', icon: Calendar, roles: ['Admin', 'Manager', 'Employee'] },
@@ -67,7 +68,6 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
     { href: `/${tenantDomain}/smart-resume-parser`, label: 'Resume Parser', icon: UploadCloud, roles: ['Admin', 'Manager'] },
   ];
 
-  // Dynamically create employee link
   let employeeLink;
   if (userRole === 'Employee' && userId) {
     employeeLink = { href: `/${tenantDomain}/employees/${userId}`, label: 'My Profile', icon: UserCog, roles: ['Employee'] };
@@ -78,13 +78,13 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
   const navItems = [
     ...baseNavItems.filter(item => item.roles.includes(userRole || '')),
   ];
-  // Insert employee/profile link after dashboard if user has access
-  if (employeeLink.roles.includes(userRole || '')) {
+
+  if (employeeLink && employeeLink.roles.includes(userRole || '')) {
       const dashboardIndex = navItems.findIndex(item => item.label === 'Dashboard');
       if (dashboardIndex !== -1) {
           navItems.splice(dashboardIndex + 1, 0, employeeLink);
       } else {
-          navItems.unshift(employeeLink); // Add to beginning if dashboard isn't there (shouldn't happen)
+          navItems.unshift(employeeLink);
       }
   }
 
@@ -129,7 +129,7 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
             <SidebarFooter className="border-t p-4">
                  <div className="flex items-center gap-3">
                     <Avatar className="h-9 w-9">
-                       <AvatarImage src={user.avatarUrl} alt={user.name} data-ai-hint="professional user avatar" />
+                       <AvatarImage src={user.avatarUrl} alt={user.name} data-ai-hint="professional user avatar"/>
                        <AvatarFallback>{user.initials}</AvatarFallback>
                      </Avatar>
                      <div className="hidden group-data-[state=expanded]:block">
