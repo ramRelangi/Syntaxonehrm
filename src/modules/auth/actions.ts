@@ -1,10 +1,6 @@
 
 'use server';
 
-// Force this module to use the Node.js runtime because bcrypt needs it
-// export const runtime = 'nodejs';
-
-
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import nodemailer from 'nodemailer';
@@ -24,9 +20,9 @@ import {
     type RootForgotPasswordFormInputs,
     type SessionData,
 } from '@/modules/auth/types';
-import { addTenant, getUserByEmail, addUser, getTenantByDomain, getUserById as dbGetUserById, getEmployeeByEmployeeIdAndTenantId } from '@/modules/auth/lib/db';
+import { addTenant, getUserByEmail, getUserById as dbGetUserById, getTenantByDomain, getEmployeeByEmployeeIdAndTenantId } from '@/modules/auth/lib/db';
 import pool, { testDbConnection } from '@/lib/db'; // Correctly import testDbConnection from here
-import { initializeDatabase } from '@/lib/init-db'; // initializeDatabase is from init-db
+import { initializeDatabase } from '@/lib/init-db';
 import { MOCK_SESSION_COOKIE } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { getEmailSettings as dbGetEmailSettings } from '@/modules/communication/lib/db';
@@ -194,30 +190,35 @@ export async function sendEmployeeWelcomeEmail(
   employeeLoginId: string, // The human-readable Employee ID (EMP-001)
   temporaryPassword?: string
 ): Promise<boolean> {
-    console.log(`[sendEmployeeWelcomeEmail] Attempting to send to ${employeeEmail} for employee ID ${employeeLoginId}`);
-    const tenant = await getTenantById(tenantId); // Use the DB helper function
+    console.log(`[sendEmployeeWelcomeEmail] Initiating for ${employeeEmail} (Employee Login ID: ${employeeLoginId}, System ID: ${employeeSystemId})`);
+    const tenant = await getTenantById(tenantId);
     if (!tenant) {
-        console.error(`[sendEmployeeWelcomeEmail] Tenant not found for ID: ${tenantId}`);
+        console.error(`[sendEmployeeWelcomeEmail] Tenant not found for ID: ${tenantId}. Cannot send welcome email to ${employeeEmail}.`);
         await sendAdminNotification(
             `Employee Welcome Email Failed (Tenant Not Found)`,
             `Failed to send welcome email to ${employeeEmail} (Employee Login ID: ${employeeLoginId}) because tenant with ID ${tenantId} was not found.`
         );
         return false;
     }
+    console.log(`[sendEmployeeWelcomeEmail] Tenant found: ${tenant.name} (Domain: ${tenant.domain})`);
 
     // Attempt to use tenant-specific SMTP settings first
     let emailSettings = await dbGetEmailSettings(tenantId);
     let transporter;
     let mailerFromName = INTERNAL_FROM_NAME;
     let mailerFromEmail = INTERNAL_FROM_EMAIL;
+    let usingSmtpType = "Internal Fallback SMTP";
 
-    if (emailSettings && emailSettings.smtpHost) {
-        console.log(`[sendEmployeeWelcomeEmail] Using tenant-specific SMTP settings for tenant ${tenant.name}`);
+    if (emailSettings && emailSettings.smtpHost && emailSettings.smtpPort && emailSettings.smtpUser && emailSettings.smtpPassword) {
+        console.log(`[sendEmployeeWelcomeEmail] Using tenant-specific SMTP settings for tenant ${tenant.name}: Host ${emailSettings.smtpHost}:${emailSettings.smtpPort}, User: ${emailSettings.smtpUser}`);
+        usingSmtpType = `Tenant SMTP (${emailSettings.smtpHost})`;
         let transportOptions: nodemailer.TransportOptions = {
             host: emailSettings.smtpHost,
             port: emailSettings.smtpPort,
-            auth: { user: emailSettings.smtpUser, pass: emailSettings.smtpPassword },
+            auth: { user: emailSettings.smtpUser, pass: emailSettings.smtpPassword }, // Password here is already decrypted by dbGetEmailSettings
             connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 15000,
+            logger: process.env.NODE_ENV === 'development',
+            debug: process.env.NODE_ENV === 'development',
         };
         if (emailSettings.smtpPort === 465) transportOptions.secure = true;
         else if (emailSettings.smtpPort === 587) {
@@ -228,7 +229,7 @@ export async function sendEmployeeWelcomeEmail(
         mailerFromName = emailSettings.fromName;
         mailerFromEmail = emailSettings.fromEmail;
     } else {
-        console.warn(`[sendEmployeeWelcomeEmail] SMTP settings not configured for tenant ${tenant.name} (${tenantId}). Falling back to internal SMTP.`);
+        console.warn(`[sendEmployeeWelcomeEmail] SMTP settings not configured or incomplete for tenant ${tenant.name} (${tenantId}). Falling back to internal SMTP.`);
         transporter = createInternalTransporter();
         const internalConfig = getInternalSmtpConfig();
         if (internalConfig) {
@@ -238,13 +239,14 @@ export async function sendEmployeeWelcomeEmail(
     }
 
     if (!transporter) {
-        console.error('[sendEmployeeWelcomeEmail] Failed to create email transporter (tenant or internal). Cannot send email.');
+        console.error(`[sendEmployeeWelcomeEmail] Failed to create ANY email transporter (tenant or internal) for ${employeeEmail}. Cannot send email.`);
         await sendAdminNotification(
-            `Employee Welcome Email Failed (Transporter Issue - Tenant: ${tenant.domain})`,
-            `Failed to send welcome email to ${employeeEmail} (Employee Login ID: ${employeeLoginId}) for tenant ${tenant.name} (${tenant.domain}) because no email transporter could be configured (neither tenant-specific nor internal SMTP worked).`
+            `Employee Welcome Email Failed (No Transporter - Tenant: ${tenant.domain})`,
+            `Failed to send welcome email to ${employeeEmail} (Employee Login ID: ${employeeLoginId}) for tenant ${tenant.name} (${tenant.domain}) because no email transporter could be configured.`
         );
         return false;
     }
+    console.log(`[sendEmployeeWelcomeEmail] Transporter created using: ${usingSmtpType}`);
 
     const loginUrl = constructLoginUrl(tenant.domain);
     const mailOptions = {
@@ -256,14 +258,16 @@ export async function sendEmployeeWelcomeEmail(
     };
 
     try {
+        console.log(`[sendEmployeeWelcomeEmail] Attempting to send email to ${employeeEmail} via ${usingSmtpType}...`);
         const info = await transporter.sendMail(mailOptions);
-        console.log(`[sendEmployeeWelcomeEmail] Employee welcome email sent successfully using ${emailSettings?.smtpHost ? 'TENANT' : 'INTERNAL'} SMTP:`, info.messageId);
+        console.log(`[sendEmployeeWelcomeEmail] Employee welcome email sent successfully using ${usingSmtpType}: Message ID ${info.messageId}`);
         return true;
     } catch (error: any) {
-        console.error(`[sendEmployeeWelcomeEmail] Error sending employee welcome email using ${emailSettings?.smtpHost ? 'TENANT' : 'INTERNAL'} SMTP:`, error);
+        console.error(`[sendEmployeeWelcomeEmail] Error sending employee welcome email using ${usingSmtpType}:`, error);
+        console.error(`[sendEmployeeWelcomeEmail] Nodemailer error details: Name: ${error.name}, Code: ${error.code}, Message: ${error.message}, Stack: ${error.stack}`);
         await sendAdminNotification(
             `Employee Welcome Email Failed (Tenant: ${tenant.domain}, SMTP Error)`,
-            `Failed to send welcome email to ${employeeEmail} (Employee Login ID: ${employeeLoginId}) for tenant ${tenant.name} (${tenant.domain}) using ${emailSettings?.smtpHost ? 'tenant SMTP ('+emailSettings.smtpHost+')' : 'internal SMTP'}.\nError: ${error.message}`
+            `Failed to send welcome email to ${employeeEmail} (Employee Login ID: ${employeeLoginId}) for tenant ${tenant.name} (${tenant.domain}) using ${usingSmtpType}.\nError Name: ${error.name}\nError Message: ${error.message}\nError Code: ${error.code}\nStack: ${error.stack}`
         );
         return false;
     }
@@ -284,8 +288,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
     try {
         const dbTest = await testDbConnection();
         if (!dbTest.success) {
-            console.error("[registerTenantAction] Database connection test failed before schema initialization:", dbTest.message);
-            // Provide a user-friendly message about DB connectivity
+            console.error("[registerTenantAction] Database connection test failed before schema initialization:", dbTest.message, dbTest.error);
             return { success: false, errors: [{ path: ['root'], message: `Could not connect to the database: ${dbTest.message}. Please check server logs and DB configuration.` }] };
         }
         console.log("[registerTenantAction] Database connection test successful.");
@@ -311,7 +314,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.log(`[registerTenantAction] Domain '${lowerCaseDomain}' is available. Creating tenant...`);
 
         newTenant = await addTenant({ name: companyName, domain: lowerCaseDomain });
-        if (!newTenant?.id) throw new Error("Failed to create tenant or retrieve tenant ID."); // Should not happen if addTenant is correct
+        if (!newTenant?.id) throw new Error("Failed to create tenant or retrieve tenant ID.");
         console.log(`[registerTenantAction] Tenant '${companyName}' created with ID: ${newTenant.id}. Adding admin user...`);
 
         const passwordHash = await bcrypt.hash(adminPassword, SALT_ROUNDS);
@@ -321,16 +324,19 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         console.log(`[registerTenantAction] Admin user '${adminName}' added with ID: ${newUser.id}.`);
 
         sendWelcomeEmail(newTenant.name, adminName, adminEmail, newTenant.domain)
+            .then(sent => {
+                 if (sent) console.log(`[registerTenantAction] Admin welcome email for ${newTenant.domain} queued successfully.`);
+                 else console.error(`[registerTenantAction] Admin welcome email for ${newTenant.domain} failed to send (logged separately).`);
+            })
             .catch(err => console.error("[registerTenantAction] Async admin welcome email sending failed after successful registration:", err));
 
         const loginUrl = constructLoginUrl(newTenant.domain);
-        const { passwordHash: _, ...safeUser } = newUser; // Omit password hash from returned user
+        const { passwordHash: _, ...safeUser } = newUser;
         return { success: true, tenant: newTenant, user: safeUser, loginUrl };
 
     } catch (error: any) {
         console.error("[registerTenantAction] Error during registration transaction:", error);
 
-        // Rollback tenant creation if admin user creation failed and tenant was created
         if (newTenant?.id && !error.message?.includes('User email already exists')) {
             console.warn(`[registerTenantAction] Rolling back tenant creation (ID: ${newTenant.id}) due to subsequent error.`);
             try {
@@ -348,16 +354,16 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         }
 
         let userMessage = 'Failed to register tenant due to a server error.';
-        let errorPath: (string | number)[] = ['root']; // Default path for general errors
+        let errorPath: (string | number)[] = ['root'];
 
         if (error.message?.includes('already exists')) {
-            userMessage = error.message; // Use specific message from DB layer
+            userMessage = error.message;
             if (error.message.includes('domain')) errorPath = ['companyDomain'];
             else if (error.message.includes('email')) errorPath = ['adminEmail'];
         } else if (error.message?.includes('Database schema not initialized') || error.message?.includes('relation "tenants" does not exist')) {
             userMessage = 'Database Error: Schema not initialized. Please contact support or run `npm run db:init` manually and check database logs.';
         } else if (error.message?.includes('Database connection issue')) {
-            userMessage = error.message; // E.g., "Could not connect to the database: ..."
+            userMessage = error.message;
         } else if (error.message) {
             userMessage = `Registration failed: ${error.message}`;
         }
@@ -377,26 +383,19 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
     const headersList = headers();
     const host = headersList.get('host') || '';
     const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-    const normalizedHost = host.split(':')[0]; // Remove port for comparison
+    const normalizedHost = host.split(':')[0];
 
     const match = normalizedHost.match(`^(.*)\\.${rootDomain}$`);
-    const tenantDomainFromHost = match ? match[1] : null;
+    let tenantDomainFromHost = match ? match[1] : null;
+
+    // Handle root domain/localhost access specifically
+    if (normalizedHost === rootDomain || normalizedHost === 'localhost' || normalizedHost === '127.0.0.1') {
+        tenantDomainFromHost = null; // Explicitly set to null for root domain requests
+    }
+
 
     if (!tenantDomainFromHost) {
-        // Check if it's the root domain or common dev equivalents like localhost, 127.0.0.1
-        const isRootEquivalent =
-            normalizedHost === rootDomain ||
-            normalizedHost === 'localhost' ||
-            normalizedHost === '127.0.0.1' ||
-            normalizedHost.match(/^192\.168\.\d+\.\d+$/) ||
-            normalizedHost.match(/^10\.\d+\.\d+\.\d+$/) ||
-            normalizedHost.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/);
-
-        if (isRootEquivalent) {
-            return { success: false, error: "Login not allowed on the root domain. Please use your company's specific login URL (e.g., your-company.syntaxhivehrm.app)." };
-        }
-        // If not root and not a valid subdomain, it's an invalid URL
-        return { success: false, error: "Invalid login URL. Could not identify company domain." };
+        return { success: false, error: "Login not allowed on the root domain. Please use your company's specific login URL (e.g., your-company.syntaxhivehrm.app)." };
     }
 
 
@@ -409,19 +408,16 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
 
         let user: User | undefined;
 
-        // Try to find by email first
         if (loginIdentifier.includes('@')) {
             console.log(`[loginAction] Attempting to find user by email: ${loginIdentifier} for tenant ${tenant.id}`);
             user = await getUserByEmail(loginIdentifier, tenant.id);
         }
 
-        // If not found by email, or if it doesn't look like an email, try by Employee ID
         if (!user) {
             console.log(`[loginAction] User not found by email or identifier is not an email. Attempting by Employee ID: ${loginIdentifier} for tenant ${tenant.id}`);
             const employeeProfile = await getEmployeeByEmployeeIdAndTenantId(loginIdentifier, tenant.id);
             if (employeeProfile && employeeProfile.userId) {
                 user = await dbGetUserById(employeeProfile.userId);
-                // Ensure the found user belongs to the correct tenant (important if userId was from a different tenant's employee record somehow)
                 if (user && user.tenantId !== tenant.id) {
                     console.warn(`[loginAction] User ${user.id} found via employee ID ${loginIdentifier} belongs to tenant ${user.tenantId}, but login is for tenant ${tenant.id}. Denying access.`);
                     user = undefined;
@@ -445,26 +441,25 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
         const sessionData: SessionData = {
             userId: user.id,
             tenantId: user.tenantId,
-            tenantDomain: tenant.domain, // Store the actual domain from DB for consistency
+            tenantDomain: tenant.domain,
             userRole: user.role,
         };
 
-        const cookieOptions: any = { // Let TypeScript infer for now
+        const cookieOptions: any = {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             path: '/',
-            sameSite: 'lax' as const, // Ensure this is a literal type
+            sameSite: 'lax' as const,
             maxAge: 60 * 60 * 24 * 7, // 1 week
         };
 
-        // Set cookie domain only for actual root domains, not for localhost or IPs
         if (rootDomain !== 'localhost' && !normalizedHost.match(/^(127\.0\.0\.1|::1|(\d{1,3}\.){3}\d{1,3})$/)) {
-            cookieOptions.domain = `.${rootDomain}`; // Prepend with a dot
+            cookieOptions.domain = `.${rootDomain}`;
         }
 
         cookies().set(MOCK_SESSION_COOKIE, JSON.stringify(sessionData), cookieOptions);
 
-        const { passwordHash: _, ...safeUser } = user; // Omit password hash before returning
+        const { passwordHash: _, ...safeUser } = user;
         return { success: true, user: safeUser };
 
     } catch (error: any) {
@@ -477,8 +472,8 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
 export async function logoutAction() {
     console.log("[logoutAction] Logging out user...");
     let tenantDomain: string | null = null;
-    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost'; // Match logic in loginAction
-    const currentHost = headers().get('host')?.split(':')[0] || ''; // Get current host without port
+    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
+    const currentHost = headers().get('host')?.split(':')[0] || '';
 
     try {
         const cookieStore = cookies();
@@ -486,7 +481,7 @@ export async function logoutAction() {
         if (sessionCookie?.value) {
             try {
                  const sessionData: SessionData = JSON.parse(sessionCookie.value);
-                 tenantDomain = sessionData.tenantDomain; // Get tenant domain from session
+                 tenantDomain = sessionData.tenantDomain;
             } catch (parseError) { console.error("[logoutAction] Error parsing session cookie:", parseError); }
         }
 
@@ -495,7 +490,6 @@ export async function logoutAction() {
              path: '/',
         };
 
-        // Apply domain to cookie deletion only if it's not localhost or an IP
         if (rootDomain !== 'localhost' && !currentHost.match(/^(127\.0\.0\.1|::1|(\d{1,3}\.){3}\d{1,3})$/)) {
             cookieDeleteOptions.domain = `.${rootDomain}`;
         }
@@ -505,9 +499,7 @@ export async function logoutAction() {
 
     } catch (error) { console.error("[logoutAction] Error clearing cookie:", error); }
 
-    // Redirect to the tenant-specific login page if tenantDomain was found in session,
-    // otherwise redirect to the root registration page (as a fallback if no session context)
-    const redirectUrl = tenantDomain ? constructLoginUrl(tenantDomain) : '/register';
+    const redirectUrl = tenantDomain ? constructLoginUrl(tenantDomain) : '/login'; // Default to /login if no tenant domain
     console.log(`[logoutAction] Redirecting to: ${redirectUrl}`);
     redirect(redirectUrl);
 }
@@ -544,7 +536,7 @@ export async function getUserFromSession(): Promise<Omit<User, 'passwordHash'> |
         return null;
     }
     try {
-        const user = await dbGetUserById(session.userId); // Use aliased import
+        const user = await dbGetUserById(session.userId);
         if (user && user.tenantId === session.tenantId) {
             const { passwordHash, ...safeUser } = user;
             return safeUser;
@@ -558,27 +550,20 @@ export async function getUserFromSession(): Promise<Omit<User, 'passwordHash'> |
 // Helper function to read session data from cookie
 export async function getSessionData(): Promise<SessionData | null> {
     try {
-        // console.log("[getSessionData] Attempting to read session cookie...");
         const cookieStore = cookies();
         const sessionCookie = cookieStore.get(MOCK_SESSION_COOKIE);
 
         if (sessionCookie?.value) {
-            // console.log("[getSessionData] Session cookie found:", sessionCookie.value);
             const sessionData: SessionData = JSON.parse(sessionCookie.value);
-
-            // Basic validation of session data structure
             const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
             if (sessionData &&
                 uuidRegex.test(sessionData.userId) &&
                 uuidRegex.test(sessionData.tenantId) &&
                 sessionData.tenantDomain &&
                 sessionData.userRole) {
-                // console.log("[getSessionData] Valid session data parsed:", sessionData);
                 return sessionData;
             }
             console.warn("[getSessionData] Invalid session data structure in cookie.");
-        } else {
-            // console.log("[getSessionData] Session cookie not found.");
         }
     } catch (error) {
         console.error("[getSessionData] Error reading/parsing session cookie:", error);
@@ -587,7 +572,7 @@ export async function getSessionData(): Promise<SessionData | null> {
 }
 
 
-async function getTenantById(id: string): Promise<Tenant | undefined> { // Duplicated to avoid circular dependency with auth/lib/db
+async function getTenantById(id: string): Promise<Tenant | undefined> {
     const client = await pool.connect();
     try {
         const res = await client.query('SELECT * FROM tenants WHERE id = $1', [id]);
@@ -599,7 +584,7 @@ async function getTenantById(id: string): Promise<Tenant | undefined> { // Dupli
         } : undefined;
     } catch (error) {
         console.error(`[getTenantById - auth/actions] Error fetching tenant ${id}:`, error);
-        throw error; // Re-throw to be handled by caller
+        throw error;
     } finally {
         client.release();
     }
@@ -607,7 +592,6 @@ async function getTenantById(id: string): Promise<Tenant | undefined> { // Dupli
 
 // Tenant Forgot Password Action
 export async function tenantForgotPasswordAction(formData: TenantForgotPasswordFormInputs): Promise<{ success: boolean; message: string }> {
-    // Tenant domain is implicitly derived from the current request's subdomain
     const headersList = headers();
     const host = headersList.get('host') || '';
     const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
@@ -641,22 +625,17 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
         const tenant = await getTenantByDomain(tenantDomain);
         if (!tenant) {
             console.log(`[forgotPasswordLogic] Tenant not found for domain: ${tenantDomain}.`);
-            return { success: true, message: userMessage }; // Don't reveal if tenant exists
+            return { success: true, message: userMessage };
         }
 
         const user = await getUserByEmail(email, tenant.id);
         if (!user || !user.isActive) {
             console.log(`[forgotPasswordLogic] User not found or inactive for email ${email} in tenant ${tenant.id}.`);
-            return { success: true, message: userMessage }; // Don't reveal if user exists or is inactive
+            return { success: true, message: userMessage };
         }
 
-        // TODO: Implement actual token generation, storage (with expiry), and validation
-        const resetToken = crypto.randomBytes(32).toString('hex'); // Generate a secure random token
-        const tokenExpiry = new Date(Date.now() + 3600000); // Token expires in 1 hour
-
-        // TODO: Store the resetToken (hashed) and tokenExpiry in the database associated with the user.
-        // For example, add `password_reset_token TEXT`, `password_reset_token_expires_at TIMESTAMP WITH TIME ZONE` columns to `users` table.
-        // await pool.query('UPDATE users SET password_reset_token = $1, password_reset_token_expires_at = $2 WHERE id = $3', [hashedToken, tokenExpiry, user.id]);
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        // TODO: Store resetToken (hashed) and expiry in DB
 
         console.log(`[forgotPasswordLogic] Generated reset token for ${user.email}: ${resetToken} (this is a mock, implement DB storage)`);
 
@@ -670,11 +649,10 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
             return { success: false, message: 'Server configuration error prevents sending email. Please contact support.' };
         }
 
-        // Construct the reset URL specific to the tenant's domain
-        const resetUrlBase = constructLoginUrl(tenantDomain).replace('/login', '/reset-password'); // Ensure it points to the tenant's domain
+        const resetUrlBase = constructLoginUrl(tenantDomain).replace('/login', '/reset-password');
         const resetUrl = `${resetUrlBase}?token=${resetToken}`;
 
-        const internalConfig = getInternalSmtpConfig(); // For fromEmail/fromName
+        const internalConfig = getInternalSmtpConfig();
         const mailOptions = {
             from: `"${internalConfig?.fromName || INTERNAL_FROM_NAME}" <${internalConfig?.fromEmail || INTERNAL_FROM_EMAIL}>`,
             to: user.email,

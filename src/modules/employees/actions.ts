@@ -13,7 +13,7 @@ import {
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getTenantIdFromSession, isAdminFromSession, sendEmployeeWelcomeEmail } from '@/modules/auth/actions';
-import { addUser } from '@/modules/auth/lib/db';
+import { addUser } from '@/modules/auth/lib/db'; // Corrected import path for addUser
 import { generateTemporaryPassword } from '@/modules/auth/lib/utils'; // Updated import path
 import bcrypt from 'bcrypt';
 
@@ -65,7 +65,7 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
    }
 
    console.log(`[Action addEmployee] Attempting to add employee for tenant: ${tenantId}`);
-   const dataWithTenantIdForValidation = { ...formData, tenantId }; // For validating employeeSchema contextually
+   const dataWithTenantIdForValidation = { ...formData, tenantId };
    const validation = employeeSchema.omit({userId: true, employeeId: true}).safeParse(dataWithTenantIdForValidation);
 
   if (!validation.success) {
@@ -78,17 +78,16 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
   try {
     console.log("[Action addEmployee] Validation successful. Creating user and employee...");
 
-    // 1. Create User account
-    const temporaryPassword = generateTemporaryPassword(12); // Explicitly set length to 12
-    console.log('[Action addEmployee] Generated temporary password length:', temporaryPassword.length); // Log the length
+    const temporaryPassword = generateTemporaryPassword(12);
+    console.log('[Action addEmployee] Generated temporary password length:', temporaryPassword.length, `Password: ${temporaryPassword}`); // Log password for debugging (REMOVE IN PROD)
     const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
     let newUser;
     try {
         newUser = await addUser({
             tenantId,
-            email, // Use validated email
+            email,
             passwordHash,
-            name, // Use validated name
+            name,
             role: 'Employee',
             isActive: true,
         });
@@ -97,32 +96,42 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
         return { success: false, errors: [{ code: 'custom', path: ['email'], message: userError.message || 'Failed to create user account for employee.' }] };
     }
 
-    // 2. Add Employee record, linking to the new user
-    // dbAddEmployee expects tenantId and userId, and other validated data
     const newEmployee = await dbAddEmployee({
-        ...employeeDetails, // Contains validated position, department, hireDate etc.
+        ...employeeDetails,
         tenantId,
         userId: newUser.id,
-        name, // Pass validated name
-        email, // Pass validated email
+        name,
+        email,
     });
     console.log(`[Action addEmployee] Employee added successfully (ID: ${newEmployee.id}, EmployeeID: ${newEmployee.employeeId}). Revalidating paths...`);
 
-    // 3. Send welcome email
     try {
         if (newEmployee.employeeId) {
-            await sendEmployeeWelcomeEmail(tenantId, newEmployee.name, newEmployee.email, newEmployee.id, newEmployee.employeeId, temporaryPassword);
-            console.log(`[Action addEmployee] Welcome email initiated for ${newEmployee.email}`);
+            console.log(`[Action addEmployee] Attempting to send welcome email to ${newEmployee.email} for employee ${newEmployee.employeeId}...`);
+            const emailSent = await sendEmployeeWelcomeEmail(tenantId, newEmployee.name, newEmployee.email, newEmployee.id, newEmployee.employeeId, temporaryPassword);
+             if (emailSent) {
+                console.log(`[Action addEmployee] Welcome email successfully sent to ${newEmployee.email}`);
+            } else {
+                console.error(`[Action addEmployee] Welcome email FAILED to send to ${newEmployee.email} (see previous logs in sendEmployeeWelcomeEmail for details).`);
+                // Optionally, inform admin or queue for retry, but don't fail the whole addEmployee operation.
+            }
         } else {
             console.error(`[Action addEmployee] Employee ID missing for new employee ${newEmployee.id}. Cannot send welcome email.`);
         }
     } catch (emailError: any) {
-        console.error(`[Action addEmployee] Failed to send welcome email to ${newEmployee.email}:`, emailError);
-        // Log this error, but don't fail the whole operation if employee/user were created
+        console.error(`[Action addEmployee] Exception caught while trying to send welcome email to ${newEmployee.email}:`, emailError);
     }
 
-    revalidatePath(`/${tenantDomain}/employees`);
-    revalidatePath(`/${tenantDomain}/dashboard`);
+    // Get tenant domain for revalidation path
+    const sessionData = await getSessionData();
+    const tenantDomain = sessionData?.tenantDomain;
+    if(tenantDomain){
+        revalidatePath(`/${tenantDomain}/employees`);
+        revalidatePath(`/${tenantDomain}/dashboard`);
+    } else {
+        console.warn("[Action addEmployee] Tenant domain not found in session for path revalidation.");
+    }
+
     return { success: true, employee: newEmployee };
   } catch (error: any) {
     console.error("[Action addEmployee] Error calling dbAddEmployee or during overall process:", error);
@@ -144,7 +153,6 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
 
    console.log(`[Action updateEmployee] Attempting to update employee ${id} for tenant: ${tenantId}`);
 
-  // When updating, we don't expect tenantId, userId, or employeeId in the formData
   const validation = employeeSchema.partial().omit({ tenantId: true, userId: true, employeeId: true }).safeParse(formData);
 
   if (!validation.success) {
@@ -154,14 +162,19 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
 
   try {
     console.log("[Action updateEmployee] Validation successful. Calling dbUpdateEmployee...");
-    // dbUpdateEmployee takes tenantId explicitly and formData for other fields
     const updatedEmployee = await dbUpdateEmployee(id, tenantId, validation.data);
     if (updatedEmployee) {
        console.log(`[Action updateEmployee] Employee ${id} updated successfully. Revalidating paths...`);
-      revalidatePath(`/${tenantDomain}/employees`);
-      revalidatePath(`/${tenantDomain}/employees/${id}`);
-      revalidatePath(`/${tenantDomain}/employees/${id}/edit`);
-      revalidatePath(`/${tenantDomain}/dashboard`);
+       const sessionData = await getSessionData();
+       const tenantDomain = sessionData?.tenantDomain;
+        if(tenantDomain){
+            revalidatePath(`/${tenantDomain}/employees`);
+            revalidatePath(`/${tenantDomain}/employees/${id}`);
+            revalidatePath(`/${tenantDomain}/employees/${id}/edit`);
+            revalidatePath(`/${tenantDomain}/dashboard`);
+        } else {
+            console.warn("[Action updateEmployee] Tenant domain not found in session for path revalidation.");
+        }
       return { success: true, employee: updatedEmployee };
     } else {
        console.warn(`[Action updateEmployee] Employee ${id} not found for tenant ${tenantId} during update.`);
@@ -188,13 +201,17 @@ export async function deleteEmployeeAction(id: string): Promise<{ success: boole
    console.log(`[Action deleteEmployeeAction] Attempting to delete employee ${id} for tenant: ${tenantId}`);
 
   try {
-    // Future: Consider if deleting an employee should also deactivate/delete the associated user account.
-    // For now, user_id in employees table is ON DELETE SET NULL.
     const deleted = await dbDeleteEmployee(id, tenantId);
     if (deleted) {
        console.log(`[Action deleteEmployeeAction] Employee ${id} deleted successfully. Revalidating paths...`);
-      revalidatePath(`/${tenantDomain}/employees`);
-      revalidatePath(`/${tenantDomain}/dashboard`);
+       const sessionData = await getSessionData();
+       const tenantDomain = sessionData?.tenantDomain;
+       if(tenantDomain){
+            revalidatePath(`/${tenantDomain}/employees`);
+            revalidatePath(`/${tenantDomain}/dashboard`);
+       } else {
+           console.warn("[Action deleteEmployeeAction] Tenant domain not found in session for path revalidation.");
+       }
       return { success: true };
     } else {
        console.warn(`[Action deleteEmployeeAction] Employee ${id} not found for tenant ${tenantId} during deletion.`);
@@ -205,3 +222,4 @@ export async function deleteEmployeeAction(id: string): Promise<{ success: boole
     return { success: false, error: error.message || 'Failed to delete employee due to a database error.' };
   }
 }
+
