@@ -1,5 +1,6 @@
+
 import { NextRequest, NextResponse } from 'next/server';
-import { getEmployeeById, updateEmployee, deleteEmployeeAction } from '@/modules/employees/actions';
+import { getEmployeeByIdAction, updateEmployee, deleteEmployeeAction } from '@/modules/employees/actions'; // Corrected import
 import { employeeSchema } from '@/modules/employees/types';
 
 interface Params {
@@ -8,14 +9,16 @@ interface Params {
 
 export async function GET(request: NextRequest, { params }: Params) {
   try {
-    const employee = await getEmployeeById(params.id); // Call the server action
+    // Call the server action, now correctly named
+    const employee = await getEmployeeByIdAction(params.id);
     if (!employee) {
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
     }
     return NextResponse.json(employee);
-  } catch (error) {
+  } catch (error: any) {
     console.error(`Error fetching employee ${params.id} (API):`, error);
-    return NextResponse.json({ error: 'Failed to fetch employee' }, { status: 500 });
+    // Propagate a more specific error message if available from the action
+    return NextResponse.json({ error: error.message || 'Failed to fetch employee' }, { status: 500 });
   }
 }
 
@@ -24,7 +27,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const body = await request.json();
 
     // Server-side validation before calling the action
-    const validation = employeeSchema.safeParse(body);
+    // Note: The `updateEmployee` action expects formData without tenantId, userId, employeeId
+    // It derives tenantId from session and uses the provided `id` param as the employee's primary key.
+    const validation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true }).partial().safeParse(body);
     if (!validation.success) {
        console.error(`PUT /api/employees/${params.id} Validation Error:`, validation.error.flatten());
        return NextResponse.json({ error: 'Invalid input', details: validation.error.flatten().fieldErrors }, { status: 400 });
@@ -35,12 +40,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
     if (result.success && result.employee) {
       return NextResponse.json(result.employee);
-    } else if (result.errors?.some(e => e.message === 'Employee not found')) {
-        return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
+    } else if (result.errors?.some(e => e.message === 'Employee not found for this tenant')) {
+        return NextResponse.json({ error: 'Employee not found for this tenant' }, { status: 404 });
     } else {
          console.error(`PUT /api/employees/${params.id} Action Error:`, result.errors);
          if (result.errors?.some(e => e.message?.includes('Email address already exists'))) {
-             return NextResponse.json({ error: 'Email address already exists.' }, { status: 409 }); // 409 Conflict
+             return NextResponse.json({ error: 'Email address already exists for this tenant.' }, { status: 409 }); // 409 Conflict
          }
       return NextResponse.json({ error: result.errors?.[0]?.message || 'Failed to update employee' }, { status: result.errors ? 400 : 500 });
     }
@@ -61,7 +66,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       return NextResponse.json({ message: 'Employee deleted successfully' }, { status: 200 }); // Or 204 No Content
     } else {
       // Use error message from the action
-      return NextResponse.json({ error: result.error || 'Failed to delete employee' }, { status: result.error === 'Employee not found.' ? 404 : 500 });
+      return NextResponse.json({ error: result.error || 'Failed to delete employee' }, { status: result.error?.includes('not found') ? 404 : 500 });
     }
   } catch (error: any) {
     console.error(`Error deleting employee ${params.id} (API):`, error);
