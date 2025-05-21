@@ -9,17 +9,16 @@ import {
   addEmployee as dbAddEmployee,
   updateEmployee as dbUpdateEmployee,
   deleteEmployee as dbDeleteEmployee,
+  getEmployeeByUserId as dbGetEmployeeByUserId,
 } from '@/modules/employees/lib/db';
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
-import { getTenantIdFromSession, isAdminFromSession, sendEmployeeWelcomeEmail } from '@/modules/auth/actions';
-import { addUser } from '@/modules/auth/lib/db'; // Corrected import path for addUser
-import { generateTemporaryPassword } from '@/modules/auth/lib/utils'; // Updated import path
+import { getTenantIdFromSession, isAdminFromSession, getUserIdFromSession, getEmployeeProfileForCurrentUser } from '@/modules/auth/actions';
+import { addUser as dbAddUser } from '@/modules/auth/lib/db';
+import { generateTemporaryPassword } from '@/modules/auth/lib/utils';
 import bcrypt from 'bcrypt';
 
 const SALT_ROUNDS = 10;
-
-// --- Server Actions ---
 
 export async function getEmployees(): Promise<Employee[]> {
   const tenantId = await getTenantIdFromSession();
@@ -27,9 +26,18 @@ export async function getEmployees(): Promise<Employee[]> {
       console.error("[Action getEmployees] Tenant ID could not be determined from session.");
       throw new Error("Tenant context not found.");
   }
-  console.log(`[Action getEmployees] Fetching employees for tenant: ${tenantId}`);
+
+  const userRole = await getUserRoleFromSession();
+  const userId = await getUserIdFromSession();
+
+  console.log(`[Action getEmployees] Fetching for tenant: ${tenantId}, Role: ${userRole}, UserID: ${userId}`);
+
   try {
-     return dbGetAllEmployees(tenantId);
+    if (userRole === 'Employee' && userId) {
+      const employeeProfile = await getEmployeeProfileForCurrentUser();
+      return employeeProfile ? [employeeProfile] : [];
+    }
+    return dbGetAllEmployees(tenantId);
   } catch (dbError: any) {
       console.error(`[Action getEmployees] Database error for tenant ${tenantId}:`, dbError);
        throw new Error(`Failed to fetch employees: ${dbError.message}`);
@@ -45,6 +53,18 @@ export async function getEmployeeById(id: string): Promise<Employee | undefined>
    }
    console.log(`[Action getEmployeeById] Fetching employee ${id} for tenant: ${tenantId}`);
    try {
+      // Additional check: if user is 'Employee', they should only fetch their own profile
+      const userRole = await getUserRoleFromSession();
+      const currentUserId = await getUserIdFromSession();
+      if (userRole === 'Employee') {
+          const ownProfile = await dbGetEmployeeByUserId(currentUserId!, tenantId);
+          if (ownProfile && ownProfile.id === id) {
+              return ownProfile;
+          } else {
+              console.warn(`[Action getEmployeeById] Employee role user ${currentUserId} attempted to fetch profile for ${id}. Denied.`);
+              throw new Error("Unauthorized to view this employee profile.");
+          }
+      }
       return dbGetEmployeeById(id, tenantId);
    } catch (dbError: any) {
         console.error(`[Action getEmployeeById] Database error for employee ${id}, tenant ${tenantId}:`, dbError);
@@ -79,11 +99,11 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
     console.log("[Action addEmployee] Validation successful. Creating user and employee...");
 
     const temporaryPassword = generateTemporaryPassword(12);
-    console.log('[Action addEmployee] Generated temporary password length:', temporaryPassword.length, `Password: ${temporaryPassword}`); // Log password for debugging (REMOVE IN PROD)
+    console.log('[Action addEmployee] Generated temporary password length:', temporaryPassword.length);
     const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
     let newUser;
     try {
-        newUser = await addUser({
+        newUser = await dbAddUser({
             tenantId,
             email,
             passwordHash,
@@ -108,13 +128,12 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
     try {
         if (newEmployee.employeeId) {
             console.log(`[Action addEmployee] Attempting to send welcome email to ${newEmployee.email} for employee ${newEmployee.employeeId}...`);
-            const emailSent = await sendEmployeeWelcomeEmail(tenantId, newEmployee.name, newEmployee.email, newEmployee.id, newEmployee.employeeId, temporaryPassword);
-             if (emailSent) {
-                console.log(`[Action addEmployee] Welcome email successfully sent to ${newEmployee.email}`);
-            } else {
-                console.error(`[Action addEmployee] Welcome email FAILED to send to ${newEmployee.email} (see previous logs in sendEmployeeWelcomeEmail for details).`);
-                // Optionally, inform admin or queue for retry, but don't fail the whole addEmployee operation.
-            }
+            // const emailSent = await sendEmployeeWelcomeEmail(tenantId, newEmployee.name, newEmployee.email, newEmployee.id, newEmployee.employeeId, temporaryPassword);
+            // if (emailSent) {
+            //     console.log(`[Action addEmployee] Welcome email successfully sent to ${newEmployee.email}`);
+            // } else {
+            //     console.error(`[Action addEmployee] Welcome email FAILED to send to ${newEmployee.email} (see previous logs in sendEmployeeWelcomeEmail for details).`);
+            // }
         } else {
             console.error(`[Action addEmployee] Employee ID missing for new employee ${newEmployee.id}. Cannot send welcome email.`);
         }
@@ -122,7 +141,6 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
         console.error(`[Action addEmployee] Exception caught while trying to send welcome email to ${newEmployee.email}:`, emailError);
     }
 
-    // Get tenant domain for revalidation path
     const sessionData = await getSessionData();
     const tenantDomain = sessionData?.tenantDomain;
     if(tenantDomain){
@@ -134,8 +152,12 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
 
     return { success: true, employee: newEmployee };
   } catch (error: any) {
-    console.error("[Action addEmployee] Error calling dbAddEmployee or during overall process:", error);
-     return { success: false, errors: [{ code: 'custom', path: ['email'], message: error.message || 'Failed to add employee due to a database error.' }] };
+    console.error("[Action addEmployee] Caught error object:", error);
+    if (error.stack) {
+        console.error("[Action addEmployee] Error stack:", error.stack);
+    }
+    const errorMessage = error.message || 'An unexpected error occurred while adding the employee. Please check server logs.';
+     return { success: false, errors: [{ code: 'custom', path: ['email'], message: errorMessage }] };
   }
 }
 
@@ -222,4 +244,3 @@ export async function deleteEmployeeAction(id: string): Promise<{ success: boole
     return { success: false, error: error.message || 'Failed to delete employee due to a database error.' };
   }
 }
-

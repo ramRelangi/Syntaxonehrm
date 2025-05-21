@@ -1,6 +1,6 @@
 
 // src/app/(app)/[domain]/reports/page.tsx
-"use client"; // Needs client-side interaction for report building elements
+"use client";
 
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -11,14 +11,14 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { BarChart2, FileText, Settings, Download, PlusCircle } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
-import { useParams } from "next/navigation"; // Import useParams
+import { useParams } from "next/navigation";
+// Removed unused auth imports as this page is client-side for now,
+// server-side auth check would happen in layout or parent server component if needed.
 
-// Mock data sources and fields for the builder
 const reportDataSources = [
   { value: "employees", label: "Employees" },
   { value: "leave", label: "Leave Requests" },
   { value: "recruitment", label: "Recruitment" },
-  // Add more sources as needed (Payroll, Performance, etc.)
 ];
 
 const employeeFields = [
@@ -37,7 +37,6 @@ const leaveFields = [
     { id: "status", label: "Status" },
 ];
 
-// Simple component for pre-built report cards
 function PreBuiltReportCard({ title, description, icon: Icon }: { title: string; description: string; icon: React.ElementType }) {
   return (
     <Card className="shadow-sm hover:shadow-md transition-shadow duration-200">
@@ -49,27 +48,20 @@ function PreBuiltReportCard({ title, description, icon: Icon }: { title: string;
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground">{description}</p>
-        {/* Placeholder for generation options or preview */}
       </CardContent>
     </Card>
   );
 }
 
-interface ReportsPageProps {
-  params: { domain: string };
-}
-
-export default function TenantReportsPage({ params }: ReportsPageProps) {
-   // Use React.use() to safely access params in a Client Component context if needed
-   const safeParams = React.use(params);
-   const tenantDomain = safeParams?.domain;
-  const [selectedDataSource, setSelectedDataSource] = React.useState<string | null>(null);
-  const [selectedFields, setSelectedFields] = React.useState<string[]>([]);
+export default function TenantReportsPage() {
+   const params = useParams();
+   const tenantDomain = params.domain as string; // Get tenant domain from params
+   const [selectedDataSource, setSelectedDataSource] = React.useState<string | null>(null);
+   const [selectedFields, setSelectedFields] = React.useState<string[]>([]);
 
   const availableFields = React.useMemo(() => {
     if (selectedDataSource === "employees") return employeeFields;
     if (selectedDataSource === "leave") return leaveFields;
-    // Add other data sources here
     return [];
   }, [selectedDataSource]);
 
@@ -80,53 +72,45 @@ export default function TenantReportsPage({ params }: ReportsPageProps) {
   };
 
    const handleGenerateReport = () => {
-    // Placeholder for report generation logic based on selectedDataSource and selectedFields
     console.log("Generating report with:", { dataSource: selectedDataSource, fields: selectedFields });
     alert("Report generation logic not implemented yet.");
   };
 
   if (!tenantDomain) {
-       // Handle case where domain isn't available yet or is invalid
        return <div>Error: Could not determine tenant context.</div>;
    }
 
 
   return (
-    <div className="flex flex-col gap-6 md:gap-8"> {/* Increased gap */}
+    <div className="flex flex-col gap-6 md:gap-8">
       <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
         <BarChart2 className="h-6 w-6" /> Reporting & Analytics for {tenantDomain}
       </h1>
 
-      {/* Pre-built Reports Section */}
       <Card className="shadow-sm">
          <CardHeader>
             <CardTitle>Pre-built Reports</CardTitle>
             <CardDescription>Quickly generate commonly used HR reports.</CardDescription>
          </CardHeader>
-          {/* Responsive grid */}
          <CardContent className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-           {/* Add more pre-built report examples */}
            <PreBuiltReportCard title="Headcount Report" description="Current number of employees by department and status." icon={FileText} />
            <PreBuiltReportCard title="Turnover Analysis" description="Analyze employee turnover rates over a selected period." icon={FileText} />
            <PreBuiltReportCard title="Leave Balance Overview" description="View current leave balances for all employees." icon={FileText} />
-           {/* Add Diversity Report, Compensation Summary etc. */}
          </CardContent>
       </Card>
 
       <Separator />
 
-      {/* Custom Report Builder Section */}
       <Card className="shadow-sm">
         <CardHeader>
           <CardTitle>Custom Report Builder</CardTitle>
           <CardDescription>Create your own reports by selecting data sources and fields.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-           {/* Step 1: Select Data Source */}
            <div className="space-y-2">
               <Label htmlFor="dataSource" className="font-semibold">1. Select Data Source</Label>
               <Select onValueChange={(value) => { setSelectedDataSource(value); setSelectedFields([]); }} value={selectedDataSource ?? ""}>
-                <SelectTrigger id="dataSource" className="w-full md:w-[300px]"> {/* Limit width on larger screens */}
+                <SelectTrigger id="dataSource" className="w-full md:w-[300px]">
                   <SelectValue placeholder="Choose data to report on..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -137,11 +121,9 @@ export default function TenantReportsPage({ params }: ReportsPageProps) {
               </Select>
            </div>
 
-           {/* Step 2: Select Fields (Conditional) */}
            {selectedDataSource && (
              <div className="space-y-2">
                 <Label className="font-semibold">2. Select Fields</Label>
-                 {/* Responsive grid for fields */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 p-4 border rounded-md bg-muted/50">
                   {availableFields.length > 0 ? availableFields.map(field => (
                     <div key={field.id} className="flex items-center space-x-2">
@@ -159,13 +141,11 @@ export default function TenantReportsPage({ params }: ReportsPageProps) {
              </div>
            )}
 
-            {/* Step 3: Filters & Grouping (Placeholder) */}
            {selectedDataSource && selectedFields.length > 0 && (
              <div className="space-y-2">
                 <Label className="font-semibold">3. Filters & Grouping (Optional)</Label>
                  <div className="p-4 border rounded-md space-y-4 bg-muted/50">
                     <p className="text-sm text-muted-foreground italic">Advanced filtering, grouping, and sorting options will be available here.</p>
-                    {/* Example filter placeholder - make it responsive */}
                     <div className="flex flex-col sm:flex-row items-center gap-2">
                         <Select disabled><SelectTrigger className="flex-1"><SelectValue placeholder="Filter Field..." /></SelectTrigger></Select>
                         <Select disabled><SelectTrigger className="flex-1"><SelectValue placeholder="Operator..." /></SelectTrigger></Select>
@@ -177,7 +157,6 @@ export default function TenantReportsPage({ params }: ReportsPageProps) {
            )}
 
 
-           {/* Step 4: Generate Report */}
             {selectedDataSource && selectedFields.length > 0 && (
                 <div className="flex justify-end pt-4">
                     <Button onClick={handleGenerateReport} disabled={!selectedDataSource || selectedFields.length === 0}>

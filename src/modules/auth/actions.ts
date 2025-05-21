@@ -23,20 +23,20 @@ import {
 import {
     addTenant,
     getUserByEmail,
-    addUser,
+    addUser as dbAddUser, // Renamed to avoid conflict with auth/actions#addUser
     getTenantByDomain,
     getUserById as dbGetUserById,
     getEmployeeByEmployeeIdAndTenantId,
-    getEmployeeByUserId,
-    deleteUserById as dbDeleteUserById // Renamed to avoid conflict
+    getEmployeeByUserId as dbGetEmployeeByUserId, // Renamed for clarity
+    deleteUserById as dbDeleteUserById
 } from '@/modules/auth/lib/db';
-import pool, { testDbConnection } from '@/lib/db'; // Correctly import testDbConnection from here
+import pool, { testDbConnection } from '@/lib/db';
 import { initializeDatabase } from '@/lib/init-db';
 import { MOCK_SESSION_COOKIE } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { getEmailSettings as dbGetEmailSettings } from '@/modules/communication/lib/db';
 import type { EmailSettings } from '@/modules/communication/types';
-
+import type { Employee } from '@/modules/employees/types'; // For getEmployeeProfileForCurrentUser
 
 const SALT_ROUNDS = 10;
 
@@ -214,7 +214,7 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
         if (!newTenant?.id) throw new Error("Failed to create tenant or retrieve tenant ID.");
         console.log(`[registerTenantAction] Tenant '${companyName}' created with ID: ${newTenant.id}. Adding admin user...`);
         const passwordHash = await bcrypt.hash(adminPassword, SALT_ROUNDS);
-        const newUser = await addUser({
+        const newUser = await dbAddUser({
             tenantId: newTenant.id, email: adminEmail, passwordHash, name: adminName, role: 'Admin', isActive: true,
         });
         console.log(`[registerTenantAction] Admin user '${adminName}' added with ID: ${newUser.id}.`);
@@ -287,13 +287,13 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
             return { success: false, error: "Invalid company domain or login URL." };
         }
         let user: User | undefined;
-        let employeeForStatusCheck: import('@/modules/employees/types').Employee | undefined;
+        let employeeForStatusCheck: Employee | undefined;
 
         if (loginIdentifier.includes('@')) {
             console.log(`[loginAction] Attempting to find user by email: ${loginIdentifier} for tenant ${tenant.id}`);
             user = await getUserByEmail(loginIdentifier, tenant.id);
             if (user) {
-                employeeForStatusCheck = await getEmployeeByUserId(user.id, tenant.id);
+                employeeForStatusCheck = await dbGetEmployeeByUserId(user.id, tenant.id);
             }
         } else {
             console.log(`[loginAction] Attempting by Employee ID: ${loginIdentifier} for tenant ${tenant.id}`);
@@ -384,19 +384,70 @@ export async function logoutAction() {
     redirect(redirectUrl);
 }
 
+
+async function _getSessionDataUnsafe(): Promise<SessionData | null> {
+  // This is an internal helper. External callers should use the specific getters.
+  try {
+    const cookieStore = cookies();
+    const sessionCookie = cookieStore.get(MOCK_SESSION_COOKIE);
+    if (sessionCookie?.value) {
+      const sessionData: SessionData = JSON.parse(sessionCookie.value);
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (
+        sessionData &&
+        uuidRegex.test(sessionData.userId) &&
+        uuidRegex.test(sessionData.tenantId) &&
+        sessionData.tenantDomain &&
+        sessionData.userRole
+      ) {
+        return sessionData;
+      }
+      console.warn("[_getSessionDataUnsafe] Invalid session data structure in cookie.");
+    }
+  } catch (error: any) {
+    console.error("[_getSessionDataUnsafe] Error reading/parsing session cookie:", error.name, error.message);
+  }
+  return null;
+}
+
+
 export async function getTenantIdFromSession(): Promise<string | null> {
-    const session = await getSessionData();
-    return session?.tenantId ?? null;
+    console.log("[getTenantIdFromSession] Attempting to get tenantId...");
+    try {
+        const session = await _getSessionDataUnsafe();
+        const tenantId = session?.tenantId ?? null;
+        console.log(`[getTenantIdFromSession] Resolved tenantId: ${tenantId}`);
+        return tenantId;
+    } catch (error: any) {
+        console.error(`[getTenantIdFromSession] Error: ${error.message}`);
+        return null;
+    }
 }
 
 export async function getUserIdFromSession(): Promise<string | null> {
-    const session = await getSessionData();
-    return session?.userId ?? null;
+     console.log("[getUserIdFromSession] Attempting to get userId...");
+    try {
+        const session = await _getSessionDataUnsafe();
+        const userId = session?.userId ?? null;
+        console.log(`[getUserIdFromSession] Resolved userId: ${userId}`);
+        return userId;
+    } catch (error: any) {
+        console.error(`[getUserIdFromSession] Error: ${error.message}`);
+        return null;
+    }
 }
 
 export async function getUserRoleFromSession(): Promise<UserRole | null> {
-    const session = await getSessionData();
-    return session?.userRole ?? null;
+    console.log("[getUserRoleFromSession] Attempting to get userRole...");
+    try {
+        const session = await _getSessionDataUnsafe();
+        const userRole = session?.userRole ?? null;
+        console.log(`[getUserRoleFromSession] Resolved userRole: ${userRole}`);
+        return userRole;
+    } catch (error: any) {
+        console.error(`[getUserRoleFromSession] Error: ${error.message}`);
+        return null;
+    }
 }
 
 export async function isAdminFromSession(): Promise<boolean> {
@@ -405,73 +456,74 @@ export async function isAdminFromSession(): Promise<boolean> {
 }
 
 export async function getUserFromSession(): Promise<Omit<User, 'passwordHash'> | null> {
-    const session = await getSessionData();
-    if (!session?.userId || !session.tenantId) {
-        return null;
-    }
+    console.log("[getUserFromSession] Attempting to get full user from session...");
     try {
+        const session = await _getSessionDataUnsafe();
+        if (!session?.userId || !session.tenantId) {
+            console.log("[getUserFromSession] Incomplete session data (userId or tenantId missing).");
+            return null;
+        }
         const user = await dbGetUserById(session.userId);
         if (user && user.tenantId === session.tenantId) {
             const { passwordHash, ...safeUser } = user;
+            console.log(`[getUserFromSession] User ${safeUser.id} found.`);
             return safeUser;
         }
-    } catch (error) {
-        console.error("[getUserFromSession] Error fetching user:", error);
+        console.log("[getUserFromSession] User not found or tenant mismatch.");
+    } catch (error: any) {
+        console.error(`[getUserFromSession] Error: ${error.message}`);
     }
     return null;
 }
 
 export async function getSessionData(): Promise<SessionData | null> {
+    console.log("[getSessionData action] Attempting to get full session data...");
     try {
-        const cookieStore = cookies();
-        const sessionCookie = cookieStore.get(MOCK_SESSION_COOKIE);
-        if (sessionCookie?.value) {
-            const sessionData: SessionData = JSON.parse(sessionCookie.value);
-            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            if (sessionData &&
-                uuidRegex.test(sessionData.userId) &&
-                uuidRegex.test(sessionData.tenantId) &&
-                sessionData.tenantDomain &&
-                sessionData.userRole) {
-                return sessionData;
-            }
-            console.warn("[getSessionData] Invalid session data structure in cookie.");
+        const session = await _getSessionDataUnsafe();
+        console.log(`[getSessionData action] Resolved session data:`, session);
+        return session;
+    } catch (error: any) {
+        console.error(`[getSessionData action] Error: ${error.message}`);
+        return null;
+    }
+}
+
+export async function getEmployeeProfileForCurrentUser(): Promise<Employee | null> {
+    console.log("[getEmployeeProfileForCurrentUser] Attempting to fetch current user's employee profile...");
+    try {
+        const userId = await getUserIdFromSession();
+        const tenantId = await getTenantIdFromSession();
+
+        if (!userId || !tenantId) {
+            console.log("[getEmployeeProfileForCurrentUser] userId or tenantId missing from session.");
+            return null;
         }
-    } catch (error) {
-        console.error("[getSessionData] Error reading/parsing session cookie:", error);
-    }
-    return null;
-}
-
-async function getTenantById(id: string): Promise<Tenant | undefined> { // Duplicated to avoid circular dependency with auth/lib/db
-    const client = await pool.connect();
-    try {
-        const res = await client.query('SELECT * FROM tenants WHERE id = $1', [id]);
-        return res.rows.length > 0 ? {
-            id: res.rows[0].id,
-            name: res.rows[0].name,
-            domain: res.rows[0].domain,
-            createdAt: new Date(res.rows[0].created_at).toISOString(),
-        } : undefined;
-    } catch (error) {
-        console.error(`[getTenantById - auth/actions] Error fetching tenant ${id}:`, error);
-        throw error;
-    } finally {
-        client.release();
+        const employee = await dbGetEmployeeByUserId(userId, tenantId);
+        if (employee) {
+            console.log(`[getEmployeeProfileForCurrentUser] Employee profile found for user ${userId}.`);
+            return employee;
+        } else {
+            console.log(`[getEmployeeProfileForCurrentUser] No employee profile found for user ${userId}.`);
+            return null;
+        }
+    } catch (error: any) {
+        console.error(`[getEmployeeProfileForCurrentUser] Error: ${error.message}`);
+        return null;
     }
 }
 
-export async function sendEmployeeWelcomeEmail(
+
+async function sendEmployeeWelcomeEmail(
   tenantId: string,
   employeeName: string,
   employeeEmail: string,
-  employeeSystemId: string, // This is the UUID from employee table
-  employeeLoginId: string, // This is the "EMP-00X" ID for login
+  employeeSystemId: string,
+  employeeLoginId: string,
   temporaryPassword?: string
 ): Promise<boolean> {
     console.log(`[sendEmployeeWelcomeEmail] Initiating for ${employeeEmail} (Employee Login ID: ${employeeLoginId}, System ID: ${employeeSystemId})`);
 
-    const tenant = await getTenantById(tenantId); // Use the local getTenantById
+    const tenant = await getTenantById(tenantId);
     if (!tenant) {
         console.error(`[sendEmployeeWelcomeEmail] Tenant not found for ID: ${tenantId}. Cannot send welcome email to ${employeeEmail}.`);
         await sendAdminNotification(
@@ -482,8 +534,7 @@ export async function sendEmployeeWelcomeEmail(
     }
     console.log(`[sendEmployeeWelcomeEmail] Tenant found: ${tenant.name} (Domain: ${tenant.domain})`);
 
-    // Determine which SMTP settings to use
-    let emailSettings = await dbGetEmailSettings(tenantId); // This should use decrypted password
+    let emailSettings = await dbGetEmailSettings(tenantId);
     let transporter;
     let mailerFromName = INTERNAL_FROM_NAME;
     let mailerFromEmail = INTERNAL_FROM_EMAIL;
@@ -497,7 +548,7 @@ export async function sendEmployeeWelcomeEmail(
             port: emailSettings.smtpPort,
             auth: {
                 user: emailSettings.smtpUser,
-                pass: emailSettings.smtpPassword, // This should be the decrypted password
+                pass: emailSettings.smtpPassword,
             },
             connectionTimeout: 15000,
             greetingTimeout: 15000,
@@ -596,18 +647,16 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
         const tenant = await getTenantByDomain(tenantDomain);
         if (!tenant) {
             console.log(`[forgotPasswordLogic] Tenant not found for domain: ${tenantDomain}.`);
-            return { success: true, message: userMessage }; // Don't reveal if tenant exists
+            return { success: true, message: userMessage };
         }
 
         const user = await getUserByEmail(email, tenant.id);
         if (!user || !user.isActive) {
             console.log(`[forgotPasswordLogic] User not found or inactive for email ${email} in tenant ${tenant.id}.`);
-            return { success: true, message: userMessage }; // Don't reveal if user exists
+            return { success: true, message: userMessage };
         }
 
         const resetToken = crypto.randomBytes(32).toString('hex');
-        // TODO: Store resetToken (hashed) and expiry in DB associated with user.id
-
         console.log(`[forgotPasswordLogic] Generated reset token for ${user.email}: ${resetToken} (this is a mock, implement DB storage)`);
 
         const transporter = createInternalTransporter();
@@ -620,8 +669,8 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
             return { success: false, message: 'Server configuration error prevents sending email. Please contact support.' };
         }
 
-        const resetUrlBase = constructLoginUrl(tenantDomain).replace('/login', '/reset-password'); // Ensure it's tenant specific URL
-        const resetUrl = `${resetUrlBase}?token=${resetToken}`; // Add domain to token for verification on reset page
+        const resetUrlBase = constructLoginUrl(tenantDomain).replace('/login', '/reset-password');
+        const resetUrl = `${resetUrlBase}?token=${resetToken}`;
 
         const internalConfig = getInternalSmtpConfig();
 
@@ -644,5 +693,23 @@ async function forgotPasswordLogic(email: string, tenantDomain: string): Promise
             `Password reset for ${email} (Tenant: ${tenantDomain}) failed.\nError: ${error.message}`
         );
         return { success: false, message: 'Error processing password reset. Please try again later or contact support.' };
+    }
+}
+
+async function getTenantById(id: string): Promise<Tenant | undefined> {
+    const client = await pool.connect();
+    try {
+        const res = await client.query('SELECT * FROM tenants WHERE id = $1', [id]);
+        return res.rows.length > 0 ? {
+            id: res.rows[0].id,
+            name: res.rows[0].name,
+            domain: res.rows[0].domain,
+            createdAt: new Date(res.rows[0].created_at).toISOString(),
+        } : undefined;
+    } catch (error) {
+        console.error(`[getTenantById - auth/actions] Error fetching tenant ${id}:`, error);
+        throw error;
+    } finally {
+        client.release();
     }
 }

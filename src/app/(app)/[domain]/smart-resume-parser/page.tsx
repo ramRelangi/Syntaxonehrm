@@ -2,22 +2,25 @@
 // src/app/(app)/[domain]/smart-resume-parser/page.tsx
 "use client";
 
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { parseResume, ParseResumeOutput } from '@/modules/ai/flows/smart-resume-parser'; // Updated import path
+import { parseResume, ParseResumeOutput } from '@/modules/ai/flows/smart-resume-parser';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, UploadCloud, CheckCircle, XCircle, User, Mail, Phone, Linkedin, Settings, Wrench } from 'lucide-react';
+import { Loader2, UploadCloud, CheckCircle, XCircle, User, Mail, Phone, Linkedin, Settings, Wrench, AlertTriangle } from 'lucide-react'; // Added AlertTriangle
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from '@/components/ui/badge';
-import { useParams } from "next/navigation"; // Import useParams
+import { useParams } from "next/navigation";
+// For client-side role check, you might need a hook or context that provides session info.
+// As this is a client component, it can't directly use server actions for session checking on initial render easily.
+// Assuming a simple isAdmin prop or context for now.
+// For a more robust solution, the parent server component would do the check.
 
-// Define the schema for the form
 const formSchema = z.object({
   resumeFile: z
     .instanceof(FileList)
@@ -31,6 +34,10 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
+// Assume isAdmin is passed as a prop or from context
+// For this example, we'll mock it. Replace with actual logic.
+const MOCK_IS_ADMIN = true; // Replace this with actual role check
+
 export default function TenantSmartResumeParserPage() {
   const params = useParams();
   const tenantDomain = params.domain as string;
@@ -39,6 +46,19 @@ export default function TenantSmartResumeParserPage() {
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const { toast } = useToast();
+
+  // Client-side check for admin (replace with actual role from session/context)
+  const [isAdmin, setIsAdmin] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    // Simulate fetching admin status (replace with actual session check)
+    // This should ideally be done by the parent Server Component and passed as a prop
+    const checkAdminStatus = async () => {
+        // Example: fetch('/api/auth/session').then(res => res.json()).then(data => setIsAdmin(data.userRole === 'Admin'));
+        setIsAdmin(MOCK_IS_ADMIN); // Using mock for now
+    };
+    checkAdminStatus();
+  }, []);
+
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -56,25 +76,22 @@ export default function TenantSmartResumeParserPage() {
   const onSubmit = async (data: FormValues) => {
     setIsLoading(true);
     setError(null);
-    setParsedData(null); // Clear previous results
-    setFileName(data.resumeFile[0].name); // Store filename for display
+    setParsedData(null);
+    setFileName(data.resumeFile[0].name);
 
     try {
       const file = data.resumeFile[0];
       const resumeDataUri = await fileToBase64(file);
 
-      // Validate if resumeDataUri is correctly formatted
       if (!resumeDataUri.startsWith('data:') || !resumeDataUri.includes(';base64,')) {
          throw new Error("File could not be read correctly. Please try again.");
       }
-
-      // API route handles tenant context via header
       const result = await parseResume({ resumeDataUri });
       setParsedData(result);
       toast({
         title: "Resume Parsed Successfully",
         description: `Extracted information from ${file.name}.`,
-         className: "bg-green-100 text-green-800 border-green-300 dark:bg-green-900 dark:text-green-100 dark:border-green-700", // Success Green
+         className: "bg-green-100 text-green-800 border-green-300 dark:bg-green-900 dark:text-green-100 dark:border-green-700",
       });
     } catch (err: any) {
       console.error("Parsing error:", err);
@@ -94,16 +111,37 @@ export default function TenantSmartResumeParserPage() {
     const files = event.target.files;
     if (files && files.length > 0) {
       setFileName(files[0].name);
-      form.setValue('resumeFile', files); // Update react-hook-form state
-      form.trigger('resumeFile'); // Trigger validation
-      setParsedData(null); // Clear results on new file select
+      form.setValue('resumeFile', files);
+      form.trigger('resumeFile');
+      setParsedData(null);
       setError(null);
     } else {
       setFileName(null);
-      // Clear the field value if no file is selected or selection is cancelled
       form.resetField('resumeFile');
     }
   };
+
+  if (isAdmin === null) { // Still checking admin status
+      return (
+          <div className="flex items-center justify-center p-10">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+      );
+  }
+
+  if (!isAdmin) {
+    return (
+        <div className="flex flex-col items-center justify-center min-h-[400px]">
+           <Alert variant="destructive" className="max-w-md">
+              <AlertTriangle className="h-5 w-5" />
+              <AlertTitle>Unauthorized Access</AlertTitle>
+              <AlertDescription>
+                  You do not have permission to use the Smart Resume Parser.
+              </AlertDescription>
+          </Alert>
+        </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -122,9 +160,9 @@ export default function TenantSmartResumeParserPage() {
                   id="resumeFile"
                   type="file"
                   accept=".pdf,.docx,.txt"
-                  className="hidden" // Hide default input
-                  {...form.register('resumeFile')} // Register directly
-                  onChange={handleFileChange} // Use custom handler
+                  className="hidden"
+                  {...form.register('resumeFile')}
+                  onChange={handleFileChange}
                   />
                  <Label
                     htmlFor="resumeFile"
@@ -170,7 +208,7 @@ export default function TenantSmartResumeParserPage() {
         <Card className="shadow-sm">
           <CardHeader>
              <CardTitle className="flex items-center gap-2">
-                 <CheckCircle className="h-5 w-5 text-green-600" /> {/* Use Green Accent */}
+                 <CheckCircle className="h-5 w-5 text-green-600" />
                  Parsed Information
              </CardTitle>
             <CardDescription>Review the extracted details from {fileName}.</CardDescription>
@@ -212,10 +250,8 @@ export default function TenantSmartResumeParserPage() {
                 <p className="text-muted-foreground italic">No experience found.</p>
               )}
             </div>
-             {/* Add button to pre-fill application form */}
              <div className="pt-4 border-t">
                  <Button disabled>
-                    {/* <FilePlus className="mr-2 h-4 w-4" /> */} {/* Needs FilePlus icon or similar */}
                     Pre-fill Application (Coming Soon)
                  </Button>
              </div>
