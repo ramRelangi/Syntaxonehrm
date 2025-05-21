@@ -29,6 +29,8 @@ interface EmployeeFormProps {
 
 type EmployeeFormShape = EmployeeFormData;
 
+const NO_MANAGER_VALUE = "__NO_MANAGER__"; // Special value for the "None" option
+
 export function EmployeeForm({
   employee,
   submitButtonText,
@@ -71,7 +73,7 @@ export function EmployeeForm({
       hireDate: getFormattedDate(employee?.hireDate),
       status: employee?.status ?? "Active",
       dateOfBirth: getFormattedDate(employee?.dateOfBirth),
-      reportingManagerId: employee?.reportingManagerId ?? "",
+      reportingManagerId: employee?.reportingManagerId ?? "", // Empty string if no manager
       workLocation: employee?.workLocation ?? "",
       employmentType: employee?.employmentType ?? "Full-time",
     },
@@ -81,13 +83,11 @@ export function EmployeeForm({
     const fetchManagers = async () => {
       setIsLoadingManagers(true);
       try {
-        // API route handles tenant context via header
         const response = await fetch('/api/employees');
         if (!response.ok) {
           throw new Error('Failed to fetch potential managers');
         }
         const data: Employee[] = await response.json();
-        // Filter out the current employee if editing, and only include active employees
         setPotentialManagers(
           data.filter(e => e.status === 'Active' && (isEditMode ? e.id !== employee?.id : true))
         );
@@ -114,7 +114,8 @@ export function EmployeeForm({
       ...data,
       phone: data.phone || undefined,
       dateOfBirth: data.dateOfBirth || null,
-      reportingManagerId: data.reportingManagerId || null,
+      // Ensure reportingManagerId is null if the special "None" value was selected or it's empty
+      reportingManagerId: data.reportingManagerId === NO_MANAGER_VALUE || data.reportingManagerId === "" ? null : data.reportingManagerId,
       workLocation: data.workLocation || undefined,
     };
 
@@ -314,14 +315,18 @@ export function EmployeeForm({
                 render={({ field }) => (
                     <FormItem className="pt-2">
                     <FormLabel>Reporting Manager</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value || ""} disabled={isLoadingManagers}>
+                    <Select
+                        onValueChange={(value) => field.onChange(value === NO_MANAGER_VALUE ? "" : value)}
+                        value={field.value || NO_MANAGER_VALUE}
+                        disabled={isLoadingManagers}
+                    >
                         <FormControl>
                         <SelectTrigger>
                             <SelectValue placeholder={isLoadingManagers ? "Loading managers..." : "Select reporting manager"} />
                         </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                        <SelectItem value="">-- None --</SelectItem>
+                        <SelectItem value={NO_MANAGER_VALUE}>-- None --</SelectItem>
                         {potentialManagers.map((manager) => (
                             <SelectItem key={manager.id} value={manager.id}>
                             {manager.name} ({manager.employeeId || manager.email})
@@ -450,5 +455,3 @@ export function EmployeeForm({
     </Form>
   );
 }
-
-    
