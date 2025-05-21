@@ -1,16 +1,17 @@
+
 // src/app/(app)/[domain]/employees/[id]/edit/page.tsx
 "use client";
 
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmployeeForm } from '@/modules/employees/components/employee-form';
-import { notFound, useParams } from 'next/navigation';
-import { Pencil, Loader2, AlertTriangle } from "lucide-react"; // Added AlertTriangle
+import { useParams, notFound } from 'next/navigation'; // Import notFound
+import { Pencil, Loader2, AlertTriangle } from "lucide-react";
 import type { Employee } from '@/modules/employees/types';
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { UserRole } from '@/modules/auth/types';
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Added Alert components
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 interface EditEmployeePageProps {
   // Params are now accessed via useParams() hook directly
@@ -22,12 +23,15 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     console.log(`[Edit Employee Page - fetchData] Fetching data from: ${fullUrl}`);
 
     try {
-        // API route handles tenant context via header
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
         console.log(`[Edit Employee Page - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
 
-        if (response.status === 404) return undefined as T; // Handle not found specifically
+        if (response.status === 404) {
+            console.log(`[Edit Employee Page - fetchData] 404 for ${fullUrl}.`);
+            return undefined as T; // Handle not found specifically
+        }
          if (response.status === 400 && (await response.text()).includes('Tenant context')) {
+             console.error(`[Edit Employee Page - fetchData] Tenant context error for ${fullUrl}.`);
              throw new Error('Tenant information is missing. Unable to load data.');
          }
          if (response.status === 403) { // Handle unauthorized specifically
@@ -38,7 +42,6 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
                 if (errorText) errorData = JSON.parse(errorText);
             } catch (e) {
                 console.warn(`[Edit Employee Page - fetchData] Failed to parse 403 error response as JSON for ${fullUrl}. Raw text: ${errorText}`);
-                // Use the raw text if JSON parsing fails but an errorText exists
                 errorData.message = errorText || 'Unauthorized to view this employee profile.';
             }
             throw new Error(errorData.message || errorData.error || 'Unauthorized to view this employee profile.');
@@ -66,7 +69,7 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     } catch (error) {
         console.error(`[Edit Employee Page - fetchData] Error in fetchData for ${fullUrl}:`, error);
         if (error instanceof Error) {
-           throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
+           throw error; // Re-throw the original error to be caught by the caller
         } else {
            throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
         }
@@ -75,62 +78,65 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
 
 
 export default function TenantEditEmployeePage() {
-  const paramsFromHook = useParams(); // Use useParams() directly
+  const paramsFromHook = useParams();
   const tenantDomain = paramsFromHook?.domain as string;
-  const employeeId = paramsFromHook?.id as string;
+  const employeeId = paramsFromHook?.id as string; // This is the employee.id (PK) from URL
 
   const { toast } = useToast();
 
   const [employee, setEmployee] = React.useState<Employee | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [currentUserRole, setCurrentUserRole] = React.useState<UserRole | null>(null); // State for user role
+  const [currentUserRole, setCurrentUserRole] = React.useState<UserRole | null>(null);
 
   React.useEffect(() => {
-    // Simulate fetching current user's role
-    // In a real app, this would come from a session context or a dedicated API call
     const fetchUserRole = async () => {
+        console.log("[Edit Employee Page] Fetching user role...");
         try {
-            // Placeholder: Replace with actual session/role fetching logic
-            // Example: const sessionDetails = await fetch('/api/auth/session-details').then(res => res.json());
-            // setCurrentUserRole(sessionDetails.role);
-
-            // Mocking for now
-             // Fetch actual session data (e.g., from a context or a simple API endpoint)
-             const sessionResponse = await fetch('/api/auth/session'); // Example endpoint
-             if (sessionResponse.ok) {
-                 const session = await sessionResponse.json();
-                 setCurrentUserRole(session.userRole);
-             } else {
-                 console.error("Failed to fetch session details for role check.");
-                 setCurrentUserRole('Employee'); // Fallback or handle error
-             }
-        } catch (err) {
-            console.error("Failed to fetch user role:", err);
-            setCurrentUserRole('Employee'); // Fallback to least privileged
+            const sessionResponse = await fetch('/api/auth/session');
+            if (sessionResponse.ok) {
+                const session = await sessionResponse.json();
+                console.log("[Edit Employee Page] Session details fetched:", session);
+                setCurrentUserRole(session.userRole);
+            } else {
+                const errorData = await sessionResponse.json().catch(() => ({}));
+                console.error("[Edit Employee Page] Failed to fetch session details for role check. Status:", sessionResponse.status, "Error:", errorData.error || errorData.message);
+                setError(errorData.error || errorData.message || "Could not verify user session for role check.");
+                setCurrentUserRole(null); // Fallback or handle error
+            }
+        } catch (err: any) {
+            console.error("[Edit Employee Page] Error in fetchUserRole:", err);
+            setError("Error fetching session details: " + err.message);
+            setCurrentUserRole(null); // Fallback to least privileged
         }
     };
-    fetchUserRole();
-  }, []);
+    if (tenantDomain) { // Only fetch if domain is present
+        fetchUserRole();
+    }
+  }, [tenantDomain]);
 
   React.useEffect(() => {
     if (!employeeId || !tenantDomain) return;
 
     const fetchEmployee = async () => {
+      console.log(`[Edit Employee Page] Attempting to fetch employee with ID (PK): ${employeeId}`);
       setIsLoading(true);
       setError(null);
       try {
+        // The API route uses employeeId (PK) for fetching
         const data = await fetchData<Employee | undefined>(`/api/employees/${employeeId}`);
         if (!data) {
-          setError("Employee profile not found."); // Set specific error for notFound
-          // notFound(); // This would render Next.js default 404, error state allows custom UI
+          console.log(`[Edit Employee Page] Employee profile not found for ID (PK): ${employeeId}. Triggering notFound().`);
+          notFound(); // Use Next.js notFound for actual 404 page
           return;
         }
         setEmployee(data);
+        console.log(`[Edit Employee Page] Employee data fetched successfully for ID (PK): ${employeeId}`);
       } catch (err: any) {
+        console.error(`[Edit Employee Page] Error loading employee profile for ID (PK) ${employeeId}:`, err);
         setError(err.message || "Failed to load employee data.");
-        // Toast is now conditional based on error type
-        if (!err.message?.toLowerCase().includes('unauthorized')) {
+        // Toast is now conditional based on error type, and only if not a 404 handled by notFound()
+        if (!err.message?.toLowerCase().includes('unauthorized') && !err.message?.toLowerCase().includes('not found')) {
           toast({
             title: "Error Loading Profile",
             description: err.message || "Could not fetch employee details.",
@@ -145,7 +151,7 @@ export default function TenantEditEmployeePage() {
     fetchEmployee();
   }, [employeeId, tenantDomain, toast]);
 
-  if (!tenantDomain || !employeeId) {
+  if (!tenantDomain || !employeeId) { // Should be caught by middleware/layout, but defensive check
        return <div>Loading context...</div>;
    }
 
@@ -154,7 +160,7 @@ export default function TenantEditEmployeePage() {
         <div className="flex flex-col gap-6">
           <div className="flex items-center justify-between">
               <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
-                 <Pencil className="h-6 w-6" /> Loading...
+                 <Pencil className="h-6 w-6" /> Loading Employee Details...
               </h1>
            </div>
            <Card className="shadow-sm">
@@ -191,9 +197,20 @@ export default function TenantEditEmployeePage() {
             </div>
         );
     }
-    return <p className="text-center text-destructive py-10">{error}</p>;
+    // If notFound() was called, Next.js handles rendering the 404 page.
+    // This section is for other errors.
+    return (
+        <div className="flex flex-col items-center justify-center min-h-[400px]">
+            <Alert variant="destructive" className="max-w-md">
+                <AlertTriangle className="h-5 w-5" />
+                <AlertTitle>Error Loading Profile</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+            </Alert>
+        </div>
+    );
   }
 
+  // This check is technically redundant if notFound() is called, but good for safety
   if (!employee) {
        return (
          <div className="flex flex-col items-center justify-center min-h-[400px]">
@@ -227,7 +244,7 @@ export default function TenantEditEmployeePage() {
              formDescription="Update the employee's information."
              submitButtonText="Save Changes"
              tenantDomain={tenantDomain}
-             currentUserRole={currentUserRole} // Pass the role
+             currentUserRole={currentUserRole}
            />
         </CardContent>
       </Card>
