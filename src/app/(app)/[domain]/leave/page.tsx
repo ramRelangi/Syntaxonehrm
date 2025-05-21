@@ -24,13 +24,12 @@ interface TenantLeavePageProps {
 }
 
 export default async function TenantLeavePage({ params }: TenantLeavePageProps) {
-  const session = await getSessionData();
-  const isAdmin = await isAdminFromSession(); // Check admin status server-side
+  const session = await getSessionData(); // Fetch session data server-side
 
-  if (!session?.userId) {
+  if (!session?.userId || !session.tenantId || !session.tenantDomain) {
     // Redirect to login if no user ID in session
     const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
-    const protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http';
+    const protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http:';
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `http://localhost:9002`;
     let port = '';
     try {
@@ -39,14 +38,19 @@ export default async function TenantLeavePage({ params }: TenantLeavePageProps) 
         port = `:${url.port}`;
       }
     } catch {}
-    const loginUrl = `${protocol}://${params.domain}.${rootDomain}${port}/login`;
-    console.warn(`[Leave Page Server] No user session found. Redirecting to ${loginUrl}`);
+    const loginUrl = `${protocol}//${params.domain}.${rootDomain}${port}/login`;
+    console.warn(`[Leave Page Server] No user session found or incomplete session. Redirecting to ${loginUrl}`);
     redirect(loginUrl);
   }
 
-  // Render the dynamically imported client component
-  // It will handle fetching its data client-side
+  const isAdmin = session.userRole === 'Admin';
+
+  // Render the dynamically imported client component, passing session data as props
   return (
-    <LeavePageClient />
+    <LeavePageClient
+      userId={session.userId}
+      isAdmin={isAdmin}
+      tenantDomain={session.tenantDomain}
+    />
   );
 }

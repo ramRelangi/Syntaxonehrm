@@ -1,4 +1,3 @@
-
 // src/modules/leave/components/leave-page-client.tsx
 "use client";
 
@@ -15,77 +14,36 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { LeaveType, LeaveRequest, LeaveBalance, Holiday } from "@/modules/leave/types"; // Added Holiday type
 import { getHolidaysAction, getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances } from '@/modules/leave/actions'; // Import all relevant actions
-import { getSessionData } from '@/modules/auth/actions'; // Import session helper
+// getSessionData is no longer directly called here
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Import Alert
 import { cn } from '@/lib/utils'; // Import cn utility
 
-// Helper to fetch data from API routes - CLIENT SIDE VERSION (Simplified - actions used directly now)
-async function fetchDataViaApi<T>(url: string, options?: RequestInit): Promise<T> {
-    const fullUrl = url.startsWith('/') ? url : `/${url}`;
-    console.log(`[Leave Page Client - fetchDataViaApi] Fetching from: ${fullUrl}`);
-    try {
-        const response = await fetch(fullUrl, { cache: 'no-store', ...options });
-        if (!response.ok) {
-            const errorText = await response.text();
-            let errorPayload: { message?: string; error?: string } = {};
-            try { errorPayload = JSON.parse(errorText || '{}'); } catch {}
-            throw new Error(errorPayload.error || errorPayload.message || `HTTP error! status: ${response.status}`);
-        }
-        return await response.json() as T;
-    } catch (error) {
-        if (error instanceof Error) { throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`); }
-        else { throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`); }
-    }
+
+interface LeavePageClientProps {
+  userId: string | null;
+  isAdmin: boolean;
+  tenantDomain: string | null;
 }
 
-export default function LeavePageClient() {
+export default function LeavePageClient({ userId, isAdmin, tenantDomain }: LeavePageClientProps) {
   const { toast } = useToast();
-  const [userId, setUserId] = React.useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = React.useState<boolean>(false);
-  const [tenantDomain, setTenantDomain] = React.useState<string | null>(null);
+  // userId, isAdmin, tenantDomain are now props
   const [leaveTypes, setLeaveTypes] = React.useState<LeaveType[]>([]);
   const [allRequests, setAllRequests] = React.useState<LeaveRequest[]>([]);
   const [myRequests, setMyRequests] = React.useState<LeaveRequest[]>([]);
   const [myBalances, setMyBalances] = React.useState<LeaveBalance[]>([]);
   const [holidays, setHolidays] = React.useState<Holiday[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [authError, setAuthError] = React.useState<string | null>(null);
   const [fetchError, setFetchError] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState('request');
-
-  // Fetch auth context (user ID, admin status, domain) on mount
-  React.useEffect(() => {
-    const fetchAuthContext = async () => {
-        setIsLoading(true); // Start loading
-        setAuthError(null);
-        try {
-            const session = await getSessionData();
-            if (!session || !session.userId || !session.tenantId || !session.tenantDomain) {
-                throw new Error("Could not verify user identity or tenant context.");
-            }
-            setUserId(session.userId);
-            setIsAdmin(session.userRole === 'Admin');
-            setTenantDomain(session.tenantDomain);
-            console.log("[Leave Page Client] Auth Context Loaded:", { userId: session.userId, isAdmin: session.userRole === 'Admin', tenantDomain: session.tenantDomain });
-        } catch (err: any) {
-            console.error("[Leave Page Client] Error fetching auth context:", err);
-            setAuthError(err.message || "Failed to load user session.");
-             toast({
-                title: "Authentication Error",
-                description: err.message || "Failed to load user session.",
-                variant: "destructive",
-            });
-        }
-    };
-    fetchAuthContext();
-  }, [toast]);
 
 
   // Function to refetch all necessary data AFTER auth context is loaded using server actions
   const refetchData = React.useCallback(async () => {
       if (!userId || !tenantDomain) {
-          console.log("[Leave Page Client] Skipping refetchData, userId or tenantDomain not available yet.");
-          setIsLoading(false); // Ensure loading stops if auth failed or isn't ready
+          console.log("[Leave Page Client] Skipping refetchData, userId or tenantDomain not available from props.");
+          setIsLoading(false); // Ensure loading stops if props aren't ready
+          setFetchError("User or tenant information is missing.");
           return;
       }
       console.log("[Leave Page Client] Refetching leave and holiday data for user:", userId);
@@ -119,10 +77,17 @@ export default function LeavePageClient() {
       }
   }, [toast, userId, isAdmin, tenantDomain]); // Keep dependencies
 
-  // Fetch data when userId and tenantDomain become available
+  // Fetch data when userId and tenantDomain become available via props
   React.useEffect(() => {
     if (userId && tenantDomain) {
         refetchData();
+    } else {
+        // If critical props are missing after initial render, show error or stop loading
+        setIsLoading(false);
+        if (!userId || !tenantDomain) {
+             setFetchError("User or tenant context could not be established.");
+             console.error("[Leave Page Client] Critical props (userId, tenantDomain) missing.");
+        }
     }
   }, [userId, tenantDomain, refetchData]); // Depend on userId and tenantDomain
 
@@ -144,16 +109,17 @@ export default function LeavePageClient() {
    }, [leaveTypes]);
 
    // Conditional rendering based on loading and error states
-    if (authError) {
-        return (
-            <div className="flex flex-col gap-6 items-center justify-center min-h-[400px]">
-                 <Alert variant="destructive" className="max-w-md">
-                    <AlertTitle>Authentication Error</AlertTitle>
-                    <AlertDescription>{authError}</AlertDescription>
-                </Alert>
-            </div>
-        );
+    if (!userId || !tenantDomain) { // Handle missing critical props early
+      return (
+          <div className="flex flex-col gap-6 items-center justify-center min-h-[400px]">
+               <Alert variant="destructive" className="max-w-md">
+                  <AlertTitle>Initialization Error</AlertTitle>
+                  <AlertDescription>{fetchError || "Could not load user or tenant context."}</AlertDescription>
+              </Alert>
+          </div>
+      );
     }
+
 
   return (
     <div className="flex flex-col gap-6 md:gap-8"> {/* Increased gap */}
