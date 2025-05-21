@@ -13,7 +13,7 @@ import type { UserRole } from '@/modules/auth/types';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Added Alert components
 
 interface EditEmployeePageProps {
-  // Params are now accessed via React.use(params)
+  // Params are now accessed via useParams() hook directly
 }
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION (API handles tenant context)
@@ -75,9 +75,9 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
 
 
 export default function TenantEditEmployeePage() {
-  const params = React.use(useParams()); // Use React.use to get params
-  const tenantDomain = params?.domain as string;
-  const employeeId = params?.id as string;
+  const paramsFromHook = useParams(); // Use useParams() directly
+  const tenantDomain = paramsFromHook?.domain as string;
+  const employeeId = paramsFromHook?.id as string;
 
   const { toast } = useToast();
 
