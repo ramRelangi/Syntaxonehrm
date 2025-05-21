@@ -1,105 +1,153 @@
+
 import { NextRequest, NextResponse } from 'next/server';
-import { getEmployees as getEmployeesAction, addEmployee } from '@/modules/employees/actions';
-import { employeeSchema, EmployeeFormData } from '@/modules/employees/types';
-// No need to import getTenantIdFromAuth here, the action handles it.
+import {
+  getAllEmployees as dbGetAllEmployees,
+  addEmployee as dbAddEmployeeInternal, // Renamed to avoid conflict
+  getEmployeeByUserId as dbGetEmployeeByUserId,
+} from '@/modules/employees/lib/db';
+import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types';
+import { _parseSessionCookie, sendEmployeeWelcomeEmail } from '@/modules/auth/actions'; // Import direct cookie parser and email sender
+import { addUser as dbAddUser } from '@/modules/auth/lib/db'; // DB function to add user
+import { generateTemporaryPassword } from '@/modules/auth/lib/utils';
+import bcrypt from 'bcrypt';
+import type { SessionData, User } from '@/modules/auth/types';
+
+const SALT_ROUNDS = 10;
+
+async function getSession(request: NextRequest): Promise<SessionData | null> {
+  return _parseSessionCookie();
+}
 
 export async function GET(request: NextRequest) {
+  console.log(`[API GET /employees] Fetching employees...`);
   try {
-    console.log(`GET /api/employees - Fetching employees...`); // Simplified log
+    const session = await getSession(request);
+    if (!session?.tenantId || !session.userRole || !session.userId) {
+      console.error(`[API GET /employees] Unauthorized: Missing session data.`);
+      return NextResponse.json({ error: "Unauthorized or missing session context." }, { status: 401 });
+    }
+    const { tenantId, userRole, userId } = session;
 
-    // Call the server action which handles its own tenant resolution and data fetching
-    const employees = await getEmployeesAction();
+    let employees;
+    if (userRole === 'Employee') {
+      console.log(`[API GET /employees] Employee role, fetching own profile for user ${userId}.`);
+      const employeeProfile = await dbGetEmployeeByUserId(userId.toLowerCase(), tenantId.toLowerCase());
+      employees = employeeProfile ? [employeeProfile] : [];
+    } else {
+      console.log(`[API GET /employees] Admin/Manager role, fetching all employees for tenant ${tenantId}.`);
+      employees = await dbGetAllEmployees(tenantId.toLowerCase());
+    }
+    console.log(`[API GET /employees] Fetched ${employees.length} employees.`);
     return NextResponse.json(employees);
 
-  } catch (error: any) { // Catch errors from the action or tenant resolution
-    console.error(`Error fetching employees (API):`, error);
-
-    let message = 'Failed to fetch employees due to an internal server error.';
+  } catch (error: any) {
+    console.error(`[API GET /employees] Error:`, error.message, error.stack ? error.stack : '(No stack trace)');
+    let message = 'Failed to fetch employees.';
     let status = 500;
-
-    // Handle specific errors (like auth errors from action or DB connection issues)
-    // Check the error message from the action
-    if (error.message?.includes('Tenant context not found') || error.message?.includes('Unauthorized') || error.message?.includes('Tenant ID is required')) {
-        message = 'Unauthorized or tenant context missing.';
-        status = 401;
-    } else if (error.message?.includes('invalid input syntax for type uuid')) {
-        message = 'Internal server error: Invalid tenant identifier.';
-        status = 500;
-        console.error("UUID Syntax Error - Check how tenantId is being passed to DB query.");
+    if (error.message?.toLowerCase().includes('unauthorized') || error.message?.toLowerCase().includes('session')) {
+      status = 401;
+      message = error.message;
+    } else if (error.message?.toLowerCase().includes('invalid identifier format')) {
+      status = 400;
+      message = error.message;
     }
-    // Add DB connection error checks if needed (though action/db layer might handle)
-    else if (error.code) {
-        switch (error.code) {
-            case 'ECONNREFUSED': message = `Database connection refused.`; status = 503; break;
-            case 'ENOTFOUND': message = `Database host not found.`; status = 503; break;
-            case 'ETIMEDOUT': message = 'Database connection timed out.'; status = 504; break;
-            default: message = error.message || message; break;
-        }
-    } else {
-         message = error.message || message;
-    }
-
-    return NextResponse.json({ error: message }, { status: status });
+    return NextResponse.json({ error: message, details: error.message }, { status });
   }
 }
 
 export async function POST(request: NextRequest) {
+  console.log(`[API POST /employees] Adding employee...`);
   try {
-    console.log(`POST /api/employees - Adding employee...`); // Simplified log
+    const session = await getSession(request);
+    if (!session?.tenantId || !session.userRole || !session.tenantDomain) {
+      console.error(`[API POST /employees] Unauthorized: Missing session data for add.`);
+      return NextResponse.json({ error: "Unauthorized or missing session context for add operation." }, { status: 401 });
+    }
+    const { tenantId, userRole, tenantDomain } = session;
+
+    if (userRole !== 'Admin' && userRole !== 'Manager') {
+      console.warn(`[API POST /employees] Unauthorized attempt by role ${userRole}.`);
+      return NextResponse.json({ error: 'Unauthorized to add employees.' }, { status: 403 });
+    }
 
     const body = await request.json();
-
-    // Pass the raw form data (without tenantId) to the action.
-    const formData = body as Omit<EmployeeFormData, 'tenantId'>;
-
-    // Call the server action to add the employee (action handles tenantId and validation)
-    const result = await addEmployee(formData);
-
-    if (result.success && result.employee) {
-      return NextResponse.json(result.employee, { status: 201 });
-    } else {
-       console.error(`POST /api/employees Action Error:`, result.errors);
-       let errorMessage = result.errors?.[0]?.message || 'Failed to add employee';
-       let statusCode = 400; // Default bad request for validation errors
-
-       // Check for specific errors from the action
-       if (errorMessage.includes('Email address already exists')) {
-            statusCode = 409; // Conflict
-       } else if (errorMessage.includes('Tenant context not found') || errorMessage.includes('Unauthorized')) {
-           statusCode = 401; // Unauthorized / Bad Context
-           errorMessage = 'Unauthorized or missing tenant context.';
-       } else if (result.errors?.some((e: any) => ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(e.code || ''))) {
-            const dbError = result.errors.find((e: any) => ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(e.code || ''));
-            if (dbError) {
-                if (dbError.code === 'ECONNREFUSED') errorMessage = `Database connection refused.`;
-                else if (dbError.code === 'ENOTFOUND') errorMessage = `Database host not found.`;
-                else if (dbError.code === 'ETIMEDOUT') errorMessage = `Database connection timed out.`;
-                statusCode = 503; // Service Unavailable
-            }
-       } else if (!result.errors) {
-           statusCode = 500; // Internal server error if no specific errors array
-           errorMessage = 'An unexpected error occurred while adding the employee.';
-       }
-
-      return NextResponse.json({ error: errorMessage, details: result.errors }, { status: statusCode });
+    // Validate form data (excluding server-set fields like tenantId, userId, employeeId)
+    const validation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true }).safeParse(body);
+    if (!validation.success) {
+      console.error(`[API POST /employees] Validation Error:`, validation.error.flatten());
+      return NextResponse.json({ error: 'Invalid input', details: validation.error.flatten().fieldErrors }, { status: 400 });
     }
+
+    const { name, email, ...employeeDetails } = validation.data;
+
+    // Create user account
+    const temporaryPassword = generateTemporaryPassword(12);
+    const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
+    let newUser: User;
+    try {
+      newUser = await dbAddUser({
+        tenantId: tenantId,
+        email: email.toLowerCase(), // Ensure email is stored consistently
+        passwordHash,
+        name,
+        role: 'Employee',
+        isActive: true,
+      });
+      console.log(`[API POST /employees] User account created with ID: ${newUser.id}`);
+    } catch (userError: any) {
+      console.error("[API POST /employees] Error creating user:", userError);
+      if (userError.message?.includes('User email already exists')) {
+        return NextResponse.json({ error: userError.message, details: [{ path: ['email'], message: userError.message }] }, { status: 409 });
+      }
+      return NextResponse.json({ error: 'Failed to create user account for employee.', details: [{ path: ['email'], message: userError.message }] }, { status: 500 });
+    }
+
+    // Add employee record
+    const newEmployee = await dbAddEmployeeInternal({
+      ...employeeDetails,
+      tenantId: tenantId,
+      userId: newUser.id,
+      name,
+      email: email.toLowerCase(), // Ensure consistent email
+    });
+    console.log(`[API POST /employees] Employee record added: ${newEmployee.id}, EmployeeID: ${newEmployee.employeeId}`);
+
+    // Send welcome email
+    sendEmployeeWelcomeEmail(
+      tenantId,
+      newEmployee.name,
+      newEmployee.email,
+      newEmployee.id, // employee.id (PK)
+      newEmployee.employeeId!, // Official employee_id (EMP-XXX)
+      temporaryPassword,
+      tenantDomain
+    ).catch(emailError => console.error(`[API POST /employees] Non-blocking error sending welcome email:`, emailError));
+
+    return NextResponse.json(newEmployee, { status: 201 });
+
   } catch (error: any) {
-    console.error(`Error adding employee (API):`, error);
-    let message = 'Internal server error';
+    console.error(`[API POST /employees] Error:`, error.message, error.stack ? error.stack : '(No stack trace)');
+    let message = 'Failed to add employee.';
     let status = 500;
-    if (error instanceof SyntaxError) {
-       message = 'Invalid JSON payload';
-       status = 400;
-    } else if (error.message?.includes('Tenant context not found') || error.message?.includes('Unauthorized')) {
-        message = 'Unauthorized or tenant context missing.';
-        status = 401;
-    }
-     // Catching potential DB connection errors directly in POST (less likely now handled by action)
-     else if (error.code === 'ECONNREFUSED') { message = `Database connection refused.`; status = 503; }
-     else if (error.code === 'ENOTFOUND') { message = `Database host not found.`; status = 503; }
-     else if (error.code === 'ETIMEDOUT') { message = 'Database connection timed out.'; status = 504; }
-     else { message = error.message || message; }
+    let details: any = [{ path: ['root'], message }];
 
-    return NextResponse.json({ error: message }, { status: status });
+     if (error instanceof SyntaxError && error.message.includes('JSON')) {
+        status = 400;
+        message = 'Invalid JSON payload.';
+        details = [{ path: ['root'], message }];
+    } else if (error.message?.toLowerCase().includes('unauthorized')) {
+        status = 403;
+        message = error.message;
+        details = [{ path: ['root'], message }];
+    } else if (error.message?.includes('Email address already exists')) {
+        status = 409; // Conflict
+        message = error.message;
+        details = [{ path: ['email'], message }];
+    } else if (error.message?.toLowerCase().includes('invalid identifier format')) {
+        status = 400;
+        message = error.message;
+        details = [{ path: ['root'], message }];
+    }
+    return NextResponse.json({ error: message, details }, { status });
   }
 }
