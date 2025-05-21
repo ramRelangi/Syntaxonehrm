@@ -13,36 +13,48 @@ import { format, parseISO, isValid } from 'date-fns';
 import type { Employee, EmploymentType } from '@/modules/employees/types';
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Import Alert components
+import { AlertTriangle } from 'lucide-react'; // For error icon
 
 interface EmployeeDetailPageProps {
   // Params are accessed via hook
 }
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION (API handles tenant context)
-async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
+async function fetchData<T>(url: string, options?: RequestInit): Promise<T | undefined> {
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
-    console.log(`[Employee Detail Page - fetchData] Fetching data from: ${fullUrl}`);
+    console.log(`[Employee Detail Page - fetchData] Attempting to fetch from: ${fullUrl}`);
 
     try {
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
-        console.log(`[Employee Detail Page - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
+        console.log(`[Employee Detail Page - fetchData] Response status for ${fullUrl}: ${response.status}`);
 
-        if (response.status === 404) return undefined as T;
-         if (response.status === 400 && (await response.text()).includes('Tenant context')) {
-              throw new Error('Tenant information is missing. Unable to load data.');
-         }
-
+        if (response.status === 404) {
+            console.log(`[Employee Detail Page - fetchData] Resource not found (404) for ${fullUrl}.`);
+            return undefined;
+        }
         if (!response.ok) {
             const errorText = await response.text();
             console.error(`[Employee Detail Page - fetchData] Fetch error response body for ${fullUrl}:`, errorText);
-            const errorData = JSON.parse(errorText || '{}');
-            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+            let errorData: { message?: string; error?: string; details?: any } = {};
+            try {
+                if (errorText) errorData = JSON.parse(errorText);
+            } catch (e) {
+                 console.warn(`[Employee Detail Page - fetchData] Failed to parse error response as JSON for ${fullUrl}. Raw text: ${errorText}`);
+                 errorData.message = errorText || `HTTP error! status: ${response.status}`;
+            }
+            throw new Error(errorData.error || errorData.message || `HTTP error! status: ${response.status}`);
         }
-        return await response.json() as T;
+        const responseText = await response.text();
+        if (!responseText) {
+            console.log(`[Employee Detail Page - fetchData] Received empty response body for ${fullUrl}, returning undefined.`);
+            return undefined;
+        }
+        return JSON.parse(responseText) as T;
     } catch (error) {
         console.error(`[Employee Detail Page - fetchData] Error in fetchData for ${fullUrl}:`, error);
         if (error instanceof Error) {
-           throw new Error(`Failed to fetch ${fullUrl}: ${error.message}`);
+           throw error; // Re-throw to be caught by the caller
         } else {
            throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
         }
@@ -73,49 +85,54 @@ const getEmploymentTypeVariant = (type?: EmploymentType): "default" | "secondary
 export default function TenantEmployeeDetailPage() {
   const params = useParams();
   const tenantDomain = params.domain as string;
-  const employeeId = params.id as string;
+  const employeeIdFromUrl = params.id as string; // This is the employee's user_id or employee_pk_id depending on context
   const { toast } = useToast();
 
   const [employee, setEmployee] = React.useState<Employee | null>(null);
-  // Consider fetching manager's name if reportingManagerId exists
-  // const [managerName, setManagerName] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!employeeId || !tenantDomain) return;
+    if (!employeeIdFromUrl || !tenantDomain) {
+      console.warn("[TenantEmployeeDetailPage - useEffect] employeeIdFromUrl or tenantDomain is missing. Aborting fetch.");
+      setIsLoading(false);
+      setError("Required identifiers missing.");
+      return;
+    }
 
     const fetchEmployeeDetails = async () => {
+      console.log(`[TenantEmployeeDetailPage - fetchEffect] Starting fetch for URL param id: '${employeeIdFromUrl}' in tenant '${tenantDomain}'`);
       setIsLoading(true);
       setError(null);
       try {
-        const data = await fetchData<Employee | undefined>(`/api/employees/${employeeId}`);
+        // The API route /api/employees/[id] now handles if 'id' is a user_id (for Employee role's "My Profile")
+        // or an employee_pk_id (for Admin/Manager viewing or editing specific employee).
+        const data = await fetchData<Employee | undefined>(`/api/employees/${employeeIdFromUrl}`);
         if (!data) {
-          notFound();
+          console.warn(`[TenantEmployeeDetailPage - fetchEffect] Employee not found for ID '${employeeIdFromUrl}'. Triggering notFound().`);
+          notFound(); // Use Next.js notFound for actual 404 page
           return;
         }
+        console.log(`[TenantEmployeeDetailPage - fetchEffect] Fetched employee. URL param id: '${employeeIdFromUrl}', Fetched Employee PK: '${data.id}', Fetched Employee UserID: '${data.userId}', Fetched Employee Name: '${data.name}'`);
         setEmployee(data);
-
-        // Optional: Fetch manager details if reportingManagerId exists
-        // if (data.reportingManagerId) {
-        //   const managerData = await fetchData<Employee | undefined>(`/api/employees/${data.reportingManagerId}`);
-        //   if (managerData) setManagerName(managerData.name);
-        // }
-
       } catch (err: any) {
+        console.error(`[TenantEmployeeDetailPage - fetchEffect] Error loading employee profile for ID '${employeeIdFromUrl}':`, err);
         setError(err.message || "Failed to load employee data.");
-        toast({
-          title: "Error",
-          description: err.message || "Could not fetch employee details.",
-          variant: "destructive",
-        });
+        // Only toast if it's not an authorization error which we will handle with specific UI
+        if (!err.message?.toLowerCase().includes('unauthorized')) {
+          toast({
+            title: "Error Loading Profile",
+            description: err.message || "Could not fetch employee details.",
+            variant: "destructive",
+          });
+        }
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchEmployeeDetails();
-  }, [employeeId, tenantDomain, toast]);
+  }, [employeeIdFromUrl, tenantDomain, toast]);
 
    const formatDate = (dateString?: string | null) => {
      if (!dateString) return "N/A";
@@ -125,8 +142,16 @@ export default function TenantEmployeeDetailPage() {
      } catch (e) { console.error("Error formatting date:", e); return "Invalid Date"; }
    };
 
-   if (!tenantDomain || !employeeId) {
-      return <div>Loading context...</div>;
+   if (!tenantDomain || !employeeIdFromUrl) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[400px]">
+          <Alert variant="destructive">
+            <AlertTriangle className="h-5 w-5" />
+            <AlertTitle>Context Error</AlertTitle>
+            <AlertDescription>Could not determine tenant or employee context.</AlertDescription>
+          </Alert>
+        </div>
+      );
    }
 
    if (isLoading) {
@@ -141,7 +166,7 @@ export default function TenantEmployeeDetailPage() {
            </div>
            <Card className="shadow-sm">
              <CardHeader><Skeleton className="h-6 w-1/3" /><Skeleton className="h-4 w-1/2" /></CardHeader>
-             <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"> {/* Adjusted grid for more fields */}
+             <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 <div className="space-y-4"> <Skeleton className="h-12 w-full" /> <Skeleton className="h-12 w-full" /> <Skeleton className="h-12 w-full" /></div>
                 <div className="space-y-4"> <Skeleton className="h-12 w-full" /> <Skeleton className="h-12 w-full" /> <Skeleton className="h-12 w-full" /></div>
                 <div className="space-y-4 md:col-span-2 lg:col-span-1"> <Skeleton className="h-12 w-full" /> <Skeleton className="h-12 w-full" /> </div>
@@ -156,15 +181,47 @@ export default function TenantEmployeeDetailPage() {
    }
 
   if (error) {
-     return <p className="text-center text-destructive py-10">{error}</p>;
+     if (error.toLowerCase().includes('unauthorized')) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[400px]">
+                 <Alert variant="destructive" className="max-w-md">
+                    <AlertTriangle className="h-5 w-5" />
+                    <AlertTitle>Access Denied</AlertTitle>
+                    <AlertDescription>
+                        {error} You may not have permission to view this profile.
+                    </AlertDescription>
+                </Alert>
+            </div>
+        );
+    }
+     return (
+        <div className="flex flex-col items-center justify-center min-h-[400px]">
+            <Alert variant="destructive" className="max-w-md">
+                <AlertTriangle className="h-5 w-5" />
+                <AlertTitle>Error Loading Profile</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+            </Alert>
+        </div>
+    );
   }
 
    if (!employee) {
-      return <p className="text-center py-10">Employee not found.</p>;
+      // This should ideally be caught by notFound() in useEffect, but as a fallback
+      return (
+         <div className="flex flex-col items-center justify-center min-h-[400px]">
+             <Alert variant="default" className="max-w-md">
+                <AlertTriangle className="h-5 w-5" />
+                <AlertTitle>Profile Not Found</AlertTitle>
+                <AlertDescription>
+                    The employee profile you are trying to view could not be found.
+                </AlertDescription>
+            </Alert>
+        </div>
+       );
   }
 
   const InfoItem = ({ icon: Icon, label, value, isLink = false, hrefPrefix = "" }: { icon: React.ElementType, label: string, value?: string | null, isLink?: boolean, hrefPrefix?: string }) => {
-    if (!value && value !== 0) return null; // Render nothing if value is undefined or null (except 0)
+    if (!value && value !== 0) return null;
     return (
         <div className="flex items-start gap-3">
             <Icon className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0"/>
@@ -179,6 +236,14 @@ export default function TenantEmployeeDetailPage() {
         </div>
     );
   };
+
+  if (employee) {
+    console.log(`[TenantEmployeeDetailPage - render] Rendering page for URL param id: '${employeeIdFromUrl}'. Current 'employee' state: PK='${employee.id}', UserID='${employee.userId}', Name='${employee.name}'. Edit link will use PK: '${employee.id}'.`);
+  } else if (isLoading) {
+    console.log(`[TenantEmployeeDetailPage - render] isLoading is true. employeeIdFromUrl from URL: '${employeeIdFromUrl}'`);
+  } else if (error) {
+    console.log(`[TenantEmployeeDetailPage - render] Error state: ${error}. employeeIdFromUrl from URL: '${employeeIdFromUrl}'`);
+  }
 
 
   return (
@@ -196,6 +261,7 @@ export default function TenantEmployeeDetailPage() {
            </h1>
            {employee.employeeId && <Badge variant="outline">ID: {employee.employeeId}</Badge>}
          </div>
+          {/* Ensure employee.id is used for the edit link. employee.id is the PK of the employees table. */}
           <Button asChild variant="outline">
              <Link href={`/${tenantDomain}/employees/${employee.id}/edit`}>
                  <Pencil className="mr-2 h-4 w-4"/> Edit Employee
@@ -207,7 +273,7 @@ export default function TenantEmployeeDetailPage() {
           <CardTitle>Employee Information</CardTitle>
           <CardDescription>Detailed view of the employee's record for {tenantDomain}.</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-3"> {/* Adjusted grid */}
+        <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
            <div className="space-y-4">
              <InfoItem icon={Mail} label="Email" value={employee.email} isLink hrefPrefix="mailto:" />
              <InfoItem icon={Phone} label="Phone" value={employee.phone} isLink hrefPrefix="tel:" />
@@ -217,7 +283,6 @@ export default function TenantEmployeeDetailPage() {
              <InfoItem icon={Briefcase} label="Position" value={employee.position} />
              <InfoItem icon={Building} label="Department" value={employee.department} />
              <InfoItem icon={UsersIcon} label="Reporting Manager ID" value={employee.reportingManagerId} />
-             {/* TODO: Fetch and display manager's name instead of ID */}
            </div>
            <div className="space-y-4">
              <InfoItem icon={Calendar} label="Hire Date" value={formatDate(employee.hireDate)} />
@@ -247,10 +312,11 @@ export default function TenantEmployeeDetailPage() {
             </Card>
              <Card className="shadow-sm">
                 <CardHeader><CardTitle>Leave History</CardTitle>
-                <CardDescription><Link href={`/${tenantDomain}/leave?employeeId=${employeeId}`} className='text-primary hover:underline'>View leave history</Link></CardDescription></CardHeader>
+                <CardDescription><Link href={`/${tenantDomain}/leave?employeeId=${employeeIdFromUrl}`} className='text-primary hover:underline'>View leave history</Link></CardDescription></CardHeader>
                 <CardContent><p className="text-muted-foreground">Recent leave records will be displayed here.</p></CardContent>
             </Card>
        </div>
     </div>
   );
 }
+
