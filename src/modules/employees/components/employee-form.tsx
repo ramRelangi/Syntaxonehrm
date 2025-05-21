@@ -20,14 +20,13 @@ import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 interface EmployeeFormProps {
-  employee?: Employee; // Includes employeeId and userId if editing
+  employee?: Employee;
   submitButtonText?: string;
   formTitle: string;
   formDescription: string;
   tenantDomain: string;
 }
 
-// Form data now excludes fields auto-generated or managed by actions (tenantId, employeeId, userId)
 type EmployeeFormShape = EmployeeFormData;
 
 export function EmployeeForm({
@@ -42,6 +41,8 @@ export function EmployeeForm({
   const [isLoading, setIsLoading] = React.useState(false);
   const [hireDatePickerOpen, setHireDatePickerOpen] = React.useState(false);
   const [dobDatePickerOpen, setDobDatePickerOpen] = React.useState(false);
+  const [potentialManagers, setPotentialManagers] = React.useState<Employee[]>([]);
+  const [isLoadingManagers, setIsLoadingManagers] = React.useState(false);
 
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
@@ -57,7 +58,6 @@ export function EmployeeForm({
     }
   };
 
-  // Schema for form validation: omits tenantId, userId, and employeeId as they are handled server-side.
   const formSchemaForValidation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true });
 
   const form = useForm<EmployeeFormShape>({
@@ -77,6 +77,35 @@ export function EmployeeForm({
     },
   });
 
+  React.useEffect(() => {
+    const fetchManagers = async () => {
+      setIsLoadingManagers(true);
+      try {
+        // API route handles tenant context via header
+        const response = await fetch('/api/employees');
+        if (!response.ok) {
+          throw new Error('Failed to fetch potential managers');
+        }
+        const data: Employee[] = await response.json();
+        // Filter out the current employee if editing, and only include active employees
+        setPotentialManagers(
+          data.filter(e => e.status === 'Active' && (isEditMode ? e.id !== employee?.id : true))
+        );
+      } catch (error) {
+        console.error("Failed to load managers:", error);
+        toast({
+          title: "Error Loading Managers",
+          description: "Could not fetch list of potential managers.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoadingManagers(false);
+      }
+    };
+
+    fetchManagers();
+  }, [isEditMode, employee?.id, toast]);
+
   const onSubmit = async (data: EmployeeFormShape) => {
     setIsLoading(true);
     console.log("[Employee Form] Submitting data:", data);
@@ -94,8 +123,6 @@ export function EmployeeForm({
         if (isEditMode && employee?.id) {
             result = await updateEmployee(employee.id, payload);
         } else {
-            // For addEmployee, we send the EmployeeFormShape.
-            // The action `addEmployee` will handle creating user, getting userId, and then calling dbAddEmployee.
             result = await addEmployee(payload);
         }
 
@@ -124,7 +151,7 @@ export function EmployeeForm({
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
-        const targetPath = isEditMode && result.employee?.id ? `/${tenantDomain}/employees/${result.employee.id}` : `/${tenantDomain}/employees`;
+        const targetPath = `/${tenantDomain}/employees`;
         router.push(targetPath);
         router.refresh();
 
@@ -281,20 +308,31 @@ export function EmployeeForm({
                 </FormItem>
               )}
             />
-            <FormField
-              control={form.control}
-              name="reportingManagerId"
-              render={({ field }) => (
-                <FormItem className="pt-2">
-                  <FormLabel>Reporting Manager ID</FormLabel>
-                   <FormDescription>Enter UUID of the manager. Select list coming soon.</FormDescription>
-                  <FormControl>
-                    <Input placeholder="Manager's Employee UUID" {...field} value={field.value ?? ""} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+             <FormField
+                control={form.control}
+                name="reportingManagerId"
+                render={({ field }) => (
+                    <FormItem className="pt-2">
+                    <FormLabel>Reporting Manager</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value || ""} disabled={isLoadingManagers}>
+                        <FormControl>
+                        <SelectTrigger>
+                            <SelectValue placeholder={isLoadingManagers ? "Loading managers..." : "Select reporting manager"} />
+                        </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                        <SelectItem value="">-- None --</SelectItem>
+                        {potentialManagers.map((manager) => (
+                            <SelectItem key={manager.id} value={manager.id}>
+                            {manager.name} ({manager.employeeId || manager.email})
+                            </SelectItem>
+                        ))}
+                        </SelectContent>
+                    </Select>
+                    <FormMessage />
+                    </FormItem>
+                )}
+                />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -412,3 +450,5 @@ export function EmployeeForm({
     </Form>
   );
 }
+
+    

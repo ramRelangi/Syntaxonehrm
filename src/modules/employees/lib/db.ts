@@ -57,7 +57,6 @@ export async function getEmployeeById(id: string, tenantId: string): Promise<Emp
 // Function to generate the next employee_id for a tenant
 async function generateNextEmployeeId(tenantId: string, client: any): Promise<string> {
     const prefix = "EMP-";
-    // Regex to match "EMP-" followed by digits. Captures the digits.
     const query = `
         SELECT employee_id FROM employees
         WHERE tenant_id = $1 AND employee_id ~ '^${prefix}\\d+$'
@@ -73,12 +72,10 @@ async function generateNextEmployeeId(tenantId: string, client: any): Promise<st
             nextNumericPart = numericPart + 1;
         }
     }
-    return `${prefix}${String(nextNumericPart).padStart(3, '0')}`; // Pads with leading zeros, e.g., EMP-001
+    return `${prefix}${String(nextNumericPart).padStart(3, '0')}`;
 }
 
 
-// Add employee for a specific tenant
-// Now expects tenantId and userId to be passed in, employeeId is generated
 export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employeeId'> & { tenantId: string, userId: string }): Promise<Employee> {
     const client = await pool.connect();
     if (!employeeData.tenantId) {
@@ -89,7 +86,7 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
     }
 
     try {
-        await client.query('BEGIN'); // Start transaction
+        await client.query('BEGIN');
 
         const newEmployeeId = await generateNextEmployeeId(employeeData.tenantId, client);
 
@@ -104,8 +101,8 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
         `;
         const values = [
             employeeData.tenantId,
-            employeeData.userId, // Store the linked user_id
-            newEmployeeId,      // Store the generated employee_id
+            employeeData.userId,
+            newEmployeeId,
             employeeData.name,
             employeeData.email,
             employeeData.phone || null,
@@ -120,17 +117,16 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
         ];
 
         const res = await client.query(query, values);
-        await client.query('COMMIT'); // Commit transaction
+        await client.query('COMMIT');
         return mapRowToEmployee(res.rows[0]);
     } catch (err: any) {
-        await client.query('ROLLBACK'); // Rollback transaction on error
+        await client.query('ROLLBACK');
         console.error('Error adding employee:', err);
-        if (err.code === '23505') { // Unique constraint violation
+        if (err.code === '23505') {
             if (err.constraint === 'employees_tenant_id_email_key') {
                 throw new Error('Email address already exists for this tenant.');
             }
             if (err.constraint === 'employees_tenant_id_employee_id_key') {
-                // This should be rare now with auto-generation, but good to keep
                 throw new Error('Generated Employee ID already exists for this tenant. Please try again.');
             }
             if (err.constraint === 'employees_user_id_key') {
@@ -143,7 +139,6 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
     }
 }
 
-// Update employee (ensure it belongs to the tenant)
 export async function updateEmployee(id: string, tenantId: string, updates: Partial<EmployeeFormData>): Promise<Employee | undefined> {
     const client = await pool.connect();
     const setClauses: string[] = [];
@@ -151,7 +146,6 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
     let valueIndex = 1;
 
     const columnMap: { [K in keyof EmployeeFormData]?: string } = {
-        // employeeId: 'employee_id', // Should not be updatable directly
         name: 'name',
         email: 'email',
         phone: 'phone',
@@ -166,7 +160,7 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
     };
 
     for (const key in updates) {
-        if (key === 'tenantId' || key === 'employeeId' || key === 'userId') continue; // These are not typically updated via this form
+        if (key === 'tenantId' || key === 'employeeId' || key === 'userId') continue;
         if (Object.prototype.hasOwnProperty.call(updates, key)) {
             const dbKey = columnMap[key as keyof EmployeeFormData];
             if (dbKey) {
@@ -207,7 +201,6 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
             if (err.constraint === 'employees_tenant_id_email_key') {
                 throw new Error('Email address already exists for this tenant.');
             }
-            // employee_id is not updatable through this function
         }
         throw err;
     } finally {
@@ -215,19 +208,62 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
     }
 }
 
-// Delete employee (ensure it belongs to the tenant)
 export async function deleteEmployee(id: string, tenantId: string): Promise<boolean> {
     const client = await pool.connect();
-    // Note: If employee deletion should also delete the user login, more complex logic is needed.
-    // For now, it just deletes the employee record. The user_id FK is ON DELETE SET NULL.
-    const query = 'DELETE FROM employees WHERE id = $1 AND tenant_id = $2';
     try {
-        const res = await client.query(query, [id, tenantId]);
-        return res.rowCount > 0;
+        await client.query('BEGIN');
+
+        // Get the user_id associated with this employee
+        const employeeRes = await client.query('SELECT user_id FROM employees WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+        const userIdToDelete = employeeRes.rows.length > 0 ? employeeRes.rows[0].user_id : null;
+
+        // Delete the employee record
+        const deleteEmployeeRes = await client.query('DELETE FROM employees WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+
+        if (deleteEmployeeRes.rowCount === 0) {
+            await client.query('ROLLBACK');
+            console.warn(`Employee ${id} not found for tenant ${tenantId} during deletion.`);
+            return false; // Employee not found or not deleted
+        }
+
+        // If a user_id was associated, delete the user record
+        if (userIdToDelete) {
+            console.log(`[DB deleteEmployee] Deleting associated user with ID: ${userIdToDelete} for employee ${id}`);
+            const deleteUserRes = await client.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2', [userIdToDelete, tenantId]);
+            if (deleteUserRes.rowCount === 0) {
+                // This case is less likely if FKs are set up correctly, but good to log
+                console.warn(`[DB deleteEmployee] User ${userIdToDelete} not found or not deleted for tenant ${tenantId} during employee cleanup.`);
+            } else {
+                console.log(`[DB deleteEmployee] Successfully deleted user ${userIdToDelete}.`);
+            }
+        }
+
+        await client.query('COMMIT');
+        return true;
     } catch (err) {
+        await client.query('ROLLBACK');
         console.error(`Error deleting employee with id ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
+
+// Needed for login restriction
+export async function getEmployeeByUserId(userId: string, tenantId: string): Promise<Employee | undefined> {
+    const client = await pool.connect();
+    try {
+        const res = await client.query('SELECT * FROM employees WHERE user_id = $1 AND tenant_id = $2', [userId, tenantId]);
+        if (res.rows.length > 0) {
+            return mapRowToEmployee(res.rows[0]);
+        }
+        return undefined;
+    } catch (err) {
+        console.error(`Error fetching employee by user_id ${userId} for tenant ${tenantId}:`, err);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+    

@@ -1,7 +1,7 @@
 
 import pool from '@/lib/db';
 import type { Tenant, User } from '@/modules/auth/types';
-import type { Employee } from '@/modules/employees/types'; // Import Employee type
+import type { Employee } from '@/modules/employees/types';
 
 // --- Tenant Operations ---
 
@@ -138,7 +138,6 @@ export async function addUser(userData: Omit<User, 'id' | 'createdAt' | 'updated
     }
 }
 
-// Get user by ID (globally unique)
 export async function getUserById(id: string): Promise<User | undefined> {
     const client = await pool.connect();
      console.log(`[DB getUserById] Fetching user with ID: ${id}`);
@@ -149,7 +148,7 @@ export async function getUserById(id: string): Promise<User | undefined> {
         return user;
     } catch (err: any) {
         console.error(`[DB getUserById] Error fetching user ${id}:`, err);
-        if (err.code === '42P01') { // undefined_table
+        if (err.code === '42P01') {
             throw new Error('Database schema not initialized. Relation "users" does not exist.');
         }
         throw err;
@@ -159,7 +158,6 @@ export async function getUserById(id: string): Promise<User | undefined> {
     }
 }
 
-// Get user by email WITHIN a specific tenant
 export async function getUserByEmail(email: string, tenantId: string): Promise<User | undefined> {
     const client = await pool.connect();
     const lowerCaseEmail = email.toLowerCase();
@@ -184,8 +182,6 @@ export async function getUserByEmail(email: string, tenantId: string): Promise<U
     }
 }
 
-// Get employee by Employee ID and Tenant ID
-// We need a way to map an Employee ID to a User for login
 export async function getEmployeeByEmployeeIdAndTenantId(employeeId: string, tenantId: string): Promise<Employee | undefined> {
     const client = await pool.connect();
     console.log(`[DB getEmployeeByEmployeeId] Fetching employee with Employee ID: ${employeeId} for tenant ${tenantId}`);
@@ -194,7 +190,6 @@ export async function getEmployeeByEmployeeIdAndTenantId(employeeId: string, ten
     try {
         const res = await client.query(query, values);
         if (res.rows.length > 0) {
-            // Need to map row to Employee (simplified here, ensure Employee type and mapRowToEmployee exist in employees/lib/db)
             return {
                 id: res.rows[0].id,
                 tenantId: res.rows[0].tenant_id,
@@ -206,7 +201,6 @@ export async function getEmployeeByEmployeeIdAndTenantId(employeeId: string, ten
                 department: res.rows[0].department,
                 hireDate: new Date(res.rows[0].hire_date).toISOString().split('T')[0],
                 status: res.rows[0].status,
-                // ... other employee fields
             } as Employee;
         }
         return undefined;
@@ -220,3 +214,60 @@ export async function getEmployeeByEmployeeIdAndTenantId(employeeId: string, ten
         client.release();
     }
 }
+
+// New function to get employee by user_id and tenant_id for login check
+export async function getEmployeeByUserId(userId: string, tenantId: string): Promise<Employee | undefined> {
+    const client = await pool.connect();
+    console.log(`[DB getEmployeeByUserId] Fetching employee with User ID: ${userId} for tenant ${tenantId}`);
+    const query = 'SELECT * FROM employees WHERE tenant_id = $1 AND user_id = $2';
+    const values = [tenantId, userId];
+    try {
+        const res = await client.query(query, values);
+        if (res.rows.length > 0) {
+             return {
+                id: res.rows[0].id,
+                tenantId: res.rows[0].tenant_id,
+                userId: res.rows[0].user_id,
+                employeeId: res.rows[0].employee_id,
+                name: res.rows[0].name,
+                email: res.rows[0].email,
+                position: res.rows[0].position,
+                department: res.rows[0].department,
+                hireDate: new Date(res.rows[0].hire_date).toISOString().split('T')[0],
+                status: res.rows[0].status,
+                // Add other fields if needed for Employee type from employees/types
+            } as Employee;
+        }
+        return undefined;
+    } catch (err: any) {
+        console.error(`[DB getEmployeeByUserId] Error fetching employee by User ID ${userId} for tenant ${tenantId}:`, err);
+        if (err.code === '42P01') {
+            throw new Error('Database schema not initialized. Relation "employees" does not exist.');
+        }
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+// Function to delete a user by ID
+export async function deleteUserById(userId: string, tenantId: string, client?: any): Promise<boolean> {
+    const conn = client || await pool.connect();
+    console.log(`[DB deleteUserById] Attempting to delete user: ${userId} for tenant ${tenantId}`);
+    try {
+        const res = await conn.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2', [userId, tenantId]);
+        if (res.rowCount > 0) {
+            console.log(`[DB deleteUserById] User ${userId} deleted successfully.`);
+            return true;
+        }
+        console.warn(`[DB deleteUserById] User ${userId} not found for tenant ${tenantId} or already deleted.`);
+        return false;
+    } catch (err: any) {
+        console.error(`[DB deleteUserById] Error deleting user ${userId} for tenant ${tenantId}:`, err);
+        throw err;
+    } finally {
+        if (!client) conn.release();
+    }
+}
+
+    
