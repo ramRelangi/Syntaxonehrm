@@ -5,11 +5,12 @@ import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmployeeForm } from '@/modules/employees/components/employee-form';
 import { notFound, useParams } from 'next/navigation';
-import { Pencil, Loader2 } from "lucide-react";
+import { Pencil, Loader2, AlertTriangle } from "lucide-react"; // Added AlertTriangle
 import type { Employee } from '@/modules/employees/types';
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { UserRole } from '@/modules/auth/types'; // Import UserRole
+import type { UserRole } from '@/modules/auth/types';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Added Alert components
 
 interface EditEmployeePageProps {
   // Params are now accessed via React.use(params)
@@ -32,7 +33,14 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
          if (response.status === 403) { // Handle unauthorized specifically
             const errorText = await response.text();
             console.error(`[Edit Employee Page - fetchData] Unauthorized access (403) for ${fullUrl}:`, errorText);
-            const errorData = JSON.parse(errorText || '{}');
+            let errorData: { message?: string; error?: string } = {};
+            try {
+                if (errorText) errorData = JSON.parse(errorText);
+            } catch (e) {
+                console.warn(`[Edit Employee Page - fetchData] Failed to parse 403 error response as JSON for ${fullUrl}. Raw text: ${errorText}`);
+                // Use the raw text if JSON parsing fails but an errorText exists
+                errorData.message = errorText || 'Unauthorized to view this employee profile.';
+            }
             throw new Error(errorData.message || errorData.error || 'Unauthorized to view this employee profile.');
         }
 
@@ -40,10 +48,21 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
         if (!response.ok) {
             const errorText = await response.text(); // Get raw error text
             console.error(`[Edit Employee Page - fetchData] Fetch error response body for ${fullUrl}:`, errorText);
-            const errorData = JSON.parse(errorText || '{}'); // Try parsing JSON, default to empty object
-            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+            let errorData: { message?: string; error?: string } = {};
+             try {
+                 if (errorText) errorData = JSON.parse(errorText);
+             } catch (e) {
+                 console.warn(`[Edit Employee Page - fetchData] Failed to parse error response as JSON for ${fullUrl}. Raw text: ${errorText}`);
+                 errorData.message = errorText || `HTTP error! status: ${response.status}`;
+             }
+            throw new Error(errorData.message || errorData.error || `HTTP error! status: ${response.status}`);
         }
-        return await response.json() as T;
+        const responseText = await response.text();
+        if (!responseText) {
+            console.log(`[Edit Employee Page - fetchData] Received empty response body for ${fullUrl}, returning undefined.`);
+            return undefined as T;
+        }
+        return JSON.parse(responseText) as T;
     } catch (error) {
         console.error(`[Edit Employee Page - fetchData] Error in fetchData for ${fullUrl}:`, error);
         if (error instanceof Error) {
@@ -73,29 +92,26 @@ export default function TenantEditEmployeePage() {
     const fetchUserRole = async () => {
         try {
             // Placeholder: Replace with actual session/role fetching logic
-            // For example, you might have an API endpoint `/api/auth/session-details`
-            // const sessionDetails = await fetch('/api/auth/session-details').then(res => res.json());
+            // Example: const sessionDetails = await fetch('/api/auth/session-details').then(res => res.json());
             // setCurrentUserRole(sessionDetails.role);
 
-            // Mocking for now, assuming Admin if not the employee themselves, or Employee if IDs match roughly
-            // This is a simplification; proper role fetching is crucial.
-            // For testing, you might want to hardcode this to 'Employee' or 'Admin'
-            // Let's assume a simple mock: if employeeId implies it's "my" profile, role is Employee.
-            // This logic is NOT robust for real use.
-            const mockSessionUserId = "7d23bea1-6664-4e0e-840a-46ba89c53c64"; // Example, replace with actual logic
-            if (employeeId === mockSessionUserId) {
-                 setCurrentUserRole('Employee');
-            } else {
-                 setCurrentUserRole('Admin'); // Default to Admin for testing other cases
-            }
-
+            // Mocking for now
+             // Fetch actual session data (e.g., from a context or a simple API endpoint)
+             const sessionResponse = await fetch('/api/auth/session'); // Example endpoint
+             if (sessionResponse.ok) {
+                 const session = await sessionResponse.json();
+                 setCurrentUserRole(session.userRole);
+             } else {
+                 console.error("Failed to fetch session details for role check.");
+                 setCurrentUserRole('Employee'); // Fallback or handle error
+             }
         } catch (err) {
             console.error("Failed to fetch user role:", err);
             setCurrentUserRole('Employee'); // Fallback to least privileged
         }
     };
     fetchUserRole();
-  }, [employeeId]);
+  }, []);
 
   React.useEffect(() => {
     if (!employeeId || !tenantDomain) return;
@@ -106,17 +122,21 @@ export default function TenantEditEmployeePage() {
       try {
         const data = await fetchData<Employee | undefined>(`/api/employees/${employeeId}`);
         if (!data) {
-          notFound();
+          setError("Employee profile not found."); // Set specific error for notFound
+          // notFound(); // This would render Next.js default 404, error state allows custom UI
           return;
         }
         setEmployee(data);
       } catch (err: any) {
         setError(err.message || "Failed to load employee data.");
-        toast({
-          title: "Error",
-          description: err.message || "Could not fetch employee details.",
-          variant: "destructive",
-        });
+        // Toast is now conditional based on error type
+        if (!err.message?.toLowerCase().includes('unauthorized')) {
+          toast({
+            title: "Error Loading Profile",
+            description: err.message || "Could not fetch employee details.",
+            variant: "destructive",
+          });
+        }
       } finally {
         setIsLoading(false);
       }
@@ -158,11 +178,34 @@ export default function TenantEditEmployeePage() {
   }
 
   if (error) {
-     return <p className="text-center text-destructive py-10">{error}</p>;
+    if (error.toLowerCase().includes('unauthorized')) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[400px]">
+                 <Alert variant="destructive" className="max-w-md">
+                    <AlertTriangle className="h-5 w-5" />
+                    <AlertTitle>Access Denied</AlertTitle>
+                    <AlertDescription>
+                        {error} You may not have permission to edit this profile.
+                    </AlertDescription>
+                </Alert>
+            </div>
+        );
+    }
+    return <p className="text-center text-destructive py-10">{error}</p>;
   }
 
   if (!employee) {
-       return <p className="text-center py-10">Employee not found.</p>;
+       return (
+         <div className="flex flex-col items-center justify-center min-h-[400px]">
+             <Alert variant="default" className="max-w-md">
+                <AlertTriangle className="h-5 w-5" />
+                <AlertTitle>Profile Not Found</AlertTitle>
+                <AlertDescription>
+                    The employee profile you are trying to edit could not be found.
+                </AlertDescription>
+            </Alert>
+        </div>
+       );
   }
 
   return (
