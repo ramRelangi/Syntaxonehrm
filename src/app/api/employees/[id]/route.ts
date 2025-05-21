@@ -1,13 +1,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  getEmployeeById as dbGetEmployeeById,
-  updateEmployee as dbUpdateEmployee,
-  deleteEmployee as dbDeleteEmployee,
-  getEmployeeByUserId as dbGetEmployeeByUserId,
-} from '@/modules/employees/lib/db';
+import { getEmployeeByIdAction, updateEmployee as updateEmployeeAction, deleteEmployeeAction } from '@/modules/employees/actions';
 import { employeeSchema } from '@/modules/employees/types';
-import { _parseSessionCookie } from '@/modules/auth/actions'; // Import the direct cookie parser
+import { _parseSessionCookie } from '@/modules/auth/actions';
 import type { SessionData } from '@/modules/auth/types';
 
 interface Params {
@@ -21,54 +16,31 @@ async function getSession(request: NextRequest): Promise<SessionData | null> {
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const { id } = params;
-  console.log(`[API GET /employees/${id}] Received request.`);
+  console.log(`[API GET /employees/${id}] Received request for employee ID: ${id}`);
 
   try {
     const session = await getSession(request);
-    if (!session?.tenantId || !session.userRole || !session.userId) {
-      console.error(`[API GET /employees/${id}] Unauthorized: Missing session data.`);
-      return NextResponse.json({ error: 'Unauthorized or missing session context.' }, { status: 401 });
+    if (!session?.tenantId) {
+      console.error(`[API GET /employees/${id}] Unauthorized: Missing tenant ID from session.`);
+      return NextResponse.json({ error: 'Unauthorized or missing session context (tenantId missing).' }, { status: 401 });
     }
-    const { tenantId, userRole, userId: currentUserId } = session;
-    console.log(`[API GET /employees/${id}] Session: tenantId=${tenantId}, userRole=${userRole}, currentUserId=${currentUserId}`);
+    console.log(`[API GET /employees/${id}] Session tenantId: ${session.tenantId}`);
 
-    let employeeProfile;
-    if (userRole === 'Employee') {
-      console.log(`[API GET /employees/${id}] Employee role. ID from URL: ${id}. Current user ID: ${currentUserId}`);
-      // If employee, 'id' in URL is usually their own userId for "My Profile"
-      // or their employee.id for an edit page if they are trying to edit their own profile.
-      // The most consistent approach for an /api/employees/[id] route is that 'id' is the employee's primary key.
-      // We then check if this employee record belongs to the current user.
-
-      const fetchedEmployee = await dbGetEmployeeById(id.toLowerCase(), tenantId.toLowerCase());
-      if (fetchedEmployee && fetchedEmployee.userId?.toLowerCase() === currentUserId.toLowerCase()) {
-        console.log(`[API GET /employees/${id}] Employee is accessing their own profile by employee PK. Fetched Employee PK: ${fetchedEmployee.id}, Linked User ID: ${fetchedEmployee.userId}`);
-        employeeProfile = fetchedEmployee;
-      } else if (fetchedEmployee) {
-         console.warn(`[API GET /employees/${id}] Employee ${currentUserId} attempting to access employee record ${id} which does not belong to them (linked user_id: ${fetchedEmployee.userId}).`);
-         return NextResponse.json({ error: 'Unauthorized: You can only view your own employee profile.' }, { status: 403 });
-      } else {
-        console.warn(`[API GET /employees/${id}] Employee record not found for PK ${id} in tenant ${tenantId}.`);
-        return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
-      }
-    } else { // Admin or Manager
-      console.log(`[API GET /employees/${id}] Admin/Manager role. Fetching employee by PK (employee.id): ${id}`);
-      employeeProfile = await dbGetEmployeeById(id.toLowerCase(), tenantId.toLowerCase());
+    const employee = await getEmployeeByIdAction(id); // Action now handles role-based fetching logic
+    if (!employee) {
+      console.warn(`[API GET /employees/${id}] Employee not found by action. ID used: ${id}, Tenant from session: ${session.tenantId}`);
+      return NextResponse.json({ error: `Employee not found for ID ${id} in tenant ${session.tenantId}.` }, { status: 404 });
     }
-
-    if (!employeeProfile) {
-      console.warn(`[API GET /employees/${id}] Employee not found for ID ${id} and tenant ${tenantId}.`);
-      return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
-    }
-    console.log(`[API GET /employees/${id}] Employee found: ${employeeProfile.name}`);
-    return NextResponse.json(employeeProfile);
+    console.log(`[API GET /employees/${id}] Employee found: ${employee.name}`);
+    return NextResponse.json(employee);
 
   } catch (error: any) {
     console.error(`[API GET /employees/${id}] Error:`, error.message, error.stack ? error.stack : '(No stack trace)');
     let errorMessage = 'Failed to fetch employee.';
     let statusCode = 500;
-    if (error.message?.toLowerCase().includes('unauthorized') || error.message?.toLowerCase().includes('session')) {
-      statusCode = 401;
+
+    if (error.message?.toLowerCase().includes('unauthorized')) {
+      statusCode = 403; // Forbidden
       errorMessage = error.message;
     } else if (error.message?.toLowerCase().includes('invalid identifier format')) {
       statusCode = 400; // Bad Request for invalid UUIDs
@@ -88,52 +60,27 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       console.error(`[API PUT /employees/${id}] Unauthorized: Missing session data.`);
       return NextResponse.json({ error: 'Unauthorized or missing session context.' }, { status: 401 });
     }
-    const { tenantId, userRole, userId: currentUserId } = session;
 
     const body = await request.json();
-    let dataToUpdate = { ...body };
+    // The updateEmployeeAction will handle role-based field restrictions and validation internally.
+    const result = await updateEmployeeAction(id, body);
 
-    // Authorization: Employee can only update specific fields of their own profile
-    if (userRole === 'Employee') {
-      const employeeToUpdate = await dbGetEmployeeById(id.toLowerCase(), tenantId.toLowerCase());
-      if (!employeeToUpdate || employeeToUpdate.userId?.toLowerCase() !== currentUserId.toLowerCase()) {
-        console.warn(`[API PUT /employees/${id}] Unauthorized attempt by Employee ${currentUserId} to update employee PK ${id}.`);
-        return NextResponse.json({ error: 'Unauthorized to update this employee profile.' }, { status: 403 });
-      }
-      const allowedUpdates: Partial<typeof body> = {};
-      if (body.phone !== undefined) allowedUpdates.phone = body.phone;
-      if (body.dateOfBirth !== undefined) allowedUpdates.dateOfBirth = body.dateOfBirth;
-      
-      const disallowedKeys = Object.keys(body).filter(key => !['phone', 'dateOfBirth'].includes(key));
-      if (disallowedKeys.length > 0) {
-        console.warn(`[API PUT /employees/${id}] Employee ${currentUserId} attempted to update disallowed fields: ${disallowedKeys.join(', ')} on employee PK ${id}.`);
-        return NextResponse.json({ error: `You are not allowed to update fields: ${disallowedKeys.join(', ')}.` }, { status: 403 });
-      }
-      dataToUpdate = allowedUpdates;
-    }
-
-    // Schema validation (excluding server-managed fields)
-    const validation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true }).partial().safeParse(dataToUpdate);
-    if (!validation.success) {
-      console.error(`[API PUT /employees/${id}] Validation Error:`, validation.error.flatten());
-      return NextResponse.json({ error: 'Invalid input', details: validation.error.flatten().fieldErrors }, { status: 400 });
-    }
-
-    if (Object.keys(validation.data).length === 0 && userRole === 'Employee') {
-        // If employee submitted no allowed changes.
-        const currentEmployee = await dbGetEmployeeById(id.toLowerCase(), tenantId.toLowerCase());
-        return NextResponse.json(currentEmployee); // Return current data
-    }
-
-
-    const updatedEmployee = await dbUpdateEmployee(id.toLowerCase(), tenantId.toLowerCase(), validation.data);
-
-    if (updatedEmployee) {
-      console.log(`[API PUT /employees/${id}] Employee updated successfully: ${updatedEmployee.name}`);
-      return NextResponse.json(updatedEmployee);
+    if (result.success && result.employee) {
+      console.log(`[API PUT /employees/${id}] Employee updated successfully: ${result.employee.name}`);
+      return NextResponse.json(result.employee);
     } else {
-      console.warn(`[API PUT /employees/${id}] Employee not found for ID ${id} during update.`);
-      return NextResponse.json({ error: 'Employee not found for this tenant' }, { status: 404 });
+      console.error(`[API PUT /employees/${id}] Action failed to update employee. Errors:`, result.errors);
+      let errorMessage = result.errors?.[0]?.message || 'Failed to update employee.';
+      let statusCode = 400; // Default for validation or general action failure
+
+      if (errorMessage.toLowerCase().includes('unauthorized')) {
+        statusCode = 403;
+      } else if (errorMessage.toLowerCase().includes('not found')) {
+        statusCode = 404;
+      } else if (errorMessage.toLowerCase().includes('already exists')) {
+        statusCode = 409; // Conflict
+      }
+      return NextResponse.json({ error: errorMessage, details: result.errors }, { status: statusCode });
     }
   } catch (error: any) {
     console.error(`[API PUT /employees/${id}] Error:`, error.message, error.stack ? error.stack : '(No stack trace)');
@@ -167,21 +114,22 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       console.error(`[API DELETE /employees/${id}] Unauthorized: Missing session data.`);
       return NextResponse.json({ error: 'Unauthorized or missing session context.' }, { status: 401 });
     }
-    const { tenantId, userRole } = session;
 
-    if (userRole !== 'Admin' && userRole !== 'Manager') {
-      console.warn(`[API DELETE /employees/${id}] Unauthorized attempt by role ${userRole}.`);
-      return NextResponse.json({ error: 'Unauthorized to delete employees.' }, { status: 403 });
-    }
+    const result = await deleteEmployeeAction(id);
 
-    const deleted = await dbDeleteEmployee(id.toLowerCase(), tenantId.toLowerCase());
-
-    if (deleted) {
+    if (result.success) {
       console.log(`[API DELETE /employees/${id}] Employee deleted successfully.`);
       return NextResponse.json({ message: 'Employee deleted successfully' }, { status: 200 });
     } else {
-      console.warn(`[API DELETE /employees/${id}] Employee not found for ID ${id} during deletion.`);
-      return NextResponse.json({ error: 'Employee not found for this tenant.' }, { status: 404 });
+      console.error(`[API DELETE /employees/${id}] Action failed to delete employee. Error:`, result.error);
+      let errorMessage = result.error || 'Failed to delete employee.';
+      let statusCode = 500;
+      if (errorMessage.toLowerCase().includes('unauthorized')) {
+        statusCode = 403;
+      } else if (errorMessage.toLowerCase().includes('not found')) {
+        statusCode = 404;
+      }
+      return NextResponse.json({ error: errorMessage }, { status: statusCode });
     }
   } catch (error: any) {
     console.error(`[API DELETE /employees/${id}] Error:`, error.message, error.stack ? error.stack : '(No stack trace)');
