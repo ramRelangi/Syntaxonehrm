@@ -24,7 +24,8 @@ import type { EmailTemplate, EmailSettings, ConnectionStatus } from "@/modules/c
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useParams } from "next/navigation";
-import { testSmtpConnectionAction, getEmailSettingsAction, sendAdminNotification } from '@/modules/communication/actions';
+import { testSmtpConnectionAction, getEmailSettingsAction } from '@/modules/communication/actions';
+import { sendAdminNotification } from '@/modules/auth/actions'; // Corrected import path
 
 
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T | null> {
@@ -87,7 +88,7 @@ export default function TenantCommunicationPage() {
         if (!result.success) {
             console.error('[Communication Page - checkConnectionInBackground] Background check failed:', result.message);
             setConnectionStatus('failed');
-            await sendAdminNotification(
+            await sendAdminNotification( // Use the imported function
                  `Background SMTP Check Failed (Tenant: ${tenantDomain})`,
                  `Tenant: ${tenantDomain}\nError: ${result.message}`
             );
@@ -98,7 +99,7 @@ export default function TenantCommunicationPage() {
     } catch (error: any) {
         console.error('[Communication Page - checkConnectionInBackground] Error during background check action call:', error);
         setConnectionStatus('failed');
-        await sendAdminNotification(
+        await sendAdminNotification( // Use the imported function
             `Error during Background SMTP Check (Tenant: ${tenantDomain})`,
             `Tenant: ${tenantDomain}\nError: ${error.message}`
         );
@@ -214,7 +215,7 @@ export default function TenantCommunicationPage() {
                  duration: success ? 5000 : 8000,
              });
              if (!success) {
-                  await sendAdminNotification(
+                  await sendAdminNotification( // Use the imported function
                      `Manual SMTP Test Failed (Tenant: ${tenantDomain})`,
                      `Tenant: ${tenantDomain}\nError: ${result.message}`
                  );
@@ -228,7 +229,7 @@ export default function TenantCommunicationPage() {
                  description: error.message || "An unexpected error occurred during the test.",
                  variant: "destructive",
              });
-              await sendAdminNotification(
+              await sendAdminNotification( // Use the imported function
                  `Error during Manual SMTP Test (Tenant: ${tenantDomain})`,
                  `Tenant: ${tenantDomain}\nError: ${error.message}`
              );
