@@ -9,9 +9,10 @@ import { Pencil, Loader2 } from "lucide-react";
 import type { Employee } from '@/modules/employees/types';
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { UserRole } from '@/modules/auth/types'; // Import UserRole
 
 interface EditEmployeePageProps {
-  params: { domain: string; id: string };
+  // Params are now accessed via React.use(params)
 }
 
 // Helper to fetch data from API routes - CLIENT SIDE VERSION (API handles tenant context)
@@ -28,6 +29,12 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
          if (response.status === 400 && (await response.text()).includes('Tenant context')) {
              throw new Error('Tenant information is missing. Unable to load data.');
          }
+         if (response.status === 403) { // Handle unauthorized specifically
+            const errorText = await response.text();
+            console.error(`[Edit Employee Page - fetchData] Unauthorized access (403) for ${fullUrl}:`, errorText);
+            const errorData = JSON.parse(errorText || '{}');
+            throw new Error(errorData.message || errorData.error || 'Unauthorized to view this employee profile.');
+        }
 
 
         if (!response.ok) {
@@ -48,17 +55,47 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 
-export default function TenantEditEmployeePage({ params }: EditEmployeePageProps) {
-  // Correct way to access params in Client Component
-  const safeParams = React.use(params);
-  const tenantDomain = safeParams?.domain;
-  const employeeId = safeParams?.id;
+export default function TenantEditEmployeePage() {
+  const params = React.use(useParams()); // Use React.use to get params
+  const tenantDomain = params?.domain as string;
+  const employeeId = params?.id as string;
 
   const { toast } = useToast();
 
   const [employee, setEmployee] = React.useState<Employee | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = React.useState<UserRole | null>(null); // State for user role
+
+  React.useEffect(() => {
+    // Simulate fetching current user's role
+    // In a real app, this would come from a session context or a dedicated API call
+    const fetchUserRole = async () => {
+        try {
+            // Placeholder: Replace with actual session/role fetching logic
+            // For example, you might have an API endpoint `/api/auth/session-details`
+            // const sessionDetails = await fetch('/api/auth/session-details').then(res => res.json());
+            // setCurrentUserRole(sessionDetails.role);
+
+            // Mocking for now, assuming Admin if not the employee themselves, or Employee if IDs match roughly
+            // This is a simplification; proper role fetching is crucial.
+            // For testing, you might want to hardcode this to 'Employee' or 'Admin'
+            // Let's assume a simple mock: if employeeId implies it's "my" profile, role is Employee.
+            // This logic is NOT robust for real use.
+            const mockSessionUserId = "7d23bea1-6664-4e0e-840a-46ba89c53c64"; // Example, replace with actual logic
+            if (employeeId === mockSessionUserId) {
+                 setCurrentUserRole('Employee');
+            } else {
+                 setCurrentUserRole('Admin'); // Default to Admin for testing other cases
+            }
+
+        } catch (err) {
+            console.error("Failed to fetch user role:", err);
+            setCurrentUserRole('Employee'); // Fallback to least privileged
+        }
+    };
+    fetchUserRole();
+  }, [employeeId]);
 
   React.useEffect(() => {
     if (!employeeId || !tenantDomain) return;
@@ -67,10 +104,9 @@ export default function TenantEditEmployeePage({ params }: EditEmployeePageProps
       setIsLoading(true);
       setError(null);
       try {
-        // API route implicitly uses tenantId from header, path is relative to root
         const data = await fetchData<Employee | undefined>(`/api/employees/${employeeId}`);
         if (!data) {
-          notFound(); // Trigger 404 if API returns undefined/404 (or tenant mismatch)
+          notFound();
           return;
         }
         setEmployee(data);
@@ -90,11 +126,10 @@ export default function TenantEditEmployeePage({ params }: EditEmployeePageProps
   }, [employeeId, tenantDomain, toast]);
 
   if (!tenantDomain || !employeeId) {
-       // Handle case where params aren't available yet
        return <div>Loading context...</div>;
    }
 
-  if (isLoading) {
+  if (isLoading || currentUserRole === null) { // Also wait for role to load
     return (
         <div className="flex flex-col gap-6">
           <div className="flex items-center justify-between">
@@ -127,7 +162,6 @@ export default function TenantEditEmployeePage({ params }: EditEmployeePageProps
   }
 
   if (!employee) {
-      // This state should ideally be caught by notFound() earlier, but added as a fallback
        return <p className="text-center py-10">Employee not found.</p>;
   }
 
@@ -144,13 +178,13 @@ export default function TenantEditEmployeePage({ params }: EditEmployeePageProps
           <CardDescription>Modify the employee's information for {tenantDomain}.</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* Pass the fetched employee data to the form */}
           <EmployeeForm
-             employee={employee} // Includes tenantId
+             employee={employee}
              formTitle="Edit Employee"
              formDescription="Update the employee's information."
              submitButtonText="Save Changes"
-             tenantDomain={tenantDomain} // Pass domain
+             tenantDomain={tenantDomain}
+             currentUserRole={currentUserRole} // Pass the role
            />
         </CardContent>
       </Card>

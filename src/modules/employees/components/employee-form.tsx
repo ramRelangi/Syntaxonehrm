@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
 import { employeeSchema, type EmployeeFormData, employmentTypeSchema } from '@/modules/employees/types';
 import type { Employee } from '@/modules/employees/types';
+import type { UserRole } from '@/modules/auth/types'; // Import UserRole
 import { addEmployee, updateEmployee } from '@/modules/employees/actions';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,11 +26,12 @@ interface EmployeeFormProps {
   formTitle: string;
   formDescription: string;
   tenantDomain: string;
+  currentUserRole: UserRole | null; // Add currentUserRole prop
 }
 
 type EmployeeFormShape = EmployeeFormData;
 
-const NO_MANAGER_VALUE = "__NO_MANAGER__"; // Special value for the "None" option
+const NO_MANAGER_VALUE = "__NO_MANAGER__";
 
 export function EmployeeForm({
   employee,
@@ -37,6 +39,7 @@ export function EmployeeForm({
   formTitle,
   formDescription,
   tenantDomain,
+  currentUserRole, // Receive role
 }: EmployeeFormProps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -48,6 +51,9 @@ export function EmployeeForm({
 
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
+
+  // Determine if fields should be disabled based on role
+  const isEmployeeRole = currentUserRole === 'Employee';
 
   const getFormattedDate = (dateString?: string | null): string => {
     if (!dateString) return "";
@@ -73,38 +79,39 @@ export function EmployeeForm({
       hireDate: getFormattedDate(employee?.hireDate),
       status: employee?.status ?? "Active",
       dateOfBirth: getFormattedDate(employee?.dateOfBirth),
-      reportingManagerId: employee?.reportingManagerId ?? "", // Empty string if no manager
+      reportingManagerId: employee?.reportingManagerId || NO_MANAGER_VALUE,
       workLocation: employee?.workLocation ?? "",
       employmentType: employee?.employmentType ?? "Full-time",
     },
   });
 
   React.useEffect(() => {
-    const fetchManagers = async () => {
-      setIsLoadingManagers(true);
-      try {
-        const response = await fetch('/api/employees');
-        if (!response.ok) {
-          throw new Error('Failed to fetch potential managers');
-        }
-        const data: Employee[] = await response.json();
-        setPotentialManagers(
-          data.filter(e => e.status === 'Active' && (isEditMode ? e.id !== employee?.id : true))
-        );
-      } catch (error) {
-        console.error("Failed to load managers:", error);
-        toast({
-          title: "Error Loading Managers",
-          description: "Could not fetch list of potential managers.",
-          variant: "destructive",
-        });
-      } finally {
-        setIsLoadingManagers(false);
-      }
-    };
-
-    fetchManagers();
-  }, [isEditMode, employee?.id, toast]);
+    if (currentUserRole === 'Admin' || currentUserRole === 'Manager') {
+        const fetchManagers = async () => {
+          setIsLoadingManagers(true);
+          try {
+            const response = await fetch('/api/employees'); // API handles tenant context
+            if (!response.ok) {
+              throw new Error('Failed to fetch potential managers');
+            }
+            const data: Employee[] = await response.json();
+            setPotentialManagers(
+              data.filter(e => e.status === 'Active' && (isEditMode ? e.id !== employee?.id : true))
+            );
+          } catch (error) {
+            console.error("Failed to load managers:", error);
+            toast({
+              title: "Error Loading Managers",
+              description: "Could not fetch list of potential managers.",
+              variant: "destructive",
+            });
+          } finally {
+            setIsLoadingManagers(false);
+          }
+        };
+        fetchManagers();
+    }
+  }, [isEditMode, employee?.id, toast, currentUserRole]);
 
   const onSubmit = async (data: EmployeeFormShape) => {
     setIsLoading(true);
@@ -114,7 +121,6 @@ export function EmployeeForm({
       ...data,
       phone: data.phone || undefined,
       dateOfBirth: data.dateOfBirth || null,
-      // Ensure reportingManagerId is null if the special "None" value was selected or it's empty
       reportingManagerId: data.reportingManagerId === NO_MANAGER_VALUE || data.reportingManagerId === "" ? null : data.reportingManagerId,
       workLocation: data.workLocation || undefined,
     };
@@ -138,7 +144,7 @@ export function EmployeeForm({
                     errorSetOnField = true;
                 }
              });
-             if (!errorSetOnField) {
+             if (!errorSetOnField && !result.errors?.some(e => e.path.length > 0)) {
                 form.setError("root.serverError", { message: errorMessage });
              }
              throw new Error(errorMessage);
@@ -153,12 +159,12 @@ export function EmployeeForm({
         });
 
         const targetPath = `/${tenantDomain}/employees`;
-        router.push(targetPath);
+        router.push(isEditMode ? `/${tenantDomain}/employees/${employee.id}` : targetPath); // Go to detail page if editing
         router.refresh();
 
     } catch (error: any) {
         console.error("[Employee Form] Submission error:", error);
-        if (!form.formState.errors.root?.serverError && !Object.keys(form.formState.errors).some(key => key !== 'root')) {
+        if (!form.formState.errors.root?.serverError && !Object.keys(form.formState.errors).some(key => key !== 'root' && form.formState.errors[key as keyof EmployeeFormShape])) {
             toast({
                 title: `Error ${isEditMode ? 'Updating' : 'Adding'} Employee`,
                 description: error.message || "An unexpected error occurred.",
@@ -195,7 +201,7 @@ export function EmployeeForm({
               <FormItem>
                 <FormLabel>Full Name *</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g. Jane Doe" {...field} />
+                  <Input placeholder="e.g. Jane Doe" {...field} disabled={isEmployeeRole && isEditMode} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -209,7 +215,7 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Email Address *</FormLabel>
                   <FormControl>
-                    <Input type="email" placeholder="e.g. jane.doe@company.com" {...field} />
+                    <Input type="email" placeholder="e.g. jane.doe@company.com" {...field} disabled={isEmployeeRole && isEditMode} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -222,7 +228,7 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Phone Number</FormLabel>
                   <FormControl>
-                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} />
+                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} disabled={isEmployeeRole && !isEditMode} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -238,7 +244,7 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Position / Job Title *</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. Software Engineer" {...field} />
+                    <Input placeholder="e.g. Software Engineer" {...field} disabled={isEmployeeRole} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -250,7 +256,7 @@ export function EmployeeForm({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Department *</FormLabel>
-                   <Select onValueChange={field.onChange} defaultValue={field.value}>
+                   <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRole}>
                      <FormControl>
                        <SelectTrigger>
                          <SelectValue placeholder="Select department" />
@@ -286,6 +292,7 @@ export function EmployeeForm({
                         <Button
                           variant={"outline"}
                           className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
+                          disabled={isEmployeeRole && !isEditMode}
                         >
                           {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
                           <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
@@ -302,6 +309,7 @@ export function EmployeeForm({
                         }}
                         captionLayout="dropdown-buttons" fromYear={1950} toYear={new Date().getFullYear() - 18}
                         initialFocus
+                        disabled={isEmployeeRole && !isEditMode}
                       />
                     </PopoverContent>
                   </Popover>
@@ -318,7 +326,7 @@ export function EmployeeForm({
                     <Select
                         onValueChange={(value) => field.onChange(value === NO_MANAGER_VALUE ? "" : value)}
                         value={field.value || NO_MANAGER_VALUE}
-                        disabled={isLoadingManagers}
+                        disabled={isLoadingManagers || isEmployeeRole}
                     >
                         <FormControl>
                         <SelectTrigger>
@@ -348,7 +356,7 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Work Location</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. Main Office, Remote" {...field} value={field.value ?? ""} />
+                    <Input placeholder="e.g. Main Office, Remote" {...field} value={field.value ?? ""} disabled={isEmployeeRole} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -360,7 +368,7 @@ export function EmployeeForm({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Employment Type *</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRole}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select employment type" />
@@ -391,6 +399,7 @@ export function EmployeeForm({
                          <Button
                            variant={"outline"}
                            className={cn("w-full pl-3 text-left font-normal",!field.value && "text-muted-foreground")}
+                           disabled={isEmployeeRole}
                          >
                            {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
@@ -405,7 +414,7 @@ export function EmployeeForm({
                             field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
                             setHireDatePickerOpen(false);
                          }}
-                         disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
+                         disabled={(date) => (date > new Date() || date < new Date("1900-01-01")) || isEmployeeRole}
                          initialFocus
                        />
                      </PopoverContent>
@@ -420,7 +429,7 @@ export function EmployeeForm({
               render={({ field }) => (
                 <FormItem className="pt-2">
                   <FormLabel>Status *</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRole}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select status" />
