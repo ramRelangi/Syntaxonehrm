@@ -3,7 +3,7 @@
 "use client";
 
 import * as React from "react";
-import { useParams, useRouter } from 'next/navigation'; // Added useRouter
+import { useParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Users, UserPlus, AlertTriangle, Loader2, UserCog } from "lucide-react";
@@ -13,45 +13,34 @@ import Link from "next/link";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Employee } from '@/modules/employees/types';
-import type { UserRole } from "@/modules/auth/types"; // Import UserRole
+import type { UserRole } from "@/modules/auth/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-// Removed direct action imports, data comes from props or higher-level fetch
 
-interface EmployeesPageProps {
-  // Props will be passed from parent layout or page after fetching session
-  // For client components, session data should ideally come via props or context
-  // For this example, we'll assume userRole and userId are passed if needed for client-side logic
-  // However, the primary data filtering will happen in the server action called by this page.
-}
-
-// Helper to fetch data from API routes - CLIENT SIDE VERSION (API handles tenant context)
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
     console.log(`[Employees Page - fetchData] Fetching data from: ${fullUrl}`);
-
     try {
         const response = await fetch(fullUrl, { cache: 'no-store', ...options });
-        console.log(`[Employees Page - fetchData] Fetch response status for ${fullUrl}: ${response.status}`);
-
+        console.log(`[Employees Page - fetchData] Response status for ${fullUrl}: ${response.status}`);
         if (!response.ok) {
             let errorPayload = { message: `HTTP error! status: ${response.status}`, error: '' };
-             let errorText = '';
-             try {
+            let errorText = '';
+            try {
                 errorText = await response.text();
-                 if (errorText) {
+                if (errorText) {
                     errorPayload = JSON.parse(errorText) as { message: string, error?: string };
-                 }
-             } catch (e) {
-                 console.warn(`[Employees Page - fetchData] Failed to parse error response as JSON for ${fullUrl}:`, errorText);
-                 errorPayload.message = errorText || errorPayload.message;
-             }
-             console.error(`[Employees Page - fetchData] Fetch error for ${fullUrl}:`, errorPayload);
-             if (response.status === 401 || response.status === 403 || (errorPayload.message && (errorPayload.message.includes('Unauthorized') || errorPayload.message.includes('Tenant context not found')))) {
-                 throw new Error(errorPayload.message || 'Unauthorized. Unable to load data.');
-             } else if (response.status === 400 && errorPayload.message && errorPayload.message.includes('Tenant context')) {
-                 throw new Error(errorPayload.message || 'Tenant information is missing. Unable to load data.');
-             }
-             throw new Error(errorPayload.message);
+                }
+            } catch (e) {
+                console.warn(`[Employees Page - fetchData] Failed to parse error response as JSON for ${fullUrl}:`, errorText);
+                errorPayload.message = errorText || errorPayload.message;
+            }
+            console.error(`[Employees Page - fetchData] Fetch error for ${fullUrl}:`, errorPayload);
+            if (response.status === 401 || response.status === 403 || (errorPayload.message && (errorPayload.message.includes('Unauthorized') || errorPayload.message.includes('Tenant context not found')))) {
+                throw new Error(errorPayload.message || 'Unauthorized. Unable to load data.');
+            } else if (response.status === 400 && errorPayload.message && errorPayload.message.includes('Tenant context')) {
+                throw new Error(errorPayload.message || 'Tenant information is missing. Unable to load data.');
+            }
+            throw new Error(errorPayload.message);
         }
         const data = await response.json();
         console.log(`[Employees Page - fetchData] Successfully fetched data for ${fullUrl}, record count: ${Array.isArray(data) ? data.length : 'N/A'}`);
@@ -66,8 +55,7 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     }
 }
 
-
-export default function TenantEmployeesPage({ /* props if passed from layout */ }: EmployeesPageProps) {
+export default function TenantEmployeesPage() {
   const params = useParams();
   const router = useRouter();
   const tenantDomain = params.domain as string;
@@ -76,37 +64,37 @@ export default function TenantEmployeesPage({ /* props if passed from layout */ 
   const [error, setError] = React.useState<string | null>(null);
   const { toast } = useToast();
 
-  // Session data (userRole, userId) would ideally be available here
-  // For this example, we'll assume it's fetched at a higher level and
-  // the `getEmployees` server action uses it correctly.
-  // For client-side conditional rendering based on role, you'd need that info here.
-  // Let's simulate having userRole available for UI adjustments:
+  // These are client-side derived/simulated; primary auth happens server-side in actions/layout
   const [userRole, setUserRole] = React.useState<UserRole | null>(null);
   const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    // In a real app, fetch session info securely or get from context/props
-    const fetchSession = async () => {
-        try {
-            // This is a conceptual client-side fetch; for actual session, use server-provided props
-            const sessionResponse = await fetch('/api/auth/session'); // Example endpoint
-            if (sessionResponse.ok) {
-                const session = await sessionResponse.json();
-                setUserRole(session.userRole);
-                setCurrentUserId(session.userId);
-            } else {
-                 setUserRole(null); // Or 'Employee' as a safe default if needed for UI
-                 setCurrentUserId(null);
-            }
-        } catch (e) {
-            console.error("Failed to fetch client-side session info:", e);
-            setUserRole(null);
-            setCurrentUserId(null);
+    const fetchSessionInfo = async () => {
+      console.log("[Employees Page] Attempting to fetch client-side session info...");
+      try {
+        // This conceptual fetch needs to be implemented or session passed via props/context
+        // For now, let's assume the API endpoint /api/auth/session exists and returns { userId, userRole }
+        const sessionResponse = await fetch('/api/auth/session'); // Placeholder
+        if (sessionResponse.ok) {
+          const session = await sessionResponse.json();
+          console.log("[Employees Page] Client-side session info fetched:", session);
+          setUserRole(session.userRole);
+          setCurrentUserId(session.userId);
+        } else {
+          console.warn("[Employees Page] Failed to fetch client-side session info, status:", sessionResponse.status);
+          setError("Could not verify user session.");
+          setUserRole(null);
+          setCurrentUserId(null);
         }
+      } catch (e) {
+        console.error("[Employees Page] Error fetching client-side session info:", e);
+        setError("Error fetching session details.");
+        setUserRole(null);
+        setCurrentUserId(null);
+      }
     };
-    fetchSession();
+    fetchSessionInfo();
   }, []);
-
 
   const fetchEmployees = React.useCallback(async () => {
     if (!tenantDomain) {
@@ -114,15 +102,20 @@ export default function TenantEmployeesPage({ /* props if passed from layout */ 
       setIsLoading(false);
       return;
     }
-    console.log(`[Employees Page - ${tenantDomain}] Starting fetchEmployees...`);
+    // Wait for session info to be available before fetching employees
+    if (userRole === null || currentUserId === null) {
+        console.log("[Employees Page - fetchEmployees] Waiting for session info...");
+        // setIsLoading(false); // Don't set loading false yet, let it complete
+        return;
+    }
+
+    console.log(`[Employees Page - ${tenantDomain}] Starting fetchEmployees... Role: ${userRole}, UserID: ${currentUserId}`);
     setIsLoading(true);
     setError(null);
     try {
-      // Call the server action (which internally uses session for role-based filtering)
-      // We use a generic API call here as an example, but this could also directly invoke the action if set up.
       const data = await fetchData<Employee[]>('/api/employees');
       setEmployees(data);
-       console.log(`[Employees Page - ${tenantDomain}] Successfully fetched ${data.length} employees.`);
+      console.log(`[Employees Page - ${tenantDomain}] Successfully fetched ${data.length} employees.`);
     } catch (err: any) {
       console.error(`[Employees Page - ${tenantDomain}] Error fetching employees:`, err);
       const errorMessage = err.message || "Failed to load employees. Please try refreshing the page.";
@@ -136,16 +129,17 @@ export default function TenantEmployeesPage({ /* props if passed from layout */ 
       setIsLoading(false);
       console.log(`[Employees Page - ${tenantDomain}] Finished fetchEmployees.`);
     }
-  }, [toast, tenantDomain]);
+  }, [toast, tenantDomain, userRole, currentUserId]); // Add userRole and currentUserId as dependencies
 
   React.useEffect(() => {
-    if (userRole !== null) { // Fetch employees once userRole is determined
+    // Only fetch employees if role and user ID are known
+    if (userRole !== null && currentUserId !== null) {
         fetchEmployees();
     }
-  }, [fetchEmployees, userRole]);
+  }, [fetchEmployees, userRole, currentUserId]);
 
    if (!tenantDomain) {
-       return <div>Error: Could not determine tenant context.</div>;
+       return <div className="text-center text-destructive py-10">Error: Could not determine tenant context.</div>;
    }
 
   const handleEmployeeDeleted = () => {
@@ -154,7 +148,7 @@ export default function TenantEmployeesPage({ /* props if passed from layout */ 
   };
 
   const renderContent = () => {
-     if (isLoading || userRole === null) { // Also show loading if role isn't determined yet
+     if (isLoading || userRole === null) {
        return (
            <div className="space-y-4">
                <Skeleton className="h-10 w-1/3" />
@@ -167,7 +161,7 @@ export default function TenantEmployeesPage({ /* props if passed from layout */ 
        return (
            <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Error Loading Employees</AlertTitle>
+              <AlertTitle>Error Loading Data</AlertTitle>
               <AlertDescription>
                  {error} <Button variant="link" onClick={fetchEmployees} className="p-0 h-auto">Try again</Button>
               </AlertDescription>
@@ -175,35 +169,26 @@ export default function TenantEmployeesPage({ /* props if passed from layout */ 
        );
      }
 
-     // If user is an 'Employee' and data is loaded, potentially show their profile or a restricted view
      if (userRole === 'Employee') {
          if (employees.length === 1 && currentUserId && employees[0].userId === currentUserId) {
-             // Option 1: Redirect to their profile page
-             // React.useEffect(() => {
-             //    router.push(`/${tenantDomain}/employees/${employees[0].id}`);
-             // }, [employees, router, tenantDomain]);
-             // return <p>Redirecting to your profile...</p>;
-
-             // Option 2: Display a link to their profile
              return (
                  <div className="text-center py-10">
                      <UserCog className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                      <h2 className="text-xl font-semibold">Your Profile</h2>
                      <p className="text-muted-foreground mb-4">You are viewing your employee information.</p>
                      <Button asChild>
-                         <Link href={`/${tenantDomain}/employees/${employees[0].id}`}>
-                             View My Profile
+                         <Link href={`/${tenantDomain}/employees/${employees[0].userId}`}>
+                             View My Detailed Profile
                          </Link>
                      </Button>
-                     {/* Or, show the table with just their data */}
-                     {/* <EmployeeDataTable columns={columns} data={employees} onEmployeeDeleted={handleEmployeeDeleted} /> */}
                  </div>
              );
          } else if (employees.length === 0 && currentUserId){
-              return <p className="text-center py-10 text-muted-foreground">Your employee profile could not be loaded.</p>;
+              return <p className="text-center py-10 text-muted-foreground">Your employee profile could not be loaded or is not yet available.</p>;
          }
      }
 
+     // For Admin/Manager or if Employee has multiple records (should not happen)
      return (
        <EmployeeDataTable
          columns={columns}
@@ -242,3 +227,4 @@ export default function TenantEmployeesPage({ /* props if passed from layout */ 
     </div>
   );
 }
+
