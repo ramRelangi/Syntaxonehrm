@@ -2,6 +2,9 @@
 import pool from '@/lib/db';
 import type { Employee, EmployeeFormData } from '@/modules/employees/types';
 
+// Case-insensitive UUID regex
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Function to map database row to Employee object
 function mapRowToEmployee(row: any): Employee {
     return {
@@ -25,9 +28,13 @@ function mapRowToEmployee(row: any): Employee {
 
 // Get employees for a specific tenant
 export async function getAllEmployees(tenantId: string): Promise<Employee[]> {
+    if (!uuidRegex.test(tenantId)) {
+        console.error(`[DB getAllEmployees] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier format.");
+    }
     const client = await pool.connect();
     try {
-        const res = await client.query('SELECT * FROM employees WHERE tenant_id = $1 ORDER BY name ASC', [tenantId]);
+        const res = await client.query('SELECT * FROM employees WHERE tenant_id = $1 ORDER BY name ASC', [tenantId.toLowerCase()]);
         return res.rows.map(mapRowToEmployee);
     } catch (err) {
         console.error(`Error fetching all employees for tenant ${tenantId}:`, err);
@@ -39,9 +46,20 @@ export async function getAllEmployees(tenantId: string): Promise<Employee[]> {
 
 // Get employee by ID (ensure it belongs to the tenant)
 export async function getEmployeeById(id: string, tenantId: string): Promise<Employee | undefined> {
+    console.log(`[DB getEmployeeById] Validating IDs. Employee ID: ${id}, Tenant ID: ${tenantId}`);
+    if (!uuidRegex.test(id)) {
+        console.error(`[DB getEmployeeById] Invalid employee ID format: ${id}`);
+        throw new Error("Invalid employee identifier format.");
+    }
+    if (!uuidRegex.test(tenantId)) {
+        console.error(`[DB getEmployeeById] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier format.");
+    }
     const client = await pool.connect();
     try {
-        const res = await client.query('SELECT * FROM employees WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+        console.log(`[DB getEmployeeById] Querying for employee.id: ${id.toLowerCase()}, tenantId: ${tenantId.toLowerCase()}`);
+        const res = await client.query('SELECT * FROM employees WHERE id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
+        console.log(`[DB getEmployeeById] Rows found: ${res.rows.length}`);
         if (res.rows.length > 0) {
             return mapRowToEmployee(res.rows[0]);
         }
@@ -63,7 +81,7 @@ async function generateNextEmployeeId(tenantId: string, client: any): Promise<st
         ORDER BY CAST(SUBSTRING(employee_id FROM ${prefix.length + 1}) AS INTEGER) DESC
         LIMIT 1;
     `;
-    const res = await client.query(query, [tenantId]);
+    const res = await client.query(query, [tenantId.toLowerCase()]);
     let nextNumericPart = 1;
     if (res.rows.length > 0 && res.rows[0].employee_id) {
         const lastId = res.rows[0].employee_id;
@@ -77,19 +95,18 @@ async function generateNextEmployeeId(tenantId: string, client: any): Promise<st
 
 
 export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employeeId'> & { tenantId: string, userId: string }): Promise<Employee> {
+    if (!uuidRegex.test(employeeData.tenantId)) {
+        console.error(`[DB addEmployee] Invalid tenantId format: ${employeeData.tenantId}`);
+        throw new Error("Invalid tenant identifier format.");
+    }
+     if (!uuidRegex.test(employeeData.userId)) {
+        console.error(`[DB addEmployee] Invalid userId format: ${employeeData.userId}`);
+        throw new Error("Invalid user identifier format.");
+    }
     const client = await pool.connect();
-    if (!employeeData.tenantId) {
-        throw new Error("Tenant ID is required to add an employee.");
-    }
-     if (!employeeData.userId) {
-        throw new Error("User ID is required to link employee to a user account.");
-    }
-
     try {
         await client.query('BEGIN');
-
         const newEmployeeId = await generateNextEmployeeId(employeeData.tenantId, client);
-
         const query = `
             INSERT INTO employees (
                 tenant_id, user_id, employee_id, name, email, phone, position, department,
@@ -100,8 +117,8 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
             RETURNING *;
         `;
         const values = [
-            employeeData.tenantId,
-            employeeData.userId,
+            employeeData.tenantId.toLowerCase(),
+            employeeData.userId.toLowerCase(),
             newEmployeeId,
             employeeData.name,
             employeeData.email,
@@ -115,7 +132,6 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
             employeeData.workLocation || null,
             employeeData.employmentType || 'Full-time',
         ];
-
         const res = await client.query(query, values);
         await client.query('COMMIT');
         return mapRowToEmployee(res.rows[0]);
@@ -140,25 +156,23 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
 }
 
 export async function updateEmployee(id: string, tenantId: string, updates: Partial<EmployeeFormData>): Promise<Employee | undefined> {
+    if (!uuidRegex.test(id)) {
+        console.error(`[DB updateEmployee] Invalid employee ID format: ${id}`);
+        throw new Error("Invalid employee identifier format.");
+    }
+    if (!uuidRegex.test(tenantId)) {
+        console.error(`[DB updateEmployee] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier format.");
+    }
     const client = await pool.connect();
     const setClauses: string[] = [];
     const values: any[] = [];
     let valueIndex = 1;
-
     const columnMap: { [K in keyof EmployeeFormData]?: string } = {
-        name: 'name',
-        email: 'email',
-        phone: 'phone',
-        position: 'position',
-        department: 'department',
-        hireDate: 'hire_date',
-        status: 'status',
-        dateOfBirth: 'date_of_birth',
-        reportingManagerId: 'reporting_manager_id',
-        workLocation: 'work_location',
-        employmentType: 'employment_type',
+        name: 'name', email: 'email', phone: 'phone', position: 'position', department: 'department',
+        hireDate: 'hire_date', status: 'status', dateOfBirth: 'date_of_birth',
+        reportingManagerId: 'reporting_manager_id', workLocation: 'work_location', employmentType: 'employment_type',
     };
-
     for (const key in updates) {
         if (key === 'tenantId' || key === 'employeeId' || key === 'userId') continue;
         if (Object.prototype.hasOwnProperty.call(updates, key)) {
@@ -166,41 +180,31 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
             if (dbKey) {
                 setClauses.push(`${dbKey} = $${valueIndex}`);
                 let value = updates[key as keyof EmployeeFormData];
-                if (key === 'phone' && value === '') value = null;
-                if (key === 'dateOfBirth' && value === '') value = null;
-                if (key === 'reportingManagerId' && value === '') value = null;
-                if (key === 'workLocation' && value === '') value = null;
+                if ((key === 'phone' || key === 'dateOfBirth' || key === 'reportingManagerId' || key === 'workLocation') && value === '') {
+                    value = null;
+                }
                 values.push(value);
                 valueIndex++;
             }
         }
     }
-
-    if (setClauses.length === 0) {
-        return getEmployeeById(id, tenantId);
-    }
-
-    values.push(id);
-    values.push(tenantId);
+    if (setClauses.length === 0) return getEmployeeById(id, tenantId);
+    setClauses.push(`updated_at = NOW()`);
+    values.push(id.toLowerCase());
+    values.push(tenantId.toLowerCase());
     const query = `
         UPDATE employees
-        SET ${setClauses.join(', ')}, updated_at = NOW()
+        SET ${setClauses.join(', ')}
         WHERE id = $${valueIndex} AND tenant_id = $${valueIndex + 1}
         RETURNING *;
     `;
-
     try {
         const res = await client.query(query, values);
-        if (res.rows.length > 0) {
-            return mapRowToEmployee(res.rows[0]);
-        }
-        return undefined;
+        return res.rows.length > 0 ? mapRowToEmployee(res.rows[0]) : undefined;
     } catch (err: any) {
         console.error(`Error updating employee with id ${id} for tenant ${tenantId}:`, err);
-        if (err.code === '23505') {
-            if (err.constraint === 'employees_tenant_id_email_key') {
-                throw new Error('Email address already exists for this tenant.');
-            }
+        if (err.code === '23505' && err.constraint === 'employees_tenant_id_email_key') {
+            throw new Error('Email address already exists for this tenant.');
         }
         throw err;
     } finally {
@@ -209,35 +213,34 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
 }
 
 export async function deleteEmployee(id: string, tenantId: string): Promise<boolean> {
+    if (!uuidRegex.test(id)) {
+        console.error(`[DB deleteEmployee] Invalid employee ID format: ${id}`);
+        throw new Error("Invalid employee identifier format.");
+    }
+    if (!uuidRegex.test(tenantId)) {
+        console.error(`[DB deleteEmployee] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier format.");
+    }
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-
-        // Get the user_id associated with this employee
-        const employeeRes = await client.query('SELECT user_id FROM employees WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+        const employeeRes = await client.query('SELECT user_id FROM employees WHERE id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
         const userIdToDelete = employeeRes.rows.length > 0 ? employeeRes.rows[0].user_id : null;
-
-        // Delete the employee record
-        const deleteEmployeeRes = await client.query('DELETE FROM employees WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
-
+        const deleteEmployeeRes = await client.query('DELETE FROM employees WHERE id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
         if (deleteEmployeeRes.rowCount === 0) {
             await client.query('ROLLBACK');
             console.warn(`Employee ${id} not found for tenant ${tenantId} during deletion.`);
-            return false; // Employee not found or not deleted
+            return false;
         }
-
-        // If a user_id was associated, delete the user record
         if (userIdToDelete) {
             console.log(`[DB deleteEmployee] Deleting associated user with ID: ${userIdToDelete} for employee ${id}`);
-            const deleteUserRes = await client.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2', [userIdToDelete, tenantId]);
+            const deleteUserRes = await client.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2', [userIdToDelete.toLowerCase(), tenantId.toLowerCase()]);
             if (deleteUserRes.rowCount === 0) {
-                // This case is less likely if FKs are set up correctly, but good to log
                 console.warn(`[DB deleteEmployee] User ${userIdToDelete} not found or not deleted for tenant ${tenantId} during employee cleanup.`);
             } else {
                 console.log(`[DB deleteEmployee] Successfully deleted user ${userIdToDelete}.`);
             }
         }
-
         await client.query('COMMIT');
         return true;
     } catch (err) {
@@ -249,11 +252,21 @@ export async function deleteEmployee(id: string, tenantId: string): Promise<bool
     }
 }
 
-// Needed for login restriction
 export async function getEmployeeByUserId(userId: string, tenantId: string): Promise<Employee | undefined> {
+    console.log(`[DB getEmployeeByUserId] Validating IDs. User ID: ${userId}, Tenant ID: ${tenantId}`);
+    if (!uuidRegex.test(userId)) {
+        console.error(`[DB getEmployeeByUserId] Invalid userId format: ${userId}`);
+        throw new Error("Invalid user identifier format.");
+    }
+    if (!uuidRegex.test(tenantId)) {
+        console.error(`[DB getEmployeeByUserId] Invalid tenantId format: ${tenantId}`);
+        throw new Error("Invalid tenant identifier format.");
+    }
     const client = await pool.connect();
     try {
-        const res = await client.query('SELECT * FROM employees WHERE user_id = $1 AND tenant_id = $2', [userId, tenantId]);
+        console.log(`[DB getEmployeeByUserId] Querying for userId: ${userId.toLowerCase()}, tenantId: ${tenantId.toLowerCase()}`);
+        const res = await client.query('SELECT * FROM employees WHERE user_id = $1 AND tenant_id = $2', [userId.toLowerCase(), tenantId.toLowerCase()]);
+        console.log(`[DB getEmployeeByUserId] Rows found: ${res.rows.length}`);
         if (res.rows.length > 0) {
             return mapRowToEmployee(res.rows[0]);
         }
@@ -265,5 +278,3 @@ export async function getEmployeeByUserId(userId: string, tenantId: string): Pro
         client.release();
     }
 }
-
-    

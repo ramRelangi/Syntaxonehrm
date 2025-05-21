@@ -18,7 +18,12 @@ export async function GET(request: NextRequest, { params }: Params) {
   } catch (error: any) {
     console.error(`Error fetching employee ${params.id} (API):`, error);
     // Propagate a more specific error message if available from the action
-    return NextResponse.json({ error: error.message || 'Failed to fetch employee' }, { status: 500 });
+    const errorMessage = error.message || 'Failed to fetch employee';
+    // Check if it's an authorization error from the action
+    if (errorMessage.toLowerCase().includes('unauthorized')) {
+        return NextResponse.json({ error: errorMessage }, { status: 403 });
+    }
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
 
@@ -47,6 +52,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
          if (result.errors?.some(e => e.message?.includes('Email address already exists'))) {
              return NextResponse.json({ error: 'Email address already exists for this tenant.' }, { status: 409 }); // 409 Conflict
          }
+          if (result.errors?.some(e => e.message?.toLowerCase().includes('unauthorized'))) {
+             return NextResponse.json({ error: result.errors[0].message }, { status: 403 });
+         }
       return NextResponse.json({ error: result.errors?.[0]?.message || 'Failed to update employee' }, { status: result.errors ? 400 : 500 });
     }
   } catch (error: any) {
@@ -66,7 +74,10 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       return NextResponse.json({ message: 'Employee deleted successfully' }, { status: 200 }); // Or 204 No Content
     } else {
       // Use error message from the action
-      return NextResponse.json({ error: result.error || 'Failed to delete employee' }, { status: result.error?.includes('not found') ? 404 : 500 });
+      let statusCode = 500;
+      if (result.error?.includes('not found')) statusCode = 404;
+      else if (result.error?.toLowerCase().includes('unauthorized')) statusCode = 403;
+      return NextResponse.json({ error: result.error || 'Failed to delete employee' }, { status: statusCode });
     }
   } catch (error: any) {
     console.error(`Error deleting employee ${params.id} (API):`, error);

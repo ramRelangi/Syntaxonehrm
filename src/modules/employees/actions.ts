@@ -90,74 +90,73 @@ export async function getEmployees(): Promise<Employee[]> {
 
 
 export async function getEmployeeByIdAction(id: string): Promise<Employee | undefined> {
-   let tenantId: string | null = null;
-   let userRole: User['role'] | null = null;
-   let currentUserId: string | null = null;
+    let tenantId: string | null = null;
+    let userRole: User['role'] | null = null;
+    let currentUserId: string | null = null;
 
-   try {
-       const sessionData = await getSessionData();
-       if (!sessionData) {
-           console.error("[Action getEmployeeByIdAction] Failed to get session data.");
-           throw new Error("Session data not found.");
-       }
-       tenantId = sessionData.tenantId;
-       userRole = sessionData.userRole;
-       currentUserId = sessionData.userId;
+    try {
+        const sessionData = await getSessionData();
+        tenantId = sessionData?.tenantId ?? null;
+        userRole = sessionData?.userRole ?? null;
+        currentUserId = sessionData?.userId ?? null;
 
-       if (!tenantId) throw new Error("Tenant ID missing from session data.");
-       if (!userRole) throw new Error("User role missing from session data.");
-       if (!currentUserId) throw new Error("User ID missing from session data.");
+        if (!tenantId || !userRole || !currentUserId) {
+            console.error("[Action getEmployeeByIdAction] Incomplete session data.");
+            throw new Error("User session is incomplete.");
+        }
+        console.log(`[Action getEmployeeByIdAction] Received ID param: ${id}`);
+        console.log(`[Action getEmployeeByIdAction] Session - currentUserId: ${currentUserId}, tenantId: ${tenantId}, userRole: ${userRole}`);
+    } catch (e: any) {
+        console.error("[Action getEmployeeByIdAction] Error fetching session data:", e.message, e.stack ? e.stack : '(No stack trace)');
+        throw new Error("Failed to retrieve session context: " + e.message);
+    }
 
-       console.log(`[Action getEmployeeByIdAction] Received ID param: ${id}`);
-       console.log(`[Action getEmployeeByIdAction] Session - currentUserId: ${currentUserId}, tenantId: ${tenantId}, userRole: ${userRole}`);
+    let employeeProfile: Employee | undefined = undefined;
 
-   } catch (e: any) {
-       console.error("[Action getEmployeeByIdAction] Error fetching session data:", e.message, e.stack ? e.stack : '(No stack trace)');
-       throw new Error("Failed to retrieve session context: " + e.message);
-   }
+    try {
+        if (userRole === 'Employee') {
+            if (id !== currentUserId) {
+                console.warn(`[Action getEmployeeByIdAction] Authorization_Failed (Employee Role): Attempt to access employee profile (URL ID: ${id}) that does not match session userId (${currentUserId}).`);
+                throw new Error("Unauthorized to view this employee profile.");
+            }
+            // For "My Profile", 'id' from URL is the userId.
+            console.log(`[Action getEmployeeByIdAction] Employee role. Fetching own profile using dbGetEmployeeByUserId with userId: ${id}, tenantId: ${tenantId}`);
+            employeeProfile = await dbGetEmployeeByUserId(id, tenantId);
+            if (employeeProfile) {
+                console.log(`[Action getEmployeeByIdAction] dbGetEmployeeByUserId SUCCESS: Own profile found for userId ${id}.`);
+            } else {
+                console.warn(`[Action getEmployeeByIdAction] dbGetEmployeeByUserId FAILED: Own profile NOT found for userId ${id} in tenant ${tenantId}. This user may not have a linked employee record, or the linkage is incorrect.`);
+            }
+        } else { // Admin or Manager
+            console.log(`[Action getEmployeeByIdAction] Admin/Manager role. Fetching employee profile by primary key id: ${id}, tenantId: ${tenantId}`);
+            employeeProfile = await dbGetEmployeeById(id, tenantId); // This 'id' is expected to be employee.id (primary key)
+            if (employeeProfile) {
+                console.log(`[Action getEmployeeByIdAction] dbGetEmployeeById SUCCESS: Profile found for employee.id ${id}.`);
+            } else {
+                console.warn(`[Action getEmployeeByIdAction] dbGetEmployeeById FAILED: Profile NOT found for employee.id ${id} in tenant ${tenantId}.`);
+            }
+        }
 
-   let employeeProfile: Employee | undefined = undefined;
+        if (!employeeProfile) {
+            console.log(`[Action getEmployeeByIdAction] No employee profile found for ID ${id} with current context. Returning undefined.`);
+            return undefined;
+        }
+        return employeeProfile;
 
-   try {
-      // First, always fetch the employee by their primary key (id from URL)
-      console.log(`[Action getEmployeeByIdAction] Attempting to fetch employee by primary key id: ${id}, tenantId: ${tenantId}`);
-      employeeProfile = await dbGetEmployeeById(id, tenantId);
-
-      if (!employeeProfile) {
-          console.warn(`[Action getEmployeeByIdAction] Employee profile not found by primary key id ${id} in tenant ${tenantId}.`);
-          return undefined;
-      }
-      console.log(`[Action getEmployeeByIdAction] Successfully fetched employee by primary key. Employee UserID: ${employeeProfile.userId}`);
-
-      // If the user is an 'Employee', verify they are accessing their own record
-      if (userRole === 'Employee') {
-          if (employeeProfile.userId !== currentUserId) {
-              console.warn(`[Action getEmployeeByIdAction] Authorization_Failed: Employee ${currentUserId} trying to access profile of employee with user_id ${employeeProfile.userId} (primary key ${id}).`);
-              throw new Error("Unauthorized to view this employee profile.");
-          }
-          console.log(`[Action getEmployeeByIdAction] Employee role accessing own profile. Access granted for employee.id ${id} (user_id ${currentUserId}).`);
-      } else {
-          // Admin or Manager role, access granted
-          console.log(`[Action getEmployeeByIdAction] Admin/Manager role. Access granted for employee.id ${id}.`);
-      }
-
-      return employeeProfile;
-
-   } catch (error: any) {
-        console.error(`[Action getEmployeeByIdAction] Error processing request for employee ID ${id} (tenant: ${tenantId}):`, error.message, error.stack ? error.stack : '(No stack trace)');
+    } catch (error: any) {
+        console.error(`[Action getEmployeeByIdAction] Error processing request for employee ID ${id} (tenant: ${tenantId}):`, error);
         if (error.message === "Unauthorized to view this employee profile.") {
             throw error; // Re-throw specific auth error
         }
-        // Check for database-specific errors or provide a generic one
         let friendlyMessage = "Failed to fetch employee details.";
-        if (error.code && typeof error.code === 'string') { // e.g., DB errors
+        if (error.code && typeof error.code === 'string') {
             friendlyMessage = `Database error (code ${error.code}) retrieving employee. Check server logs.`;
         } else if (error.message) {
             const prefix = "Error: ";
             friendlyMessage = error.message.startsWith(prefix) ? error.message.substring(prefix.length) : error.message;
         }
         throw new Error(friendlyMessage);
-   }
+    }
 }
 
 
