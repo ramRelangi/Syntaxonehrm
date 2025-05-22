@@ -2,7 +2,8 @@
 import pool from '@/lib/db';
 import type { Employee, EmployeeFormData, Gender } from '@/modules/employees/types';
 import { initializeEmployeeBalancesForAllTypes } from '@/modules/leave/lib/db';
-import type { UserRole } from '@/modules/auth/types'; // Import UserRole
+import type { UserRole } from '@/modules/auth/types';
+import { deleteUserById as dbDeleteUserById } from '@/modules/auth/lib/db'; // Import user deletion function
 
 // Case-insensitive UUID regex
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -28,7 +29,7 @@ function mapRowToEmployee(row: any): Employee {
         employmentType: row.employment_type as Employee['employmentType'] ?? 'Full-time',
         // Role is not directly stored on the employees table in this schema version,
         // it's on the users table. If needed here, a JOIN would be required.
-        // role: row.role as UserRole ?? 'Employee', 
+        // role: row.role as UserRole ?? 'Employee',
     };
 }
 
@@ -234,36 +235,50 @@ export async function deleteEmployee(id: string, tenantId: string): Promise<bool
     }
     if (!uuidRegex.test(tenantId)) {
         console.error(`[DB deleteEmployee] Invalid tenantId format: ${tenantId}`);
-        throw new Error("Invalid tenant identifier format.");
+        throw new Error("Invalid tenant identifier.");
     }
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        console.log(`[DB deleteEmployee] Attempting to fetch employee PK ${id.toLowerCase()} for tenant ${tenantId.toLowerCase()} to get user_id.`);
         const employeeRes = await client.query('SELECT user_id FROM employees WHERE id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
+        
         const userIdToDelete = employeeRes.rows.length > 0 ? employeeRes.rows[0].user_id : null;
+        console.log(`[DB deleteEmployee] Found user_id to delete: ${userIdToDelete} (null if no user linked or employee not found).`);
+
+        console.log(`[DB deleteEmployee] Attempting to delete employee record PK ${id.toLowerCase()} for tenant ${tenantId.toLowerCase()}.`);
         const deleteEmployeeRes = await client.query('DELETE FROM employees WHERE id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
+        
         if (deleteEmployeeRes.rowCount === 0) {
             await client.query('ROLLBACK');
-            console.warn(`Employee PK ${id} not found for tenant ${tenantId} during deletion.`);
-            return false;
+            console.warn(`[DB deleteEmployee] Employee PK ${id} not found for tenant ${tenantId} during deletion attempt. Rollback.`);
+            return false; // Employee not found
         }
+        console.log(`[DB deleteEmployee] Employee record PK ${id} deleted successfully. Count: ${deleteEmployeeRes.rowCount}.`);
+
         if (userIdToDelete) {
-            console.log(`[DB deleteEmployee] Deleting associated user with ID: ${userIdToDelete} for employee PK ${id}`);
-            const deleteUserRes = await client.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2', [userIdToDelete.toLowerCase(), tenantId.toLowerCase()]);
-            if (deleteUserRes.rowCount === 0) {
-                console.warn(`[DB deleteEmployee] User ${userIdToDelete} not found or not deleted for tenant ${tenantId} during employee cleanup.`);
-            } else {
+            console.log(`[DB deleteEmployee] Attempting to delete associated user with ID: ${userIdToDelete} for tenant ${tenantId.toLowerCase()} using dbDeleteUserById.`);
+            const userDeleted = await dbDeleteUserById(userIdToDelete, tenantId.toLowerCase(), client); // Pass the client for transaction
+            if (userDeleted) {
                 console.log(`[DB deleteEmployee] Successfully deleted user ${userIdToDelete}.`);
+            } else {
+                // This case (user not found) might be acceptable if the link was already broken, but log it.
+                console.warn(`[DB deleteEmployee] User ${userIdToDelete} not found during employee cleanup, or an error occurred in dbDeleteUserById (which should throw).`);
             }
+        } else {
+            console.log(`[DB deleteEmployee] No user_id associated with employee PK ${id}, or user_id was null. Skipping user deletion.`);
         }
+
         await client.query('COMMIT');
+        console.log(`[DB deleteEmployee] Transaction committed for deletion of employee PK ${id}.`);
         return true;
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error(`Error deleting employee with id (PK) ${id} for tenant ${tenantId}:`, err);
-        throw err;
+        console.error(`[DB deleteEmployee] Error during deletion of employee PK ${id} for tenant ${tenantId}. Transaction rolled back:`, err);
+        throw err; // Re-throw the error to be caught by the action
     } finally {
         client.release();
+        console.log(`[DB deleteEmployee] Client released for deletion of employee PK ${id}.`);
     }
 }
 
