@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { LeaveType, LeaveRequest, LeaveBalance, Holiday } from "@/modules/leave/types";
 import type { Gender } from "@/modules/employees/types"; // Import Gender
-import { getHolidaysAction, getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances } from '@/modules/leave/actions';
+import { getHolidaysAction, getLeaveRequestsAction as getLeaveRequests, getLeaveTypesAction as getLeaveTypes, getEmployeeLeaveBalancesAction } from '@/modules/leave/actions';
 import { useSearchParams, useRouter } from "next/navigation";
 
 interface LeavePageClientProps {
@@ -60,7 +60,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
               getLeaveTypes(),
               isAdmin && !employeeIdFromQuery ? getLeaveRequests() : Promise.resolve([]),
               getLeaveRequests({ employeeId: targetUserId }),
-              getEmployeeLeaveBalances(targetUserId),
+              getEmployeeLeaveBalancesAction(targetUserId),
               getHolidaysAction(),
           ]);
           setAllLeaveTypes(typesData); // Store all types
