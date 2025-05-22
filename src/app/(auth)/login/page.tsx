@@ -22,7 +22,7 @@ export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const [tenantDomain, setTenantDomain] = useState<string | null>(null);
+  const [tenantSubdomain, setTenantSubdomain] = useState<string | null>(null); // Changed from tenantDomain
   const [rootDomain, setRootDomain] = useState<string>('localhost');
   const [port, setPort] = useState<string>('');
   const [displayUrl, setDisplayUrl] = useState<string | null>(null);
@@ -32,7 +32,6 @@ export default function LoginPage() {
       if (typeof window !== 'undefined') {
         const currentRootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
         const currentPort = window.location.port;
-        const currentProtocol = window.location.protocol;
         const hostname = window.location.hostname;
         console.log(`[LoginPage Effect] Hostname: ${hostname}, Root Domain: ${currentRootDomain}, Port: ${currentPort}`);
 
@@ -43,32 +42,35 @@ export default function LoginPage() {
 
         const isRoot =
            hostname === currentRootDomain ||
-           hostname === 'localhost' ||
-           hostname === '127.0.0.1' ||
+           hostname === 'localhost' || // Keep localhost for dev
+           hostname === '127.0.0.1' || // Local IP
            hostname.match(/^192\.168\.\d+\.\d+$/) || // Local IPs
            hostname.match(/^10\.\d+\.\d+\.\d+$/) || // Local IPs
            hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/); // Local IPs
 
+
         if (isRoot) {
             setIsRootLogin(true);
-            setTenantDomain(null);
+            setTenantSubdomain(null);
             setDisplayUrl(`${currentRootDomain}${displayPortString}`);
             console.log(`[LoginPage Effect] On root domain. Display URL: ${currentRootDomain}${displayPortString}`);
         } else {
-            const match = hostname.match(`^(.*)\\.${currentRootDomain}$`);
+            // Match subdomain.rootDomain
+            const match = hostname.match(new RegExp(`^(.*)\\.${currentRootDomain.replace(/\./g, '\\.')}$`));
             const subdomain = match ? match[1] : null;
             console.log(`[LoginPage Effect] Extracted subdomain: ${subdomain}`);
 
-            if (subdomain && !['www', 'api'].includes(subdomain)) {
+            if (subdomain && !['www', 'api'].includes(subdomain)) { // Add more ignored subdomains if needed
                 setIsRootLogin(false);
-                setTenantDomain(subdomain);
+                setTenantSubdomain(subdomain);
                 setDisplayUrl(`${subdomain}.${currentRootDomain}${displayPortString}`);
-                console.log(`[LoginPage Effect] Tenant domain set to: ${subdomain}. Display URL: ${subdomain}.${currentRootDomain}${displayPortString}`);
+                console.log(`[LoginPage Effect] Tenant subdomain set to: ${subdomain}. Display URL: ${subdomain}.${currentRootDomain}${displayPortString}`);
             } else {
-                setIsRootLogin(true);
-                setTenantDomain(null);
-                setDisplayUrl(`${hostname}${displayPortString}`); // Use actual hostname if subdomain is invalid/ignored
-                console.log(`[LoginPage Effect] Invalid/ignored subdomain or root equivalent. Treating as root login. Display URL: ${hostname}${displayPortString}`);
+                // If it's not a valid subdomain structure or an ignored subdomain, treat as root/invalid
+                setIsRootLogin(true); // Or handle as error, redirect to register
+                setTenantSubdomain(null);
+                setDisplayUrl(`${hostname}${displayPortString}`);
+                console.warn(`[LoginPage Effect] Invalid/ignored subdomain or non-tenant hostname: ${hostname}. Treating as root/default. Display URL: ${hostname}${displayPortString}`);
             }
         }
       }
@@ -78,7 +80,7 @@ export default function LoginPage() {
   const form = useForm<TenantLoginFormInputs>({
     resolver: zodResolver(tenantLoginSchema),
     defaultValues: {
-      loginIdentifier: "",
+      loginIdentifier: "", // For username or email
       password: "",
     },
   });
@@ -88,15 +90,14 @@ export default function LoginPage() {
     console.log(`Login attempt with identifier: ${data.loginIdentifier}`);
 
     try {
-      const result = await loginAction(data);
+      const result = await loginAction(data); // loginAction will derive tenant from hostname
 
       if (!result.success) {
-        toast({ title: "Login Failed", description: result.error || "Invalid credentials.", variant: "destructive" });
+        toast({ title: "Login Failed", description: result.error || "Invalid credentials or inactive account.", variant: "destructive" });
         setIsLoading(false);
       } else {
         toast({ title: "Login Successful", description: "Welcome back!" });
-        // The router.push will redirect to the dashboard *within the current tenant's domain*
-        // due to how the middleware and app layout are structured.
+        // router.push will work within the current subdomain context
         router.push('/dashboard');
       }
     } catch (error: any) {
@@ -106,12 +107,12 @@ export default function LoginPage() {
     }
   };
 
-  const forgotPasswordHref = tenantDomain
-    ? `/forgot-password/${tenantDomain}` // Keep tenant domain in forgot password link
-    : '/forgot-password'; // Root forgot password page
+  const forgotPasswordHref = tenantSubdomain
+    ? `/forgot-password/${tenantSubdomain}`
+    : '/forgot-password';
 
-  const displayLocation = tenantDomain
-      ? `company: ${tenantDomain}`
+  const displayLocation = tenantSubdomain
+      ? `company: ${tenantSubdomain}`
       : `the main portal`;
 
   return (
@@ -133,7 +134,8 @@ export default function LoginPage() {
                 <Alert variant="default" className="mb-4 bg-blue-50 border-blue-300 text-blue-800 [&>svg]:text-blue-600 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-300 dark:[&>svg]:text-blue-500">
                     <AlertTitle>Root Login</AlertTitle>
                     <AlertDescription>
-                         Please use your company's unique login URL (e.g., <strong>your-company.{rootDomain}</strong>) to access your account. If you are registering a new company, please go to the <Link href="/register" className='font-medium underline'>registration page</Link>.
+                         Please use your company's unique login URL (e.g., <strong>your-company.{rootDomain}</strong>) to access your account.
+                         If you are registering a new company, please go to the <Link href="/register" className='font-medium underline'>registration page</Link>.
                     </AlertDescription>
                 </Alert>
             )}
@@ -144,9 +146,9 @@ export default function LoginPage() {
                 name="loginIdentifier"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Email or Employee ID</FormLabel>
+                    <FormLabel>Username or Email</FormLabel>
                     <FormControl>
-                      <Input placeholder="your.email@company.com or EMP-001" {...field} />
+                      <Input placeholder="your_username or your.email@company.com" {...field} autoCapitalize='none'/>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -161,9 +163,9 @@ export default function LoginPage() {
                       <FormLabel>Password</FormLabel>
                       <Link
                         href={forgotPasswordHref}
-                        className={`text-sm font-medium text-primary hover:underline ${isRootLogin && !tenantDomain ? 'pointer-events-none opacity-50' : ''}`}
-                        aria-disabled={isRootLogin && !tenantDomain}
-                        tabIndex={isRootLogin && !tenantDomain ? -1 : undefined}
+                        className={`text-sm font-medium text-primary hover:underline ${isRootLogin && !tenantSubdomain ? 'pointer-events-none opacity-50' : ''}`}
+                        aria-disabled={isRootLogin && !tenantSubdomain}
+                        tabIndex={isRootLogin && !tenantSubdomain ? -1 : undefined}
                       >
                         Forgot password?
                       </Link>
@@ -178,7 +180,7 @@ export default function LoginPage() {
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full" disabled={isLoading || (isRootLogin && !tenantDomain) }>
+              <Button type="submit" className="w-full" disabled={isLoading || (isRootLogin && !tenantSubdomain) }>
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Please wait
@@ -189,7 +191,7 @@ export default function LoginPage() {
               </Button>
             </form>
           </Form>
-          {!tenantDomain && ( // Only show register link on root login or if tenant domain isn't determined
+          {!tenantSubdomain && (
             <div className="mt-4 text-center text-sm">
                 Need to register a company?{' '}
                 <Link href="/register" className="font-medium text-primary hover:underline">

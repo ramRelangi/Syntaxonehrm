@@ -1,7 +1,7 @@
 
 "use client";
 
-import * as React from 'react'; // Import React
+import * as React from 'react';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Link as LinkIcon } from 'lucide-react'; // Added LinkIcon
+import { Loader2, Link as LinkIcon } from 'lucide-react';
 import { registrationSchema, type RegistrationFormData } from '@/modules/auth/types';
 import { registerTenantAction } from '@/modules/auth/actions';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -21,11 +21,10 @@ export default function RegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const [registrationSuccess, setRegistrationSuccess] = useState(false); // Track success state
-  const [loginUrl, setLoginUrl] = useState(''); // State to hold the login URL
-  const [rootDomain, setRootDomain] = React.useState('localhost'); // State for root domain
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const [loginUrl, setLoginUrl] = useState('');
+  const [rootDomain, setRootDomain] = React.useState('localhost');
 
-  // Get the root domain on the client side
   React.useEffect(() => {
     setRootDomain(process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost');
   }, []);
@@ -36,8 +35,9 @@ export default function RegisterPage() {
     resolver: zodResolver(registrationSchema),
     defaultValues: {
       companyName: "",
-      companyDomain: "",
+      companySubdomain: "", // Changed from companyDomain
       adminName: "",
+      adminUsername: "", // Added
       adminEmail: "",
       adminPassword: "",
     },
@@ -45,8 +45,8 @@ export default function RegisterPage() {
 
   const onSubmit: SubmitHandler<RegistrationFormData> = async (data) => {
     setIsLoading(true);
-    setRegistrationSuccess(false); // Reset success state on new submission
-    setLoginUrl(''); // Reset login URL
+    setRegistrationSuccess(false);
+    setLoginUrl('');
     console.log("[registerTenantAction] Registration form submitted with data:", data);
 
     try {
@@ -56,14 +56,14 @@ export default function RegisterPage() {
         if (result.success && result.tenant && result.loginUrl) {
              toast({
                 title: "Registration Successful",
-                description: `Company "${result.tenant.name}" created. Check your email for login instructions.`,
+                description: `Company "${result.tenant.name}" created. Check your email for login instructions. Your login URL is ${result.loginUrl}`,
                 className: "bg-green-100 text-green-800 border-green-300 dark:bg-green-900 dark:text-green-100 dark:border-green-700",
-                duration: 15000, // Show longer
+                duration: 15000,
              });
-             setLoginUrl(result.loginUrl); // Store the login URL
-             setRegistrationSuccess(true); // Set success state to show the message
-             form.reset(); // Clear form after success
-             setIsLoading(false); // Stop loading indicator
+             setLoginUrl(result.loginUrl);
+             setRegistrationSuccess(true);
+             form.reset();
+             setIsLoading(false);
         } else {
             const errorMessage = result.errors?.[0]?.message || 'Registration failed. Please try again.';
             console.error("[registerTenantAction] Registration failed:", errorMessage, result.errors);
@@ -73,11 +73,12 @@ export default function RegisterPage() {
                 variant: "destructive",
             });
             setIsLoading(false);
-            // Set specific field errors if available from action
-             if (result.errors?.some(e => e.path?.includes('companyDomain'))) {
-                form.setError("companyDomain", { type: 'server', message: errorMessage });
+            if (result.errors?.some(e => e.path?.includes('companySubdomain'))) { // Changed from companyDomain
+                form.setError("companySubdomain", { type: 'server', message: errorMessage });
             } else if (result.errors?.some(e => e.path?.includes('adminEmail'))) {
                 form.setError("adminEmail", { type: 'server', message: errorMessage });
+            } else if (result.errors?.some(e => e.path?.includes('adminUsername'))) {
+                form.setError("adminUsername", { type: 'server', message: errorMessage });
             } else if (result.errors?.some(e => e.message?.includes('Database schema not initialized'))) {
                  form.setError("root.serverError", { type: 'server', message: errorMessage });
             } else {
@@ -98,7 +99,6 @@ export default function RegisterPage() {
   };
 
   return (
-    // Center content vertically and horizontally, add padding
     <div className="flex min-h-screen items-center justify-center bg-background p-4 sm:p-6 lg:p-8">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
@@ -111,7 +111,6 @@ export default function RegisterPage() {
         </CardHeader>
         <CardContent>
           {registrationSuccess ? (
-             // Display success message and login link
              <Alert className="border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950">
                <AlertTitle className="text-green-800 dark:text-green-200">Registration Complete!</AlertTitle>
                <AlertDescription className="text-green-700 dark:text-green-300 space-y-2">
@@ -124,11 +123,10 @@ export default function RegisterPage() {
                     </a>
                  </div>
                  <p className="text-xs">Please bookmark this link for future access.</p>
-                 <Button onClick={() => setRegistrationSuccess(false)} className="mt-4 w-full">Register Another Company</Button>
+                 <Button onClick={() => { setRegistrationSuccess(false); form.reset(); }} className="mt-4 w-full">Register Another Company</Button>
                </AlertDescription>
              </Alert>
           ) : (
-            // Display registration form
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                {form.formState.errors.root?.serverError && (
@@ -151,10 +149,10 @@ export default function RegisterPage() {
                 />
                  <FormField
                   control={form.control}
-                  name="companyDomain"
+                  name="companySubdomain" // Changed from companyDomain
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Choose Your Domain</FormLabel>
+                      <FormLabel>Choose Your Subdomain</FormLabel>
                       <FormControl>
                         <div className="flex items-center">
                            <Input placeholder="your-company" {...field} className="rounded-r-none lowercase" autoCapitalize='none'/>
@@ -180,12 +178,25 @@ export default function RegisterPage() {
                     </FormItem>
                   )}
                 />
+                 <FormField
+                  control={form.control}
+                  name="adminUsername" // Added
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Admin Username</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g., admin_john" {...field} autoCapitalize='none'/>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <FormField
                   control={form.control}
                   name="adminEmail"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Your Email (Admin)</FormLabel>
+                      <FormLabel>Admin Email</FormLabel>
                       <FormControl>
                         <Input placeholder="admin@yourcompany.com" {...field} type="email" />
                       </FormControl>
@@ -219,8 +230,7 @@ export default function RegisterPage() {
             </Form>
              )}
            <div className="mt-4 text-center text-sm">
-             {/* Keep link to root login for users who might land here mistakenly */}
-              Already have an account?{' '}
+             Already have an account?{' '}
              <Link href="/login" className="font-medium text-primary hover:underline">
                 Login
              </Link>
