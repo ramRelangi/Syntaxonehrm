@@ -5,18 +5,17 @@ import * as React from "react";
 import { useParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmployeeForm } from '@/modules/employees/components/employee-form';
-import { UserPlus, Loader2 } from "lucide-react";
+import { UserPlus, Loader2, AlertTriangle } from "lucide-react";
 import type { UserRole } from '@/modules/auth/types';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle } from "lucide-react";
 
 interface AddEmployeePageProps {
-  // Params are now accessed via useParams() hook directly
+  // Params are accessed via hook
 }
 
-export default function TenantAddEmployeePage() {
-  const params = useParams();
-  const tenantDomain = params.domain as string;
+export default function TenantAddEmployeePage({ params: routeParams }: AddEmployeePageProps) {
+  // const params = useParams(); // No longer needed if passed as prop
+  const tenantDomain = routeParams.domain as string; // Use destructured and typed params
   const [currentUserRole, setCurrentUserRole] = React.useState<UserRole | null>(null);
   const [isLoadingRole, setIsLoadingRole] = React.useState(true);
   const [roleError, setRoleError] = React.useState<string | null>(null);
@@ -27,7 +26,7 @@ export default function TenantAddEmployeePage() {
       setRoleError(null);
       console.log("[Add Employee Page] Fetching user role...");
       try {
-        const sessionResponse = await fetch('/api/auth/session');
+        const sessionResponse = await fetch('/api/auth/session'); // Ensure this endpoint exists and returns role
         if (sessionResponse.ok) {
           const session = await sessionResponse.json();
           console.log("[Add Employee Page] Session details fetched:", session);
@@ -118,7 +117,7 @@ export default function TenantAddEmployeePage() {
             formDescription="Enter the employee's information below."
             submitButtonText="Add Employee"
             tenantDomain={tenantDomain}
-            currentUserRole={currentUserRole}
+            currentUserRole={currentUserRole} // Pass the fetched role
           />
         </CardContent>
       </Card>

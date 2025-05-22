@@ -11,10 +11,10 @@ const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 // Function to map database row to Employee object
 function mapRowToEmployee(row: any): Employee {
     return {
-        id: row.id,
+        id: row.id, // This is employees.id (PK)
         tenantId: row.tenant_id,
-        userId: row.user_id ?? undefined,
-        employeeId: row.employee_id ?? undefined,
+        userId: row.user_id ?? undefined, // This is users.id (FK)
+        employeeId: row.employee_id ?? undefined, // This is the human-readable EMP-XXX
         name: row.name,
         email: row.email,
         phone: row.phone ?? undefined,
@@ -27,9 +27,7 @@ function mapRowToEmployee(row: any): Employee {
         reportingManagerId: row.reporting_manager_id ?? null,
         workLocation: row.work_location ?? undefined,
         employmentType: row.employment_type as Employee['employmentType'] ?? 'Full-time',
-        // Role is not directly stored on the employees table in this schema version,
-        // it's on the users table. If needed here, a JOIN would be required.
-        // role: row.role as UserRole ?? 'Employee',
+        role: row.role as UserRole ?? undefined, // Role is on users table, this might come from a JOIN in future
     };
 }
 
@@ -53,7 +51,7 @@ export async function getAllEmployees(tenantId: string): Promise<Employee[]> {
 
 // Get employee by ID (PK of employees table, ensure it belongs to the tenant)
 export async function getEmployeeById(id: string, tenantId: string, client?: any): Promise<Employee | undefined> {
-    console.log(`[DB getEmployeeById] Validating IDs. Employee ID (PK): ${id}, Tenant ID: ${tenantId}`);
+    console.log(`[DB getEmployeeById] Validating IDs. Employee PK: ${id}, Tenant ID: ${tenantId}`);
     if (!uuidRegex.test(id)) {
         console.error(`[DB getEmployeeById] Invalid employee ID (PK) format: ${id}`);
         throw new Error("Invalid employee identifier format.");
@@ -101,14 +99,17 @@ async function generateNextEmployeeId(tenantId: string, client: any): Promise<st
 }
 
 
-// This internal function now omits `role` as it's handled during user creation.
-export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employeeId' | 'role'> & { tenantId: string, userId: string }): Promise<Employee> {
+// This internal function now expects `userId` (from users table) to be passed.
+// The `role` parameter is conceptually for the User, not directly stored on Employee here.
+export async function addEmployeeInternal(
+    employeeData: Omit<EmployeeFormData, 'employeeId' | 'role'> & { tenantId: string, userId: string, role?: UserRole }
+): Promise<Employee> {
     if (!uuidRegex.test(employeeData.tenantId)) {
-        console.error(`[DB addEmployee] Invalid tenantId format: ${employeeData.tenantId}`);
+        console.error(`[DB addEmployeeInternal] Invalid tenantId format: ${employeeData.tenantId}`);
         throw new Error("Invalid tenant identifier format.");
     }
      if (!uuidRegex.test(employeeData.userId)) {
-        console.error(`[DB addEmployee] Invalid userId format: ${employeeData.userId}`);
+        console.error(`[DB addEmployeeInternal] Invalid userId format: ${employeeData.userId}`);
         throw new Error("Invalid user identifier format.");
     }
     const client = await pool.connect();
@@ -126,7 +127,7 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
         `;
         const values = [
             employeeData.tenantId.toLowerCase(),
-            employeeData.userId.toLowerCase(),
+            employeeData.userId.toLowerCase(), // Store the user's UUID
             newEmployeeId,
             employeeData.name,
             employeeData.email,
@@ -135,7 +136,7 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
             employeeData.position,
             employeeData.department,
             employeeData.hireDate,
-            employeeData.status || 'Active', // Default status if not provided
+            employeeData.status || 'Active',
             employeeData.dateOfBirth || null,
             employeeData.reportingManagerId || null,
             employeeData.workLocation || null,
@@ -144,17 +145,18 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
         const res = await client.query(query, values);
         const newEmployee = mapRowToEmployee(res.rows[0]);
 
-        await initializeEmployeeBalancesForAllTypes(newEmployee.tenantId, newEmployee.id, client);
-        console.log(`[DB addEmployee] Initialized leave balances for new employee ${newEmployee.id}`);
+        // Initialize leave balances for this new employee
+        await initializeEmployeeBalancesForAllTypes(newEmployee.tenantId, newEmployee.id, client); // Use newEmployee.id (PK)
+        console.log(`[DB addEmployeeInternal] Initialized leave balances for new employee ${newEmployee.id}`);
 
         await client.query('COMMIT');
         return newEmployee;
     } catch (err: any) {
         await client.query('ROLLBACK');
-        console.error('Error adding employee:', err);
+        console.error('Error adding employee (internal):', err);
         if (err.code === '23505') {
             if (err.constraint === 'employees_tenant_id_email_key') {
-                throw new Error('Email address already exists for this tenant.');
+                throw new Error('Email address already exists for an employee in this tenant.');
             }
             if (err.constraint === 'employees_tenant_id_employee_id_key') {
                 throw new Error('Generated Employee ID already exists for this tenant. Please try again.');
@@ -169,7 +171,7 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
     }
 }
 
-// This function expects formData to potentially include a role, but it will be ignored for employees table update
+// The `updates` parameter can contain `role` but it's not used to update the employees table.
 export async function updateEmployee(id: string, tenantId: string, updates: Partial<EmployeeFormData>): Promise<Employee | undefined> {
     if (!uuidRegex.test(id)) {
         console.error(`[DB updateEmployee] Invalid employee ID (PK) format: ${id}`);
@@ -183,31 +185,44 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
     const setClauses: string[] = [];
     const values: any[] = [];
     let valueIndex = 1;
-    const columnMap: { [K in keyof EmployeeFormData]?: string } = {
-        name: 'name', email: 'email', phone: 'phone', gender: 'gender', position: 'position', department: 'department',
-        hireDate: 'hire_date', status: 'status', dateOfBirth: 'date_of_birth',
-        reportingManagerId: 'reporting_manager_id', workLocation: 'work_location', employmentType: 'employment_type',
-        // Role is NOT in employees table, so it's ignored here. Role updates happen on users table.
-    };
-    for (const key in updates) {
-        if (key === 'tenantId' || key === 'employeeId' || key === 'userId' || key === 'role') continue; // Skip role here
+
+    // Define which fields from EmployeeFormData can be updated on the employees table.
+    const allowedEmployeeTableUpdates: (keyof Omit<EmployeeFormData, 'role'>)[] = [
+        'name', 'email', 'phone', 'gender', 'position', 'department',
+        'hireDate', 'status', 'dateOfBirth', 'reportingManagerId',
+        'workLocation', 'employmentType'
+    ];
+
+    for (const key of allowedEmployeeTableUpdates) {
         if (Object.prototype.hasOwnProperty.call(updates, key)) {
-            const dbKey = columnMap[key as keyof EmployeeFormData];
-            if (dbKey) {
-                setClauses.push(`${dbKey} = $${valueIndex}`);
-                let value = updates[key as keyof EmployeeFormData];
-                if ((key === 'phone' || key === 'dateOfBirth' || key === 'reportingManagerId' || key === 'workLocation' || key === 'gender') && value === '') {
-                    value = null;
-                }
-                values.push(value);
-                valueIndex++;
+            const dbKey = key === 'hireDate' ? 'hire_date' :
+                          key === 'dateOfBirth' ? 'date_of_birth' :
+                          key === 'reportingManagerId' ? 'reporting_manager_id' :
+                          key === 'workLocation' ? 'work_location' :
+                          key === 'employmentType' ? 'employment_type' : key;
+
+            setClauses.push(`${dbKey} = $${valueIndex}`);
+            let value = updates[key];
+            // Handle specific keys that might be empty strings from form but should be null in DB
+            if ((key === 'phone' || key === 'dateOfBirth' || key === 'reportingManagerId' || key === 'workLocation' || key === 'gender') && value === '') {
+                value = null;
             }
+            values.push(value);
+            valueIndex++;
         }
     }
-    if (setClauses.length === 0) return getEmployeeById(id, tenantId, client);
-    setClauses.push(`updated_at = NOW()`);
+
+    if (setClauses.length === 0) {
+        // If only role was in 'updates', or no updatable fields were provided.
+        // It's important to release the client if we exit early.
+        client.release();
+        return getEmployeeById(id, tenantId);
+    }
+
+    setClauses.push(`updated_at = NOW()`); // Always update updated_at
     values.push(id.toLowerCase());
     values.push(tenantId.toLowerCase());
+
     const query = `
         UPDATE employees
         SET ${setClauses.join(', ')}
@@ -220,7 +235,7 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
     } catch (err: any) {
         console.error(`Error updating employee with id (PK) ${id} for tenant ${tenantId}:`, err);
         if (err.code === '23505' && err.constraint === 'employees_tenant_id_email_key') {
-            throw new Error('Email address already exists for this tenant.');
+            throw new Error('Email address already exists for another employee in this tenant.');
         }
         throw err;
     } finally {
@@ -229,6 +244,7 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
 }
 
 export async function deleteEmployee(id: string, tenantId: string): Promise<boolean> {
+    console.log(`[DB deleteEmployee] Attempting to delete employee PK ${id} for tenant ${tenantId}`);
     if (!uuidRegex.test(id)) {
         console.error(`[DB deleteEmployee] Invalid employee ID (PK) format: ${id}`);
         throw new Error("Invalid employee identifier format.");
@@ -240,30 +256,32 @@ export async function deleteEmployee(id: string, tenantId: string): Promise<bool
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        console.log(`[DB deleteEmployee] Attempting to fetch employee PK ${id.toLowerCase()} for tenant ${tenantId.toLowerCase()} to get user_id.`);
+        console.log(`[DB deleteEmployee] Fetching employee record for PK ${id} to get user_id.`);
         const employeeRes = await client.query('SELECT user_id FROM employees WHERE id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
         
         const userIdToDelete = employeeRes.rows.length > 0 ? employeeRes.rows[0].user_id : null;
         console.log(`[DB deleteEmployee] Found user_id to delete: ${userIdToDelete} (null if no user linked or employee not found).`);
 
-        console.log(`[DB deleteEmployee] Attempting to delete employee record PK ${id.toLowerCase()} for tenant ${tenantId.toLowerCase()}.`);
+        console.log(`[DB deleteEmployee] Attempting to delete employee record PK ${id}.`);
         const deleteEmployeeRes = await client.query('DELETE FROM employees WHERE id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
         
         if (deleteEmployeeRes.rowCount === 0) {
             await client.query('ROLLBACK');
             console.warn(`[DB deleteEmployee] Employee PK ${id} not found for tenant ${tenantId} during deletion attempt. Rollback.`);
-            return false; // Employee not found
+            return false;
         }
         console.log(`[DB deleteEmployee] Employee record PK ${id} deleted successfully. Count: ${deleteEmployeeRes.rowCount}.`);
 
         if (userIdToDelete) {
-            console.log(`[DB deleteEmployee] Attempting to delete associated user with ID: ${userIdToDelete} for tenant ${tenantId.toLowerCase()} using dbDeleteUserById.`);
-            const userDeleted = await dbDeleteUserById(userIdToDelete, tenantId.toLowerCase(), client); // Pass the client for transaction
+            console.log(`[DB deleteEmployee] Attempting to delete associated user with ID: ${userIdToDelete} for tenant ${tenantId} using dbDeleteUserById.`);
+            // Pass the client to dbDeleteUserById to keep it within the same transaction
+            const userDeleted = await dbDeleteUserById(userIdToDelete, tenantId.toLowerCase(), client);
             if (userDeleted) {
                 console.log(`[DB deleteEmployee] Successfully deleted user ${userIdToDelete}.`);
             } else {
-                // This case (user not found) might be acceptable if the link was already broken, but log it.
-                console.warn(`[DB deleteEmployee] User ${userIdToDelete} not found during employee cleanup, or an error occurred in dbDeleteUserById (which should throw).`);
+                console.warn(`[DB deleteEmployee] User ${userIdToDelete} not found during employee cleanup, or an error occurred in dbDeleteUserById (which should ideally throw on error).`);
+                // If dbDeleteUserById returns false on "not found" but doesn't throw, the transaction will still commit.
+                // If it throws on error, this part of the log might not be reached if user deletion fails critically.
             }
         } else {
             console.log(`[DB deleteEmployee] No user_id associated with employee PK ${id}, or user_id was null. Skipping user deletion.`);
@@ -275,7 +293,7 @@ export async function deleteEmployee(id: string, tenantId: string): Promise<bool
     } catch (err) {
         await client.query('ROLLBACK');
         console.error(`[DB deleteEmployee] Error during deletion of employee PK ${id} for tenant ${tenantId}. Transaction rolled back:`, err);
-        throw err; // Re-throw the error to be caught by the action
+        throw err;
     } finally {
         client.release();
         console.log(`[DB deleteEmployee] Client released for deletion of employee PK ${id}.`);
@@ -295,7 +313,7 @@ export async function getEmployeeByUserId(userId: string, tenantId: string, clie
     }
     const conn = client || await pool.connect();
     try {
-        console.log(`[DB getEmployeeByUserId] Querying for userId: ${userId.toLowerCase()}, tenantId: ${tenantId.toLowerCase()}`);
+        console.log(`[DB getEmployeeByUserId] Querying for user_id: ${userId.toLowerCase()}, tenant_id: ${tenantId.toLowerCase()}`);
         const res = await conn.query('SELECT * FROM employees WHERE user_id = $1 AND tenant_id = $2', [userId.toLowerCase(), tenantId.toLowerCase()]);
         console.log(`[DB getEmployeeByUserId] Rows found: ${res.rows.length}`);
         if (res.rows.length > 0) {
@@ -309,3 +327,4 @@ export async function getEmployeeByUserId(userId: string, tenantId: string, clie
         if (!client) conn.release();
     }
 }
+
