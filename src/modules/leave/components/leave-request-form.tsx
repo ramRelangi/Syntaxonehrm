@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react';
@@ -10,14 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form"; // Added FormDescription
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, CalendarIcon, Send, X, Paperclip, Info } from 'lucide-react';
 import { format, parseISO, isValid, differenceInDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription as AlertDesc } from "@/components/ui/alert"; // Renamed AlertDescription to avoid conflict
 
 interface LeaveRequestFormProps {
   employeeId: string; // This should be a valid UUID (user_id)
@@ -188,7 +189,7 @@ export function LeaveRequestForm({
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
         {form.formState.errors.root?.serverError && (
           <Alert variant="destructive" className="mt-4">
-            <AlertDescription>{form.formState.errors.root.serverError.message}</AlertDescription>
+            <AlertDesc>{form.formState.errors.root.serverError.message}</AlertDesc>
           </Alert>
         )}
 
@@ -373,3 +374,4 @@ export function LeaveRequestForm({
     </Form>
   );
 }
+
