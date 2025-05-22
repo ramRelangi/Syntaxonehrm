@@ -7,8 +7,10 @@ import { getTenantByDomain, getUserById as dbGetUserById } from '@/modules/auth/
 import type { User, SessionData } from '@/modules/auth/types';
 import pool from '@/lib/db'; // Import pool for direct DB access in mock
 
-// --- Mock Session Cookie Name ---
-export const MOCK_SESSION_COOKIE = 'syntaxHiveHrmSession'; // Changed cookie name
+// --- Session Cookie Name ---
+// The actual constant is now defined and used within src/modules/auth/actions.ts
+// This file can be kept for other auth-related utilities or type exports if needed,
+// or eventually removed if all its functionality is migrated.
 
 
 /**
@@ -39,7 +41,7 @@ export async function isUserAdmin(): Promise<boolean> {
  * **Note:** This function now relies on server-side context.
  * Fetching the full user object on every request might be inefficient.
  *
- * @returns {Promise<User | null>} User object or null if not authenticated.
+ * @returns {Promise<Omit<User, 'passwordHash'> | null>} User object or null if not authenticated.
  */
 export async function getUserFromAuth(): Promise<Omit<User, 'passwordHash'> | null> {
      console.warn("[getUserFromAuth] Placeholder invoked. Requires server-side implementation using cookies().");
@@ -50,37 +52,22 @@ export async function getUserFromAuth(): Promise<Omit<User, 'passwordHash'> | nu
 // Keep this as it's just a data mapper
 function mapRowToUser(row: any): User {
     return {
-        user_id: row.user_id, // Changed from id
-        tenant_id: row.tenant_id, // Changed from tenantId
-        employee_id: row.employee_id ?? undefined, // new field
-        username: row.username, // new field
+        user_id: row.user_id,
+        tenant_id: row.tenant_id,
+        employee_id: row.employee_id ?? undefined,
+        username: row.username,
         passwordHash: row.password_hash,
         email: row.email,
-        name: row.name, // new field
+        name: row.name,
         role: row.role,
-        is_active: row.is_active, // Changed from isActive
-        last_login: row.last_login ? new Date(row.last_login).toISOString() : undefined, // new field
-        failed_attempts: row.failed_attempts, // new field
-        account_locked: row.account_locked, // new field
-        password_changed_at: row.password_changed_at ? new Date(row.password_changed_at).toISOString() : undefined, // new field
+        is_active: row.is_active,
+        last_login: row.last_login ? new Date(row.last_login).toISOString() : undefined,
+        failed_attempts: row.failed_attempts,
+        account_locked: row.account_locked,
+        password_changed_at: row.password_changed_at ? new Date(row.password_changed_at).toISOString() : undefined,
         created_at: new Date(row.created_at).toISOString(),
         updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : undefined,
     };
 }
 
-/**
- * **MOCK FUNCTION:** To be called from Server Actions to set session cookie.
- * **REPLACE WITH ACTUAL SESSION MANAGEMENT.**
- */
-// export async function setMockSession(sessionData: SessionData) {
-//     // Logic moved to loginAction
-// }
-
-/**
- * **MOCK FUNCTION:** To be called from Server Actions to clear session cookie.
- * **REPLACE WITH ACTUAL SESSION MANAGEMENT.**
- */
-// export async function clearMockSession() {
-//    // Logic moved to logoutAction
-// }
     
