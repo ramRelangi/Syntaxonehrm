@@ -33,7 +33,7 @@ export async function addTenant(tenantData: Pick<Tenant, 'name' | 'subdomain'>):
     } catch (err: any) {
         console.error('[DB addTenant] Error adding tenant:', err);
         if (err.code === '23505') {
-            if (err.constraint === 'tenants_subdomain_key') { // Check your actual constraint name
+            if (err.constraint === 'tenants_subdomain_key') {
                 throw new Error('Tenant subdomain already exists.');
             }
             if (err.constraint === 'unique_tenant_name') {
@@ -99,7 +99,7 @@ function mapRowToUser(row: any): User {
         user_id: row.user_id,
         tenant_id: row.tenant_id,
         employee_id: row.employee_id ?? undefined,
-        username: row.username, // Ensure this is mapped
+        username: row.username,
         passwordHash: row.password_hash,
         email: row.email,
         name: row.name,
@@ -125,7 +125,7 @@ export async function addUser(userData: Omit<User, 'user_id' | 'created_at' | 'u
         RETURNING *;
     `;
     const values = [
-        userData.tenant_id, // This can be null for system users if your schema allows, but for tenants it must be set.
+        userData.tenant_id,
         userData.employee_id || null,
         userData.username.toLowerCase(),
         userData.passwordHash,
@@ -141,18 +141,24 @@ export async function addUser(userData: Omit<User, 'user_id' | 'created_at' | 'u
         return user;
     } catch (err: any) {
         console.error('[DB addUser] Error adding user:', err);
-         if (err.code === '23505') { // unique_violation
+         if (err.code === '23505') {
             if (err.constraint === 'unique_tenant_username') {
                  throw new Error('Username already exists for this tenant.');
             }
             if (err.constraint === 'unique_tenant_email') {
                  throw new Error('Email address already exists for this tenant.');
             }
-            if (err.constraint === 'users_employee_id_key') { // Or whatever your unique constraint for employee_id is
+            if (err.constraint === 'users_employee_id_key') {
                 throw new Error('This employee is already linked to a user account.');
             }
+             if (err.constraint === 'unique_username') { // For schema without tenantId unique constraint
+                 throw new Error('Username already exists.');
+             }
+             if (err.constraint === 'unique_email') { // For schema without tenantId unique constraint
+                 throw new Error('Email address already exists.');
+             }
         }
-        if (err.code === '42P01') { // undefined_table
+        if (err.code === '42P01') {
             throw new Error('Database schema not initialized. Relation "users" does not exist.');
         }
         throw err;
@@ -192,8 +198,8 @@ export async function getUserByEmail(email: string, tenantId: string | null): Pr
         query = 'SELECT * FROM users WHERE tenant_id = $1 AND email = $2';
         values = [tenantId, lowerCaseEmail];
     } else {
-        // This case might not be relevant if all users are tenant-specific
-        query = 'SELECT * FROM users WHERE tenant_id IS NULL AND email = $1';
+        // This case might not be relevant if all users are tenant-specific as per new schema
+        query = 'SELECT * FROM users WHERE email = $1'; // Assuming email is globally unique if no tenantId
         values = [lowerCaseEmail];
     }
 
@@ -224,7 +230,8 @@ export async function getUserByUsername(username: string, tenantId: string | nul
         query = 'SELECT * FROM users WHERE tenant_id = $1 AND username = $2';
         values = [tenantId, lowerCaseUsername];
     } else {
-        query = 'SELECT * FROM users WHERE tenant_id IS NULL AND username = $1';
+        // Username should be globally unique according to new schema's users table
+        query = 'SELECT * FROM users WHERE username = $1';
         values = [lowerCaseUsername];
     }
 
@@ -245,31 +252,28 @@ export async function getUserByUsername(username: string, tenantId: string | nul
     }
 }
 
-// This function expects the human-readable employee_id (e.g., "EMP-001")
-// It returns the Employee record, which includes the user_id (FK)
+
 export async function getEmployeeByEmployeeIdAndTenantId(employee_id_string: string, tenantId: string): Promise<Employee | undefined> {
     const client = await pool.connect();
     console.log(`[DB getEmployeeByEmployeeIdAndTenantId (auth/db)] Fetching employee with Employee ID String: ${employee_id_string} for tenant ${tenantId}`);
-    // Query the employees table using the human-readable employee_id
     const query = 'SELECT * FROM employees WHERE employee_id = $1 AND tenant_id = $2';
     const values = [employee_id_string, tenantId];
     try {
         const res = await client.query(query, values);
         if (res.rows.length > 0) {
             const row = res.rows[0];
-            // Map to your Employee type (ensure this mapping is consistent with your employees module)
-            // This is a simplified mapping for auth purposes
             return {
-                id: row.id, // This is the UUID PK from employees table
+                id: row.id, // Primary Key
+                employee_id: row.employee_id, // Human-readable string ID
                 tenantId: row.tenant_id,
-                userId: row.user_id, // This is the UUID FK to users table
-                employeeId: row.employee_id, // This is the VARCHAR human-readable ID
-                name: `${row.first_name} ${row.last_name || ''}`.trim(),
+                user_id: row.user_id, // FK to users table
                 first_name: row.first_name,
                 last_name: row.last_name,
-                email: row.email,
-                status: row.status,
-            } as Employee; // Adjust cast as needed
+                name: `${row.first_name} ${row.last_name || ''}`.trim(),
+                email: row.email, // Using 'email' as official_email was removed
+                status: row.is_active ? 'Active' : 'Inactive', // Deriving from is_active
+                 // Add other fields from your new employees schema as needed
+            } as Employee; // Cast carefully, ensure all required Employee fields are mapped
         }
         console.log(`[DB getEmployeeByEmployeeIdAndTenantId (auth/db)] No employee found for Employee ID String ${employee_id_string}`);
         return undefined;
@@ -284,27 +288,38 @@ export async function getEmployeeByEmployeeIdAndTenantId(employee_id_string: str
     }
 }
 
-// Get employee by user_id (UUID FK from employees table to users.user_id) and tenant_id
+
 export async function getEmployeeByUserId(user_id_uuid: string, tenantId: string, client?: any): Promise<Employee | undefined> {
     const conn = client || await pool.connect();
     console.log(`[DB getEmployeeByUserId (auth/db)] Fetching employee with User ID (UUID FK): ${user_id_uuid} for tenant ${tenantId}`);
-    const query = 'SELECT * FROM employees WHERE user_id = $1 AND tenant_id = $2';
+    // This query needs to match your *new* schema for the employees table
+    const query = `
+        SELECT 
+            e.id, e.tenant_id, e.user_id, e.employee_id, 
+            e.first_name, e.middle_name, e.last_name,
+            e.email, e.is_active
+            -- Join with employment_details if necessary for status or other Employee type fields
+        FROM employees e
+        WHERE e.user_id = $1 AND e.tenant_id = $2
+    `;
     const values = [user_id_uuid.toLowerCase(), tenantId.toLowerCase()];
     try {
         const res = await conn.query(query, values);
         if (res.rows.length > 0) {
             const row = res.rows[0];
              return {
-                id: row.id,
-                userId: row.user_id,
+                id: row.id, // This is the employee PK (employees.id)
+                user_id: row.user_id, // This is the FK to users table
                 tenantId: row.tenant_id,
-                employeeId: row.employee_id,
+                employeeId: row.employee_id, // This is the human-readable string ID
                 name: `${row.first_name} ${row.last_name || ''}`.trim(),
                 first_name: row.first_name,
                 last_name: row.last_name,
-                email: row.email,
-                status: row.status,
-            } as Employee; // Adjust cast as needed
+                email: row.email, // New schema has 'email'
+                status: row.is_active ? 'Active' : 'Inactive', // Derive from is_active
+                // You might need to join with employment_details for position, department, hireDate, etc.
+                // For now, keeping it simple as per the direct columns in employees table.
+            } as Employee;
         }
         console.log(`[DB getEmployeeByUserId (auth/db)] No employee found for User ID (UUID FK) ${user_id_uuid}`);
         return undefined;
@@ -323,16 +338,18 @@ export async function deleteUserById(user_id: string, tenant_id: string | null, 
     const conn = client || await pool.connect();
     console.log(`[DB deleteUserById] Attempting to delete user: ${user_id} for tenant ${tenant_id || 'SYSTEM'}`);
     try {
-        // Ensure the FK in employees table (employees.user_id) is set to NULL before deleting user
-        // or that it allows SET NULL ON DELETE. Assuming it does.
-        const updateUserQuery = 'UPDATE employees SET user_id = NULL WHERE user_id = $1 AND tenant_id = $2';
+        // Set employee_id in users table to NULL for any employee referencing this user
+        // This query assumes your new 'users' table has 'employee_id' and your 'employees' table has 'user_id'
+        // If 'users.employee_id' points to 'employees.employee_id' (the VARCHAR one), this needs adjustment.
+        // Assuming users.employee_id points to employees.id (UUID PK)
+        const updateEmployeeFkQuery = 'UPDATE employees SET user_id = NULL WHERE user_id = $1 AND tenant_id = $2';
         if (tenant_id) {
-            await conn.query(updateUserQuery, [user_id, tenant_id]);
+            await conn.query(updateEmployeeFkQuery, [user_id, tenant_id]);
         }
         
         const query = tenant_id
             ? 'DELETE FROM users WHERE user_id = $1 AND tenant_id = $2'
-            : 'DELETE FROM users WHERE user_id = $1 AND tenant_id IS NULL';
+            : 'DELETE FROM users WHERE user_id = $1 AND tenant_id IS NULL'; // For system users if any
         const values = tenant_id ? [user_id, tenant_id] : [user_id];
         const res = await conn.query(query, values);
 

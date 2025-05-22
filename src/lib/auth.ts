@@ -1,3 +1,4 @@
+
 // src/lib/auth.ts
 // Placeholder for actual Authentication logic, including tenant and user identification
 
@@ -7,7 +8,7 @@ import type { User, SessionData } from '@/modules/auth/types';
 import pool from '@/lib/db'; // Import pool for direct DB access in mock
 
 // --- Mock Session Cookie Name ---
-export const MOCK_SESSION_COOKIE = 'mockSession';
+export const MOCK_SESSION_COOKIE = 'syntaxHiveHrmSession'; // Changed cookie name
 
 
 /**
@@ -49,15 +50,21 @@ export async function getUserFromAuth(): Promise<Omit<User, 'passwordHash'> | nu
 // Keep this as it's just a data mapper
 function mapRowToUser(row: any): User {
     return {
-        id: row.id,
-        tenantId: row.tenant_id,
+        user_id: row.user_id, // Changed from id
+        tenant_id: row.tenant_id, // Changed from tenantId
+        employee_id: row.employee_id ?? undefined, // new field
+        username: row.username, // new field
+        passwordHash: row.password_hash,
         email: row.email,
-        passwordHash: row.password_hash, // Included, but should be omitted before returning
-        name: row.name,
+        name: row.name, // new field
         role: row.role,
-        isActive: row.is_active,
-        createdAt: new Date(row.created_at).toISOString(),
-        updatedAt: new Date(row.updated_at).toISOString(),
+        is_active: row.is_active, // Changed from isActive
+        last_login: row.last_login ? new Date(row.last_login).toISOString() : undefined, // new field
+        failed_attempts: row.failed_attempts, // new field
+        account_locked: row.account_locked, // new field
+        password_changed_at: row.password_changed_at ? new Date(row.password_changed_at).toISOString() : undefined, // new field
+        created_at: new Date(row.created_at).toISOString(),
+        updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : undefined,
     };
 }
 
@@ -76,5 +83,4 @@ function mapRowToUser(row: any): User {
 // export async function clearMockSession() {
 //    // Logic moved to logoutAction
 // }
-
     
