@@ -6,12 +6,12 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
 import {
-  jobPostingSchema,
-  type JobPostingFormData,
-  type JobPosting,
-  jobPostingStatusSchema,
-  employmentTypeSchema, // Import new enum
-  experienceLevelSchema, // Import new enum
+  jobOpeningSchema, // Changed from jobPostingSchema
+  type JobOpeningFormData, // Changed from JobPostingFormData
+  type JobOpening, // Changed from JobPosting
+  jobOpeningStatusSchema, // Changed from jobPostingStatusSchema
+  employmentTypeSchema,
+  experienceLevelSchema,
 } from '@/modules/recruitment/types';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,14 +25,16 @@ import { Loader2, CalendarIcon, Save, PlusCircle } from 'lucide-react';
 import { format, parseISO, isValid, formatISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { DialogClose } from '@/components/ui/dialog';
-import { addJobPostingAction, updateJobPostingAction } from '@/modules/recruitment/actions';
+import { addJobOpeningAction, updateJobOpeningAction } from '@/modules/recruitment/actions'; // Corrected import name
 
 interface JobPostingFormProps {
-  jobPosting?: JobPosting;
+  jobPosting?: JobOpening; // Changed from JobPosting
   onSuccess: () => void;
 }
 
-type JobPostingFormSubmitData = Omit<JobPostingFormData, 'tenantId' | 'datePosted'>;
+// FormData for submit, matching the schema used in actions
+type JobPostingFormSubmitData = Omit<JobOpeningFormData, 'tenantId' | 'date_posted'>;
+
 
 export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
   const { toast } = useToast();
@@ -40,7 +42,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
   const [closingDatePickerOpen, setClosingDatePickerOpen] = React.useState(false);
 
   const isEditMode = !!jobPosting;
-  const submitButtonText = isEditMode ? "Save Changes" : "Create Job Posting";
+  const submitButtonText = isEditMode ? "Save Changes" : "Create Job Opening"; // Changed text
 
   const getFormattedDate = (dateString?: string | null): string => {
     if (!dateString) return "";
@@ -50,51 +52,58 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
     } catch (e) { console.error("Error parsing date:", e); return ""; }
   };
 
+  // Use jobOpeningSchema, omit server-set fields
+  const formSchemaForValidation = jobOpeningSchema.omit({ id: true, date_posted: true, tenantId: true, created_at: true, updated_at: true });
+
+
   const form = useForm<JobPostingFormSubmitData>({
-    resolver: zodResolver(jobPostingSchema.omit({ id: true, datePosted: true, tenantId: true })),
+    resolver: zodResolver(formSchemaForValidation),
     defaultValues: {
-      title: jobPosting?.title ?? "",
+      job_title: jobPosting?.job_title ?? "",
       description: jobPosting?.description ?? "",
       department: jobPosting?.department ?? "",
       location: jobPosting?.location ?? "",
-      salaryRange: jobPosting?.salaryRange ?? "",
+      salary_range: jobPosting?.salary_range ?? "",
       status: jobPosting?.status ?? "Draft",
-      closingDate: getFormattedDate(jobPosting?.closingDate),
-      employmentType: jobPosting?.employmentType ?? "Full-time",
-      experienceLevel: jobPosting?.experienceLevel ?? "Mid-Level",
+      closing_date: getFormattedDate(jobPosting?.closing_date),
+      employment_type: jobPosting?.employment_type ?? "Full-time",
+      experience_level: jobPosting?.experience_level ?? "Mid-Level",
+      no_of_vacancies: jobPosting?.no_of_vacancies ?? 1,
+      requirements: jobPosting?.requirements ?? "",
     },
   });
 
    const onSubmit = async (data: JobPostingFormSubmitData) => {
     setIsLoading(true);
     form.clearErrors();
-    console.log("[Job Posting Form] Attempting to submit data:", data);
+    console.log("[Job Opening Form] Attempting to submit data:", data);
 
     const payload = {
          ...data,
-         closingDate: data.closingDate && isValid(parseISO(data.closingDate))
-            ? formatISO(parseISO(data.closingDate), { representation: 'date' })
+         closing_date: data.closing_date && isValid(parseISO(data.closing_date))
+            ? formatISO(parseISO(data.closing_date), { representation: 'date' })
             : undefined,
-         salaryRange: data.salaryRange || undefined,
+         salary_range: data.salary_range || undefined,
+         no_of_vacancies: data.no_of_vacancies || 1,
      };
 
-     console.log("[Job Posting Form] Sending payload to action:", payload);
+     console.log("[Job Opening Form] Sending payload to action:", payload);
 
     try {
         let result;
         if (isEditMode && jobPosting?.id) {
-            console.log(`[Job Posting Form] Calling updateJobPostingAction for ID: ${jobPosting.id}`);
-            result = await updateJobPostingAction(jobPosting.id, payload);
+            console.log(`[Job Opening Form] Calling updateJobOpeningAction for ID: ${jobPosting.id}`);
+            result = await updateJobOpeningAction(jobPosting.id, payload);
         } else {
-             console.log(`[Job Posting Form] Calling addJobPostingAction`);
-            result = await addJobPostingAction(payload);
+             console.log(`[Job Opening Form] Calling addJobOpeningAction`);
+            result = await addJobOpeningAction(payload); // Use corrected action name
         }
 
-        console.log("[Job Posting Form] Action Result:", result);
+        console.log("[Job Opening Form] Action Result:", result);
 
         if (!result.success) {
-             console.error("[Job Posting Form] Action Error:", result.errors);
-             const errorMessage = result.errors?.[0]?.message || `Failed to ${isEditMode ? 'update' : 'create'} job posting.`;
+             console.error("[Job Opening Form] Action Error:", result.errors);
+             const errorMessage = result.errors?.[0]?.message || `Failed to ${isEditMode ? 'update' : 'create'} job opening.`;
               if (result.errors?.[0]?.path) {
                   const fieldPath = result.errors[0].path[0] as keyof JobPostingFormSubmitData;
                   form.setError(fieldPath, { message: errorMessage });
@@ -104,21 +113,21 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
              throw new Error(errorMessage);
         }
 
-         console.log("[Job Posting Form] Action Success:", result.jobPosting);
+         console.log("[Job Opening Form] Action Success:", result.jobOpening);
 
         toast({
-            title: `Job Posting ${isEditMode ? 'Updated' : 'Created'}`,
-            description: `${result.jobPosting?.title || data.title} has been successfully ${isEditMode ? 'updated' : 'created'}.`,
+            title: `Job Opening ${isEditMode ? 'Updated' : 'Created'}`,
+            description: `${result.jobOpening?.job_title || data.job_title} has been successfully ${isEditMode ? 'updated' : 'created'}.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
         onSuccess();
 
     } catch (error: any) {
-        console.error("[Job Posting Form] Submission error catch block:", error);
+        console.error("[Job Opening Form] Submission error catch block:", error);
         if (!form.formState.errors.root?.serverError && !Object.keys(form.formState.errors).length) {
              toast({
-                title: `Error ${isEditMode ? 'Updating' : 'Creating'} Job Posting`,
+                title: `Error ${isEditMode ? 'Updating' : 'Creating'} Job Opening`,
                 description: error.message || "An unexpected error occurred.",
                 variant: "destructive",
             });
@@ -126,7 +135,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
         }
     } finally {
         setIsLoading(false);
-        console.log("[Job Posting Form] Submission finished.");
+        console.log("[Job Opening Form] Submission finished.");
     }
   };
 
@@ -141,7 +150,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
 
         <FormField
           control={form.control}
-          name="title"
+          name="job_title"
           render={({ field }) => (
             <FormItem>
               <FormLabel>Job Title</FormLabel>
@@ -160,12 +169,26 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
             <FormItem>
               <FormLabel>Description</FormLabel>
               <FormControl>
-                <Textarea placeholder="Describe the role, responsibilities, and requirements..." rows={5} {...field} />
+                <Textarea placeholder="Describe the role, responsibilities..." rows={5} {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
+         <FormField
+          control={form.control}
+          name="requirements"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Requirements (Optional)</FormLabel>
+              <FormControl>
+                <Textarea placeholder="List key skills, qualifications, and experience needed..." rows={4} {...field} value={field.value ?? ""} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
              <FormField
@@ -174,7 +197,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Department</FormLabel>
-                   <Select onValueChange={field.onChange} defaultValue={field.value}>
+                   <Select onValueChange={field.onChange} defaultValue={field.value ?? ""} value={field.value ?? ""}>
                      <FormControl>
                        <SelectTrigger>
                          <SelectValue placeholder="Select department" />
@@ -202,7 +225,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
                 <FormItem>
                   <FormLabel>Location</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. Remote, New York Office" {...field} />
+                    <Input placeholder="e.g. Remote, New York Office" {...field} value={field.value ?? ""} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -213,11 +236,11 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
              <FormField
               control={form.control}
-              name="employmentType"
+              name="employment_type"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Employment Type</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} defaultValue={field.value ?? "Full-time"} value={field.value ?? undefined}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select employment type" />
@@ -235,11 +258,11 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
             />
             <FormField
               control={form.control}
-              name="experienceLevel"
+              name="experience_level"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Experience Level</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} defaultValue={field.value ?? "Mid-Level"} value={field.value ?? undefined}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select experience level" />
@@ -256,11 +279,27 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
               )}
             />
         </div>
+         <FormField
+            control={form.control}
+            name="no_of_vacancies"
+            render={({ field }) => (
+                <FormItem>
+                    <FormLabel>Number of Vacancies</FormLabel>
+                    <FormControl>
+                        <Input type="number" min="1" placeholder="e.g., 1" {...field} 
+                         onChange={e => field.onChange(parseInt(e.target.value,10) || 1)}
+                         value={field.value ?? 1}/>
+                    </FormControl>
+                    <FormMessage />
+                </FormItem>
+            )}
+        />
+
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField
               control={form.control}
-              name="salaryRange"
+              name="salary_range"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Salary Range (Optional)</FormLabel>
@@ -284,7 +323,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {jobPostingStatusSchema.options.map(status => (
+                      {jobOpeningStatusSchema.options.map(status => (
                          <SelectItem key={status} value={status}>{status}</SelectItem>
                       ))}
                     </SelectContent>
@@ -297,7 +336,7 @@ export function JobPostingForm({ jobPosting, onSuccess }: JobPostingFormProps) {
 
          <FormField
            control={form.control}
-           name="closingDate"
+           name="closing_date"
            render={({ field }) => (
              <FormItem className="flex flex-col">
                <FormLabel>Closing Date (Optional)</FormLabel>
