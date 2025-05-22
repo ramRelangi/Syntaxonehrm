@@ -5,8 +5,8 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
-import { employeeSchema, type EmployeeFormData, employmentTypeSchema, genderSchema } from '@/modules/employees/types'; // Import genderSchema
-import type { Employee, Gender } from '@/modules/employees/types'; // Import Gender type
+import { employeeSchema, type EmployeeFormData, employmentTypeSchema, genderSchema } from '@/modules/employees/types';
+import type { Employee, Gender } from '@/modules/employees/types';
 import type { UserRole } from '@/modules/auth/types';
 import { addEmployee, updateEmployee } from '@/modules/employees/actions';
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, CalendarIcon, Save, UserPlus } from 'lucide-react';
+import { Loader2, CalendarIcon, Save, UserPlus, Search } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -31,7 +31,7 @@ interface EmployeeFormProps {
 
 type EmployeeFormShape = EmployeeFormData;
 
-const NO_MANAGER_VALUE = "__NO_MANAGER__";
+const NO_MANAGER_VALUE = "__NO_MANAGER__"; // Special value for "-- None --" option
 
 export function EmployeeForm({
   employee,
@@ -48,6 +48,8 @@ export function EmployeeForm({
   const [dobDatePickerOpen, setDobDatePickerOpen] = React.useState(false);
   const [potentialManagers, setPotentialManagers] = React.useState<Employee[]>([]);
   const [isLoadingManagers, setIsLoadingManagers] = React.useState(false);
+  const [managerSearchTerm, setManagerSearchTerm] = React.useState("");
+
 
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
@@ -64,7 +66,14 @@ export function EmployeeForm({
     }
   };
 
-  const formSchemaForValidation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true });
+  const formSchemaForValidation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true })
+    .refine(data => !data.reportingManagerId || data.reportingManagerId === NO_MANAGER_VALUE || uuidRegex.test(data.reportingManagerId), { // Allow NO_MANAGER_VALUE or UUID
+      message: "Invalid manager ID format.",
+      path: ["reportingManagerId"],
+    });
+
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 
   const form = useForm<EmployeeFormShape>({
     resolver: zodResolver(formSchemaForValidation),
@@ -72,13 +81,13 @@ export function EmployeeForm({
       name: employee?.name ?? "",
       email: employee?.email ?? "",
       phone: employee?.phone ?? "",
-      gender: employee?.gender ?? undefined, // Add gender default
+      gender: employee?.gender ?? undefined,
       position: employee?.position ?? "",
       department: employee?.department ?? "",
       hireDate: getFormattedDate(employee?.hireDate),
       status: employee?.status ?? "Active",
       dateOfBirth: getFormattedDate(employee?.dateOfBirth),
-      reportingManagerId: employee?.reportingManagerId || NO_MANAGER_VALUE,
+      reportingManagerId: employee?.reportingManagerId || null, // Default to null for form state
       workLocation: employee?.workLocation ?? "",
       employmentType: employee?.employmentType ?? "Full-time",
     },
@@ -89,9 +98,11 @@ export function EmployeeForm({
         const fetchManagers = async () => {
           setIsLoadingManagers(true);
           try {
+            // The API route should derive tenant context from session
             const response = await fetch('/api/employees');
             if (!response.ok) {
-              throw new Error('Failed to fetch potential managers');
+              const errorData = await response.json().catch(() => ({}));
+              throw new Error(errorData.message || 'Failed to fetch potential managers');
             }
             const data: Employee[] = await response.json();
             setPotentialManagers(
@@ -101,7 +112,7 @@ export function EmployeeForm({
             console.error("Failed to load managers:", error);
             toast({
               title: "Error Loading Managers",
-              description: "Could not fetch list of potential managers.",
+              description: (error as Error).message || "Could not fetch list of potential managers.",
               variant: "destructive",
             });
           } finally {
@@ -112,18 +123,32 @@ export function EmployeeForm({
     }
   }, [isEditMode, employee?.id, toast, currentUserRole]);
 
+  const potentialManagersFiltered = React.useMemo(() => {
+    if (!managerSearchTerm) return potentialManagers;
+    return potentialManagers.filter(
+      (manager) =>
+        manager.name.toLowerCase().includes(managerSearchTerm.toLowerCase()) ||
+        (manager.employeeId && manager.employeeId.toLowerCase().includes(managerSearchTerm.toLowerCase())) ||
+        (manager.email && manager.email.toLowerCase().includes(managerSearchTerm.toLowerCase()))
+    );
+  }, [potentialManagers, managerSearchTerm]);
+
   const onSubmit = async (data: EmployeeFormShape) => {
     setIsLoading(true);
-    console.log("[Employee Form] Submitting data:", data);
+    console.log("[Employee Form] Submitting data (raw from form):", data);
 
+    // Prepare payload: ensure reportingManagerId is null if it was the placeholder or empty
     const payload = {
       ...data,
       phone: data.phone || undefined,
-      gender: data.gender || undefined, // Ensure gender is passed
+      gender: data.gender || undefined,
       dateOfBirth: data.dateOfBirth || null,
-      reportingManagerId: data.reportingManagerId === NO_MANAGER_VALUE || data.reportingManagerId === "" ? null : data.reportingManagerId,
+      // reportingManagerId is already null or a UUID string from the form state due to onValueChange
+      reportingManagerId: data.reportingManagerId,
       workLocation: data.workLocation || undefined,
     };
+    console.log("[Employee Form] Payload to be sent to action:", payload);
+
 
     try {
         let result;
@@ -139,12 +164,12 @@ export function EmployeeForm({
              let errorSetOnField = false;
              result.errors?.forEach(err => {
                 const path = err.path?.[0] as keyof EmployeeFormShape | 'root.serverError' | undefined;
-                if (path && form.getFieldState(path as keyof EmployeeFormShape)) {
+                if (path && path !== 'root.serverError' && form.getFieldState(path as keyof EmployeeFormShape)) {
                     form.setError(path as keyof EmployeeFormShape, { type: "manual", message: err.message });
                     errorSetOnField = true;
                 }
              });
-             if (!errorSetOnField && !result.errors?.some(e => e.path.length > 0)) {
+             if (!errorSetOnField && !result.errors?.some(e => e.path.length > 0)) { // Check if specific field errors were already set
                 form.setError("root.serverError", { message: errorMessage });
              }
              throw new Error(errorMessage);
@@ -159,12 +184,14 @@ export function EmployeeForm({
         });
 
         const targetPath = `/${tenantDomain}/employees`;
-        router.push(isEditMode ? `/${tenantDomain}/employees/${employee.id}` : targetPath);
-        router.refresh();
+        // For edit, navigate back to the detail page, for add, to the list page
+        router.push(isEditMode && employee?.id ? `/${tenantDomain}/employees/${employee.id}` : targetPath);
+        router.refresh(); // Ensure data is fresh
 
     } catch (error: any) {
         console.error("[Employee Form] Submission error:", error);
-        if (!form.formState.errors.root?.serverError && !Object.keys(form.formState.errors).some(key => key !== 'root' && form.formState.errors[key as keyof EmployeeFormShape])) {
+        // Only show generic toast if a specific field error wasn't already set by the action's return
+        if (!form.formState.errors.root?.serverError && !Object.keys(form.formState.errors).some(key => key !== 'root' && form.getFieldState(key as keyof EmployeeFormShape)?.error)) {
             toast({
                 title: `Error ${isEditMode ? 'Updating' : 'Adding'} Employee`,
                 description: error.message || "An unexpected error occurred.",
@@ -228,7 +255,7 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Phone Number</FormLabel>
                   <FormControl>
-                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} disabled={isEmployeeRole && !isEditMode && !!employee?.phone} />
+                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} disabled={isEmployeeRole && isEditMode && !['phone', 'dateOfBirth'].includes(field.name)} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -245,8 +272,8 @@ export function EmployeeForm({
                   <FormLabel>Gender</FormLabel>
                   <Select
                     onValueChange={field.onChange}
-                    value={field.value ?? undefined} // Handle null/undefined for placeholder
-                    disabled={isEmployeeRole && !isEditMode && !!employee?.gender}
+                    value={field.value ?? undefined}
+                    disabled={isEmployeeRole && isEditMode && !['phone', 'dateOfBirth', 'gender'].includes(field.name)}
                   >
                     <FormControl>
                       <SelectTrigger>
@@ -267,7 +294,7 @@ export function EmployeeForm({
               control={form.control}
               name="dateOfBirth"
               render={({ field }) => (
-                <FormItem className="flex flex-col pt-2">
+                <FormItem className="flex flex-col pt-2"> {/* Adjusted pt-2 to align label better if gender is present */}
                   <FormLabel>Date of Birth</FormLabel>
                   <Popover open={dobDatePickerOpen} onOpenChange={setDobDatePickerOpen}>
                     <PopoverTrigger asChild>
@@ -275,7 +302,7 @@ export function EmployeeForm({
                         <Button
                           variant={"outline"}
                           className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
-                          disabled={isEmployeeRole && !isEditMode && !!employee?.dateOfBirth}
+                          disabled={isEmployeeRole && isEditMode && !['phone', 'dateOfBirth', 'gender'].includes(field.name)}
                         >
                           {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
                           <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
@@ -292,7 +319,7 @@ export function EmployeeForm({
                         }}
                         captionLayout="dropdown-buttons" fromYear={1950} toYear={new Date().getFullYear() - 18}
                         initialFocus
-                        disabled={isEmployeeRole && !isEditMode && !!employee?.dateOfBirth}
+                        disabled={isEmployeeRole && isEditMode && !['phone', 'dateOfBirth', 'gender'].includes(field.name)}
                       />
                     </PopoverContent>
                   </Popover>
@@ -353,25 +380,41 @@ export function EmployeeForm({
                 render={({ field }) => (
                     <FormItem className="pt-2">
                     <FormLabel>Reporting Manager</FormLabel>
-                    <Select
-                        onValueChange={(value) => field.onChange(value === NO_MANAGER_VALUE ? "" : value)}
-                        value={field.value || NO_MANAGER_VALUE}
-                        disabled={isLoadingManagers || isEmployeeRole}
-                    >
-                        <FormControl>
-                        <SelectTrigger>
-                            <SelectValue placeholder={isLoadingManagers ? "Loading managers..." : "Select reporting manager"} />
-                        </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                        <SelectItem value={NO_MANAGER_VALUE}>-- None --</SelectItem>
-                        {potentialManagers.map((manager) => (
-                            <SelectItem key={manager.id} value={manager.id}>
-                            {manager.name} ({manager.employeeId || manager.email})
-                            </SelectItem>
-                        ))}
-                        </SelectContent>
-                    </Select>
+                    <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                             <Search className="h-4 w-4 text-muted-foreground" />
+                             <Input
+                                type="text"
+                                placeholder="Search managers by name/ID/email..."
+                                value={managerSearchTerm}
+                                onChange={(e) => setManagerSearchTerm(e.target.value)}
+                                className="h-9 text-sm flex-grow"
+                                disabled={isLoadingManagers || isEmployeeRole}
+                             />
+                        </div>
+                        <Select
+                            onValueChange={(value) => field.onChange(value === NO_MANAGER_VALUE ? null : value)}
+                            value={field.value ?? NO_MANAGER_VALUE} // If field.value is null/undefined, select NO_MANAGER_VALUE
+                            disabled={isLoadingManagers || isEmployeeRole}
+                        >
+                            <FormControl>
+                            <SelectTrigger>
+                                <SelectValue placeholder={isLoadingManagers ? "Loading managers..." : "Select reporting manager"} />
+                            </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                            <SelectItem value={NO_MANAGER_VALUE}>-- None --</SelectItem>
+                            {potentialManagersFiltered.map((manager) => (
+                                <SelectItem key={manager.id} value={manager.id}>
+                                {manager.name} ({manager.employeeId || manager.email})
+                                </SelectItem>
+                            ))}
+                            {potentialManagersFiltered.length === 0 && managerSearchTerm && (
+                                <div className="p-2 text-sm text-muted-foreground text-center">No managers found.</div>
+                            )}
+                            </SelectContent>
+                        </Select>
+                    </div>
                     <FormMessage />
                     </FormItem>
                 )}
@@ -479,7 +522,7 @@ export function EmployeeForm({
           <Button type="button" variant="outline" onClick={() => router.back()} disabled={isLoading}>
             Cancel
           </Button>
-          <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode && !isEmployeeRole) || (isEmployeeRole && !form.formState.isDirty && !form.watch('phone') && !form.watch('gender') && !form.watch('dateOfBirth'))}>
+          <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode && !isEmployeeRole) || (isEmployeeRole && !form.formState.isDirty && !['phone', 'dateOfBirth', 'gender'].some(key => form.getFieldState(key as keyof EmployeeFormShape).isDirty))}>
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />)
@@ -491,5 +534,3 @@ export function EmployeeForm({
     </Form>
   );
 }
-
-    
