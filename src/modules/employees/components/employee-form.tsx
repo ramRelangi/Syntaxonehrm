@@ -16,9 +16,20 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, CalendarIcon, Save, UserPlus, Search } from 'lucide-react';
+import { Loader2, CalendarIcon, Save, UserPlus, Search, XCircle } from 'lucide-react'; // Added XCircle
 import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose,
+} from "@/components/ui/dialog";
+import { ScrollArea } from '@/components/ui/scroll-area';
+
 
 interface EmployeeFormProps {
   employee?: Employee;
@@ -30,8 +41,6 @@ interface EmployeeFormProps {
 }
 
 type EmployeeFormShape = EmployeeFormData;
-
-const NO_MANAGER_VALUE = "__NO_MANAGER__"; // Special value for "-- None --" option
 
 export function EmployeeForm({
   employee,
@@ -46,9 +55,12 @@ export function EmployeeForm({
   const [isLoading, setIsLoading] = React.useState(false);
   const [hireDatePickerOpen, setHireDatePickerOpen] = React.useState(false);
   const [dobDatePickerOpen, setDobDatePickerOpen] = React.useState(false);
+
   const [potentialManagers, setPotentialManagers] = React.useState<Employee[]>([]);
   const [isLoadingManagers, setIsLoadingManagers] = React.useState(false);
-  const [managerSearchTerm, setManagerSearchTerm] = React.useState("");
+  const [managerLookupSearchTerm, setManagerLookupSearchTerm] = React.useState("");
+  const [isManagerLookupOpen, setIsManagerLookupOpen] = React.useState(false);
+  const [selectedManagerName, setSelectedManagerName] = React.useState<string>("");
 
 
   const isEditMode = !!employee;
@@ -66,13 +78,11 @@ export function EmployeeForm({
     }
   };
 
-  const formSchemaForValidation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true })
-    .refine(data => !data.reportingManagerId || data.reportingManagerId === NO_MANAGER_VALUE || uuidRegex.test(data.reportingManagerId), { // Allow NO_MANAGER_VALUE or UUID
-      message: "Invalid manager ID format.",
-      path: ["reportingManagerId"],
-    });
-
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const formSchemaForValidation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true })
+    .extend({
+        reportingManagerId: z.string().uuid("Invalid manager ID format.").nullable().optional(),
+    });
 
 
   const form = useForm<EmployeeFormShape>({
@@ -87,7 +97,7 @@ export function EmployeeForm({
       hireDate: getFormattedDate(employee?.hireDate),
       status: employee?.status ?? "Active",
       dateOfBirth: getFormattedDate(employee?.dateOfBirth),
-      reportingManagerId: employee?.reportingManagerId || null, // Default to null for form state
+      reportingManagerId: employee?.reportingManagerId || null,
       workLocation: employee?.workLocation ?? "",
       employmentType: employee?.employmentType ?? "Full-time",
     },
@@ -97,19 +107,35 @@ export function EmployeeForm({
     if (currentUserRole === 'Admin' || currentUserRole === 'Manager') {
         const fetchManagers = async () => {
           setIsLoadingManagers(true);
+          console.log("[EmployeeForm - fetchManagers] Fetching potential managers...");
           try {
-            // The API route should derive tenant context from session
-            const response = await fetch('/api/employees');
+            const response = await fetch('/api/employees'); // API derives tenant context
             if (!response.ok) {
               const errorData = await response.json().catch(() => ({}));
+              console.error("[EmployeeForm - fetchManagers] API error:", errorData);
               throw new Error(errorData.message || 'Failed to fetch potential managers');
             }
             const data: Employee[] = await response.json();
-            setPotentialManagers(
-              data.filter(e => e.status === 'Active' && (isEditMode ? e.id !== employee?.id : true))
-            );
+            console.log(`[EmployeeForm - fetchManagers] Employees fetched from API: ${data.length}`);
+            const filteredData = data.filter(e => e.status === 'Active' && (isEditMode ? e.id !== employee?.id : true));
+            setPotentialManagers(filteredData);
+            console.log(`[EmployeeForm - fetchManagers] Potential managers after filtering: ${filteredData.length}`);
+
+            // If editing and employee has a reportingManagerId, find and set their name
+            if (isEditMode && employee?.reportingManagerId) {
+                const currentManager = filteredData.find(m => m.id === employee.reportingManagerId);
+                if (currentManager) {
+                    setSelectedManagerName(currentManager.name);
+                } else if (potentialManagers.length > 0) { // Fallback if manager not in filtered list (e.g. inactive)
+                    const originalManager = potentialManagers.find(m => m.id === employee.reportingManagerId) || data.find(m => m.id === employee.reportingManagerId);
+                    if(originalManager) setSelectedManagerName(`${originalManager.name} (Current)`);
+                }
+            } else if (!isEditMode) {
+                 setSelectedManagerName(""); // Clear for new employee form
+            }
+
           } catch (error) {
-            console.error("Failed to load managers:", error);
+            console.error("[EmployeeForm - fetchManagers] Failed to load managers:", error);
             toast({
               title: "Error Loading Managers",
               description: (error as Error).message || "Could not fetch list of potential managers.",
@@ -121,30 +147,28 @@ export function EmployeeForm({
         };
         fetchManagers();
     }
-  }, [isEditMode, employee?.id, toast, currentUserRole]);
+  }, [isEditMode, employee?.id, employee?.reportingManagerId, toast, currentUserRole]); // Removed potentialManagers from deps
 
   const potentialManagersFiltered = React.useMemo(() => {
-    if (!managerSearchTerm) return potentialManagers;
+    if (!managerLookupSearchTerm) return potentialManagers;
     return potentialManagers.filter(
       (manager) =>
-        manager.name.toLowerCase().includes(managerSearchTerm.toLowerCase()) ||
-        (manager.employeeId && manager.employeeId.toLowerCase().includes(managerSearchTerm.toLowerCase())) ||
-        (manager.email && manager.email.toLowerCase().includes(managerSearchTerm.toLowerCase()))
+        manager.name.toLowerCase().includes(managerLookupSearchTerm.toLowerCase()) ||
+        (manager.employeeId && manager.employeeId.toLowerCase().includes(managerLookupSearchTerm.toLowerCase())) ||
+        (manager.email && manager.email.toLowerCase().includes(managerLookupSearchTerm.toLowerCase()))
     );
-  }, [potentialManagers, managerSearchTerm]);
+  }, [potentialManagers, managerLookupSearchTerm]);
 
   const onSubmit = async (data: EmployeeFormShape) => {
     setIsLoading(true);
     console.log("[Employee Form] Submitting data (raw from form):", data);
 
-    // Prepare payload: ensure reportingManagerId is null if it was the placeholder or empty
     const payload = {
       ...data,
       phone: data.phone || undefined,
       gender: data.gender || undefined,
       dateOfBirth: data.dateOfBirth || null,
-      // reportingManagerId is already null or a UUID string from the form state due to onValueChange
-      reportingManagerId: data.reportingManagerId,
+      reportingManagerId: data.reportingManagerId, // Should be UUID string or null
       workLocation: data.workLocation || undefined,
     };
     console.log("[Employee Form] Payload to be sent to action:", payload);
@@ -169,7 +193,7 @@ export function EmployeeForm({
                     errorSetOnField = true;
                 }
              });
-             if (!errorSetOnField && !result.errors?.some(e => e.path.length > 0)) { // Check if specific field errors were already set
+             if (!errorSetOnField && !result.errors?.some(e => e.path.length > 0)) {
                 form.setError("root.serverError", { message: errorMessage });
              }
              throw new Error(errorMessage);
@@ -184,13 +208,11 @@ export function EmployeeForm({
         });
 
         const targetPath = `/${tenantDomain}/employees`;
-        // For edit, navigate back to the detail page, for add, to the list page
         router.push(isEditMode && employee?.id ? `/${tenantDomain}/employees/${employee.id}` : targetPath);
-        router.refresh(); // Ensure data is fresh
+        router.refresh();
 
     } catch (error: any) {
         console.error("[Employee Form] Submission error:", error);
-        // Only show generic toast if a specific field error wasn't already set by the action's return
         if (!form.formState.errors.root?.serverError && !Object.keys(form.formState.errors).some(key => key !== 'root' && form.getFieldState(key as keyof EmployeeFormShape)?.error)) {
             toast({
                 title: `Error ${isEditMode ? 'Updating' : 'Adding'} Employee`,
@@ -255,7 +277,7 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Phone Number</FormLabel>
                   <FormControl>
-                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} disabled={isEmployeeRole && isEditMode && !['phone', 'dateOfBirth'].includes(field.name)} />
+                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} disabled={isEmployeeRole && isEditMode && !['phone', 'dateOfBirth', 'gender'].includes(field.name)} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -294,7 +316,7 @@ export function EmployeeForm({
               control={form.control}
               name="dateOfBirth"
               render={({ field }) => (
-                <FormItem className="flex flex-col pt-2"> {/* Adjusted pt-2 to align label better if gender is present */}
+                <FormItem className="flex flex-col pt-2">
                   <FormLabel>Date of Birth</FormLabel>
                   <Popover open={dobDatePickerOpen} onOpenChange={setDobDatePickerOpen}>
                     <PopoverTrigger asChild>
@@ -328,7 +350,6 @@ export function EmployeeForm({
               )}
             />
           </div>
-
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
              <FormField
@@ -373,66 +394,100 @@ export function EmployeeForm({
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-             <FormField
-                control={form.control}
-                name="reportingManagerId"
-                render={({ field }) => (
-                    <FormItem className="pt-2">
+        <FormField
+            control={form.control}
+            name="reportingManagerId"
+            render={({ field }) => (
+                <FormItem>
                     <FormLabel>Reporting Manager</FormLabel>
-                    <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                             <Search className="h-4 w-4 text-muted-foreground" />
-                             <Input
-                                type="text"
-                                placeholder="Search managers by name/ID/email..."
-                                value={managerSearchTerm}
-                                onChange={(e) => setManagerSearchTerm(e.target.value)}
-                                className="h-9 text-sm flex-grow"
-                                disabled={isLoadingManagers || isEmployeeRole}
-                             />
-                        </div>
-                        <Select
-                            onValueChange={(value) => field.onChange(value === NO_MANAGER_VALUE ? null : value)}
-                            value={field.value ?? NO_MANAGER_VALUE} // If field.value is null/undefined, select NO_MANAGER_VALUE
+                    <div className="flex items-center gap-2">
+                        <Input
+                            readOnly
+                            value={selectedManagerName || (isLoadingManagers ? "Loading..." : "None selected")}
+                            placeholder="Select a manager"
+                            className="flex-grow bg-muted cursor-default"
+                        />
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setIsManagerLookupOpen(true)}
                             disabled={isLoadingManagers || isEmployeeRole}
+                            className="shrink-0"
                         >
-                            <FormControl>
-                            <SelectTrigger>
-                                <SelectValue placeholder={isLoadingManagers ? "Loading managers..." : "Select reporting manager"} />
-                            </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                            <SelectItem value={NO_MANAGER_VALUE}>-- None --</SelectItem>
-                            {potentialManagersFiltered.map((manager) => (
-                                <SelectItem key={manager.id} value={manager.id}>
-                                {manager.name} ({manager.employeeId || manager.email})
-                                </SelectItem>
-                            ))}
-                            {potentialManagersFiltered.length === 0 && managerSearchTerm && (
-                                <div className="p-2 text-sm text-muted-foreground text-center">No managers found.</div>
-                            )}
-                            </SelectContent>
-                        </Select>
+                            <Search className="mr-2 h-4 w-4" />
+                            {selectedManagerName ? "Change" : "Select"}
+                        </Button>
+                        {selectedManagerName && (
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                    field.onChange(null);
+                                    setSelectedManagerName("");
+                                }}
+                                disabled={isEmployeeRole}
+                                className="shrink-0 text-muted-foreground hover:text-destructive"
+                                title="Clear manager selection"
+                            >
+                                <XCircle className="h-4 w-4" />
+                            </Button>
+                        )}
                     </div>
                     <FormMessage />
-                    </FormItem>
-                )}
-                />
-             <FormField
-              control={form.control}
-              name="workLocation"
-              render={({ field }) => (
-                <FormItem className="pt-2">
-                  <FormLabel>Work Location</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Main Office, Remote" {...field} value={field.value ?? ""} disabled={isEmployeeRole} />
-                  </FormControl>
-                  <FormMessage />
                 </FormItem>
-              )}
-            />
-          </div>
+            )}
+        />
+
+        <Dialog open={isManagerLookupOpen} onOpenChange={setIsManagerLookupOpen}>
+            <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                    <DialogTitle>Select Reporting Manager</DialogTitle>
+                    <DialogDescription>Search and select an active employee to be the reporting manager.</DialogDescription>
+                </DialogHeader>
+                <div className="py-4 space-y-4">
+                    <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input
+                            type="text"
+                            placeholder="Search managers by name, ID, email..."
+                            value={managerLookupSearchTerm}
+                            onChange={(e) => setManagerLookupSearchTerm(e.target.value)}
+                            className="pl-8"
+                        />
+                    </div>
+                    <ScrollArea className="h-[300px] border rounded-md">
+                        {potentialManagersFiltered.length > 0 ? (
+                            potentialManagersFiltered.map((manager) => (
+                                <Button
+                                    key={manager.id}
+                                    variant="ghost"
+                                    className="w-full justify-start h-auto py-2 px-3 text-left"
+                                    onClick={() => {
+                                        form.setValue('reportingManagerId', manager.id, { shouldValidate: true, shouldDirty: true });
+                                        setSelectedManagerName(manager.name);
+                                        setIsManagerLookupOpen(false);
+                                    }}
+                                >
+                                    <div className="flex flex-col">
+                                      <span>{manager.name}</span>
+                                      <span className="text-xs text-muted-foreground">{manager.position} ({manager.employeeId || manager.email})</span>
+                                    </div>
+                                </Button>
+                            ))
+                        ) : (
+                            <p className="p-4 text-center text-sm text-muted-foreground">
+                                {isLoadingManagers ? "Loading managers..." : "No active managers found" + (managerLookupSearchTerm ? " matching your search." : ".")}
+                            </p>
+                        )}
+                    </ScrollArea>
+                </div>
+                 <DialogClose asChild>
+                    <Button type="button" variant="outline" className="mt-2">Cancel</Button>
+                </DialogClose>
+            </DialogContent>
+        </Dialog>
+
 
            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <FormField
@@ -494,6 +549,21 @@ export function EmployeeForm({
                )}
              />
            </div>
+
+           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+             <FormField
+              control={form.control}
+              name="workLocation"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Work Location</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. Main Office, Remote" {...field} value={field.value ?? ""} disabled={isEmployeeRole} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
             <FormField
               control={form.control}
               name="status"
@@ -516,6 +586,7 @@ export function EmployeeForm({
                 </FormItem>
               )}
             />
+           </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-4 border-t">

@@ -14,14 +14,15 @@ import {
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import {
-    getSessionData,
+    getSessionData, // Use the general session data fetcher
     sendEmployeeWelcomeEmail,
+    // Ensure these specific helpers are also available if used directly elsewhere, though getSessionData is preferred
     getTenantIdFromSession,
     isAdminFromSession,
     getUserIdFromSession,
     getUserRoleFromSession,
     getEmployeeProfileForCurrentUser,
-    _parseSessionCookie, // Ensure this is exported if needed directly, or rely on getSessionData
+    _parseSessionCookie,
 } from '@/modules/auth/actions';
 import { addUser as dbAddUser } from '@/modules/auth/lib/db';
 import { generateTemporaryPassword } from '@/modules/auth/lib/utils';
@@ -29,11 +30,17 @@ import bcrypt from 'bcrypt';
 
 const SALT_ROUNDS = 10;
 
+// Schema for actions - expects reportingManagerId to be null or UUID string
+const actionEmployeeSchema = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true }).extend({
+    reportingManagerId: z.string().uuid("Invalid manager ID format").nullable().optional(),
+});
+
+
 export async function getEmployees(): Promise<Employee[]> {
   console.log("[Action getEmployees] Initiating fetch.");
-  let sessionData;
+  let sessionData: Awaited<ReturnType<typeof getSessionData>>;
   try {
-    sessionData = await getSessionData(); // This internally calls _parseSessionCookie
+    sessionData = await getSessionData();
     if (!sessionData?.tenantId || !sessionData.userRole || !sessionData.userId) {
       console.error("[Action getEmployees] Critical: Incomplete session data:", sessionData);
       throw new Error("Tenant context, user role, or user ID missing from session. Unable to determine permissions.");
@@ -70,7 +77,7 @@ export async function getEmployees(): Promise<Employee[]> {
 
 export async function getEmployeeByIdAction(id: string): Promise<Employee | undefined> {
     console.log(`[Action getEmployeeByIdAction] Received ID param to fetch: ${id}`);
-    let sessionData;
+    let sessionData: Awaited<ReturnType<typeof getSessionData>>;
     try {
         sessionData = await getSessionData();
          if (!sessionData?.tenantId || !sessionData.userRole || !sessionData.userId) {
@@ -90,29 +97,37 @@ export async function getEmployeeByIdAction(id: string): Promise<Employee | unde
 
         if (userRole === 'Employee') {
             console.log(`[Action getEmployeeByIdAction] Employee role. ID from URL: ${id}. Current user ID: ${currentUserId}`);
-            if (id.toLowerCase() !== currentUserId.toLowerCase()) {
-                console.warn(`[Action getEmployeeByIdAction] Auth_Failed (Employee Role): Attempt to access profile for ID ${id} which does not match session userId ${currentUserId}.`);
+            // For "My Profile", ID from URL is the user_id. For "Edit Profile", ID from URL is employee.id
+            // This action is generally called with employee.id for fetching.
+            // We need to ensure the employee record fetched by employee.id belongs to the current user.
+            const potentialProfile = await dbGetEmployeeById(id.toLowerCase(), tenantId);
+            if (potentialProfile && potentialProfile.userId?.toLowerCase() === currentUserId.toLowerCase()) {
+                employeeProfile = potentialProfile;
+                console.log(`[Action getEmployeeByIdAction] Employee role. Fetched employee PK ${id} and verified it belongs to session user ${currentUserId}.`);
+            } else if (potentialProfile) { // Found employee but doesn't belong to current user
+                console.warn(`[Action getEmployeeByIdAction] Auth_Failed (Employee Role): Attempt to access profile for Employee PK ${id}. Record's user_id (${potentialProfile.userId}) != session userId (${currentUserId}).`);
                 throw new Error("Unauthorized: You can only view your own employee profile.");
-            }
-            console.log(`[Action getEmployeeByIdAction] Employee role. ID from URL matches session userId. Fetching own profile using dbGetEmployeeByUserId with userId: ${id.toLowerCase()}, tenantId: ${tenantId}`);
-            employeeProfile = await dbGetEmployeeByUserId(id.toLowerCase(), tenantId);
-            if (employeeProfile) {
-                console.log(`[Action getEmployeeByIdAction] dbGetEmployeeByUserId SUCCESS: Found profile for current user. Employee ID (PK): ${employeeProfile.id}, Linked User ID on record: ${employeeProfile.userId}`);
-            } else {
-                console.warn(`[Action getEmployeeByIdAction] dbGetEmployeeByUserId FAILED to find profile for current user. userId: ${id.toLowerCase()}, tenantId: ${tenantId}. This user may not have a linked employee record or tenantId mismatch.`);
+            } else { // Employee not found by PK
+                 console.warn(`[Action getEmployeeByIdAction] Employee PK ${id} not found for tenant ${tenantId}.`);
+                 // If the ID from URL *might* be a userId (e.g. direct "My Profile" link concept)
+                 if (id.toLowerCase() === currentUserId.toLowerCase()) {
+                    console.log(`[Action getEmployeeByIdAction] ID matches session. Attempting fetch by userId as fallback for Employee role.`);
+                    employeeProfile = await dbGetEmployeeByUserId(id.toLowerCase(), tenantId);
+                    if (!employeeProfile) {
+                        console.warn(`[Action getEmployeeByIdAction] Also failed to find profile by userId ${id}.`);
+                    }
+                 }
             }
         } else { // Admin or Manager
             console.log(`[Action getEmployeeByIdAction] Admin/Manager role. Fetching employee by primary key (employee.id): ${id.toLowerCase()} for tenant: ${tenantId}`);
             employeeProfile = await dbGetEmployeeById(id.toLowerCase(), tenantId);
             if (employeeProfile) {
-                console.log(`[Action getEmployeeByIdAction] dbGetEmployeeById SUCCESS: Found employee ${employeeProfile.id} (PK) with linked user_id ${employeeProfile.userId}. Name: ${employeeProfile.name}`);
-                 if (employeeProfile.userId && employeeProfile.userId.toLowerCase() === currentUserId.toLowerCase()) {
-                    console.log(`[Action getEmployeeByIdAction] Admin/Manager viewing/editing their own profile (PK: ${employeeProfile.id})`);
-                }
+                console.log(`[Action getEmployeeByIdAction] dbGetEmployeeById SUCCESS: Found employee ${employeeProfile.id} (PK). Name: ${employeeProfile.name}`);
             } else {
                 console.warn(`[Action getEmployeeByIdAction] dbGetEmployeeById FAILED: Employee profile NOT found for employee.id (PK) ${id} in tenant ${tenantId}.`);
             }
         }
+
         if (!employeeProfile) {
             console.log(`[Action getEmployeeByIdAction] No employee profile found for id ${id} in tenant ${tenantId} with role ${userRole}.`);
         }
@@ -133,11 +148,6 @@ export async function getEmployeeByIdAction(id: string): Promise<Employee | unde
         throw new Error(friendlyMessage);
     }
 }
-
-// Schema for actions - expects reportingManagerId to be null or UUID string
-const actionEmployeeSchema = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true }).extend({
-    reportingManagerId: z.string().uuid("Invalid manager ID format").optional().nullable(),
-});
 
 
 export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 'userId' | 'employeeId'>): Promise<{ success: boolean; employee?: Employee; errors?: z.ZodIssue[] | { code: string; path: (string|number)[]; message: string }[] }> {
@@ -163,11 +173,11 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
    }
 
    console.log(`[Action addEmployee] Attempting to add employee for tenant: ${tenantId}`);
-   
-   // Ensure reportingManagerId is null if it was a placeholder or empty before validation
+
+   // Data for Zod validation, ensuring reportingManagerId is null if not a valid UUID
    const dataForValidation = {
        ...formData,
-       reportingManagerId: formData.reportingManagerId === "" || formData.reportingManagerId === "__NO_MANAGER__" ? null : formData.reportingManagerId,
+       reportingManagerId: formData.reportingManagerId ? formData.reportingManagerId : null,
    };
    console.log("[Action addEmployee] Data for Zod validation:", JSON.stringify(dataForValidation, null, 2));
 
@@ -181,12 +191,11 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
 
 
   const { name, email, ...employeeDetailsValidated } = validation.data;
-  
-  // This explicit conversion should now be redundant if Zod handles it with nullable()
-  // const employeeDataToSave = {
-  //     ...employeeDetailsValidated,
-  //     reportingManagerId: employeeDetailsValidated.reportingManagerId, // Should already be null or UUID
-  // };
+  // Ensure reportingManagerId is null if it was an empty string or the special value after validation
+  const finalEmployeeData = {
+    ...employeeDetailsValidated,
+    reportingManagerId: employeeDetailsValidated.reportingManagerId, // Should be null or UUID string from validation
+  };
 
   try {
     console.log("[Action addEmployee] Creating user and employee...");
@@ -211,7 +220,7 @@ export async function addEmployee(formData: Omit<EmployeeFormData, 'tenantId' | 
     console.log(`[Action addEmployee] User account created with ID: ${newUser.id}`);
 
     const newEmployee = await dbAddEmployeeInternal({
-        ...employeeDetailsValidated, // Use validated data (reportingManagerId should be null or UUID)
+        ...finalEmployeeData,
         tenantId,
         userId: newUser.id,
         name,
@@ -280,13 +289,11 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
 
    const { tenantId, userRole: userRolePerformingAction, userId: currentUserIdPerformingAction, tenantDomain } = sessionData;
 
-   // Ensure reportingManagerId is null if it was a placeholder or empty before validation
-    const dataForValidation = {
+   const dataForValidation = {
        ...formData,
-       reportingManagerId: formData.reportingManagerId === "" || formData.reportingManagerId === "__NO_MANAGER__" ? null : formData.reportingManagerId,
+       reportingManagerId: formData.reportingManagerId ? formData.reportingManagerId : null,
    };
    console.log("[Action updateEmployee] Data for Zod validation:", JSON.stringify(dataForValidation, null, 2));
-
 
     let validatedDataForAction: Partial<EmployeeFormData>;
 
@@ -301,11 +308,9 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
         if (dataForValidation.dateOfBirth !== undefined) allowedUpdates.dateOfBirth = dataForValidation.dateOfBirth;
         if (dataForValidation.gender !== undefined) allowedUpdates.gender = dataForValidation.gender;
 
-
         const disallowedKeys = Object.keys(dataForValidation).filter(key => !['phone', 'dateOfBirth', 'gender'].includes(key));
         if (disallowedKeys.length > 0 && Object.keys(dataForValidation).some(key => disallowedKeys.includes(key))) {
              console.warn(`[Action updateEmployee] Employee ${currentUserIdPerformingAction} attempted to update disallowed fields: ${disallowedKeys.join(', ')} on employee PK ${id}.`);
-             // Keep allowed fields if any were submitted alongside disallowed ones
              if (Object.keys(allowedUpdates).length === 0) {
                 return { success: false, errors: [{ code: 'custom', path: ['root'], message: `You are not allowed to update fields: ${disallowedKeys.join(', ')}.` }] };
              }
@@ -314,8 +319,6 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
 
         if (Object.keys(validatedDataForAction).length === 0) {
             console.log(`[Action updateEmployee] No valid/allowed changes submitted by employee ${currentUserIdPerformingAction} for employee PK ${id}.`);
-            // Return success, but indicate no changes were made, or return the existing employee data.
-            // For simplicity, let's consider it a success with no DB update.
             return { success: true, employee: employeeToUpdate, errors: [{ code: 'custom', path: ['root'], message: 'No updatable changes detected.' }] };
         }
     } else {
@@ -332,15 +335,20 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
     return { success: false, errors: validation.error.errors };
   }
    console.log("[Action updateEmployee] Zod Validation successful. Validated data for DB:", JSON.stringify(validation.data, null, 2));
+
+  const finalDataToUpdate = {
+    ...validation.data,
+    reportingManagerId: validation.data.reportingManagerId, // Should be null or UUID string
+  };
   
 
   try {
     console.log("[Action updateEmployee] Calling dbUpdateEmployee...");
-    const updatedEmployee = await dbUpdateEmployee(id, tenantId, validation.data); // Pass fully validated data
+    const updatedEmployee = await dbUpdateEmployee(id, tenantId, finalDataToUpdate);
     if (updatedEmployee) {
        console.log(`[Action updateEmployee] Employee PK ${id} updated successfully. Revalidating paths...`);
         revalidatePath(`/${tenantDomain}/employees`);
-        revalidatePath(`/${tenantDomain}/employees/${updatedEmployee.id}`); 
+        revalidatePath(`/${tenantDomain}/employees/${updatedEmployee.id}`);
         revalidatePath(`/${tenantDomain}/employees/${updatedEmployee.id}/edit`);
         revalidatePath(`/${tenantDomain}/dashboard`);
       return { success: true, employee: updatedEmployee };
