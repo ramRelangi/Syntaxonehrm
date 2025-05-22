@@ -1,7 +1,7 @@
 
 import pool from '@/lib/db';
 import type { Employee, EmployeeFormData, Gender } from '@/modules/employees/types';
-import { initializeEmployeeBalancesForAllTypes } from '@/modules/leave/lib/db'; // Import the new function
+import { initializeEmployeeBalancesForAllTypes } from '@/modules/leave/lib/db';
 
 // Case-insensitive UUID regex
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -16,7 +16,7 @@ function mapRowToEmployee(row: any): Employee {
         name: row.name,
         email: row.email,
         phone: row.phone ?? undefined,
-        gender: row.gender as Gender ?? undefined, // Map gender
+        gender: row.gender as Gender ?? undefined,
         position: row.position,
         department: row.department,
         hireDate: new Date(row.hire_date).toISOString().split('T')[0],
@@ -46,31 +46,31 @@ export async function getAllEmployees(tenantId: string): Promise<Employee[]> {
     }
 }
 
-// Get employee by ID (ensure it belongs to the tenant)
-export async function getEmployeeById(id: string, tenantId: string): Promise<Employee | undefined> {
-    console.log(`[DB getEmployeeById] Validating IDs. Employee ID: ${id}, Tenant ID: ${tenantId}`);
+// Get employee by ID (PK of employees table, ensure it belongs to the tenant)
+export async function getEmployeeById(id: string, tenantId: string, client?: any): Promise<Employee | undefined> {
+    console.log(`[DB getEmployeeById] Validating IDs. Employee ID (PK): ${id}, Tenant ID: ${tenantId}`);
     if (!uuidRegex.test(id)) {
-        console.error(`[DB getEmployeeById] Invalid employee ID format: ${id}`);
+        console.error(`[DB getEmployeeById] Invalid employee ID (PK) format: ${id}`);
         throw new Error("Invalid employee identifier format.");
     }
     if (!uuidRegex.test(tenantId)) {
         console.error(`[DB getEmployeeById] Invalid tenantId format: ${tenantId}`);
         throw new Error("Invalid tenant identifier format.");
     }
-    const client = await pool.connect();
+    const conn = client || await pool.connect();
     try {
-        console.log(`[DB getEmployeeById] Querying for employee.id: ${id.toLowerCase()}, tenantId: ${tenantId.toLowerCase()}`);
-        const res = await client.query('SELECT * FROM employees WHERE id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
+        console.log(`[DB getEmployeeById] Querying for employee.id (PK): ${id.toLowerCase()}, tenantId: ${tenantId.toLowerCase()}`);
+        const res = await conn.query('SELECT * FROM employees WHERE id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
         console.log(`[DB getEmployeeById] Rows found: ${res.rows.length}`);
         if (res.rows.length > 0) {
             return mapRowToEmployee(res.rows[0]);
         }
         return undefined;
     } catch (err) {
-        console.error(`Error fetching employee with id ${id} for tenant ${tenantId}:`, err);
+        console.error(`Error fetching employee with id (PK) ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
-        client.release();
+        if (!client) conn.release();
     }
 }
 
@@ -125,7 +125,7 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
             employeeData.name,
             employeeData.email,
             employeeData.phone || null,
-            employeeData.gender || null, // Add gender
+            employeeData.gender || null,
             employeeData.position,
             employeeData.department,
             employeeData.hireDate,
@@ -138,7 +138,7 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
         const res = await client.query(query, values);
         const newEmployee = mapRowToEmployee(res.rows[0]);
 
-        // Initialize leave balances for the new employee
+        // Initialize leave balances for the new employee using their PK (newEmployee.id)
         await initializeEmployeeBalancesForAllTypes(newEmployee.tenantId, newEmployee.id, client);
         console.log(`[DB addEmployee] Initialized leave balances for new employee ${newEmployee.id}`);
 
@@ -166,7 +166,7 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
 
 export async function updateEmployee(id: string, tenantId: string, updates: Partial<EmployeeFormData>): Promise<Employee | undefined> {
     if (!uuidRegex.test(id)) {
-        console.error(`[DB updateEmployee] Invalid employee ID format: ${id}`);
+        console.error(`[DB updateEmployee] Invalid employee ID (PK) format: ${id}`);
         throw new Error("Invalid employee identifier format.");
     }
     if (!uuidRegex.test(tenantId)) {
@@ -197,7 +197,7 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
             }
         }
     }
-    if (setClauses.length === 0) return getEmployeeById(id, tenantId);
+    if (setClauses.length === 0) return getEmployeeById(id, tenantId, client);
     setClauses.push(`updated_at = NOW()`);
     values.push(id.toLowerCase());
     values.push(tenantId.toLowerCase());
@@ -211,7 +211,7 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
         const res = await client.query(query, values);
         return res.rows.length > 0 ? mapRowToEmployee(res.rows[0]) : undefined;
     } catch (err: any) {
-        console.error(`Error updating employee with id ${id} for tenant ${tenantId}:`, err);
+        console.error(`Error updating employee with id (PK) ${id} for tenant ${tenantId}:`, err);
         if (err.code === '23505' && err.constraint === 'employees_tenant_id_email_key') {
             throw new Error('Email address already exists for this tenant.');
         }
@@ -223,7 +223,7 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
 
 export async function deleteEmployee(id: string, tenantId: string): Promise<boolean> {
     if (!uuidRegex.test(id)) {
-        console.error(`[DB deleteEmployee] Invalid employee ID format: ${id}`);
+        console.error(`[DB deleteEmployee] Invalid employee ID (PK) format: ${id}`);
         throw new Error("Invalid employee identifier format.");
     }
     if (!uuidRegex.test(tenantId)) {
@@ -238,11 +238,11 @@ export async function deleteEmployee(id: string, tenantId: string): Promise<bool
         const deleteEmployeeRes = await client.query('DELETE FROM employees WHERE id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
         if (deleteEmployeeRes.rowCount === 0) {
             await client.query('ROLLBACK');
-            console.warn(`Employee ${id} not found for tenant ${tenantId} during deletion.`);
+            console.warn(`Employee PK ${id} not found for tenant ${tenantId} during deletion.`);
             return false;
         }
         if (userIdToDelete) {
-            console.log(`[DB deleteEmployee] Deleting associated user with ID: ${userIdToDelete} for employee ${id}`);
+            console.log(`[DB deleteEmployee] Deleting associated user with ID: ${userIdToDelete} for employee PK ${id}`);
             const deleteUserRes = await client.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2', [userIdToDelete.toLowerCase(), tenantId.toLowerCase()]);
             if (deleteUserRes.rowCount === 0) {
                 console.warn(`[DB deleteEmployee] User ${userIdToDelete} not found or not deleted for tenant ${tenantId} during employee cleanup.`);
@@ -254,14 +254,15 @@ export async function deleteEmployee(id: string, tenantId: string): Promise<bool
         return true;
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error(`Error deleting employee with id ${id} for tenant ${tenantId}:`, err);
+        console.error(`Error deleting employee with id (PK) ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
-export async function getEmployeeByUserId(userId: string, tenantId: string): Promise<Employee | undefined> {
+// Get employee by user_id (FK from users table) and tenant_id
+export async function getEmployeeByUserId(userId: string, tenantId: string, client?: any): Promise<Employee | undefined> {
     console.log(`[DB getEmployeeByUserId] Validating IDs. User ID: ${userId}, Tenant ID: ${tenantId}`);
     if (!uuidRegex.test(userId)) {
         console.error(`[DB getEmployeeByUserId] Invalid userId format: ${userId}`);
@@ -271,10 +272,10 @@ export async function getEmployeeByUserId(userId: string, tenantId: string): Pro
         console.error(`[DB getEmployeeByUserId] Invalid tenantId format: ${tenantId}`);
         throw new Error("Invalid tenant identifier format.");
     }
-    const client = await pool.connect();
+    const conn = client || await pool.connect();
     try {
         console.log(`[DB getEmployeeByUserId] Querying for userId: ${userId.toLowerCase()}, tenantId: ${tenantId.toLowerCase()}`);
-        const res = await client.query('SELECT * FROM employees WHERE user_id = $1 AND tenant_id = $2', [userId.toLowerCase(), tenantId.toLowerCase()]);
+        const res = await conn.query('SELECT * FROM employees WHERE user_id = $1 AND tenant_id = $2', [userId.toLowerCase(), tenantId.toLowerCase()]);
         console.log(`[DB getEmployeeByUserId] Rows found: ${res.rows.length}`);
         if (res.rows.length > 0) {
             return mapRowToEmployee(res.rows[0]);
@@ -284,8 +285,6 @@ export async function getEmployeeByUserId(userId: string, tenantId: string): Pro
         console.error(`Error fetching employee by user_id ${userId} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
-        client.release();
+        if (!client) conn.release();
     }
 }
-
-    
