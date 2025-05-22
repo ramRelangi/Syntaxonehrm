@@ -16,7 +16,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, CalendarIcon, Save, UserPlus, Search, XCircle } from 'lucide-react'; // Added XCircle
+import { Loader2, CalendarIcon, Save, UserPlus, Search, XCircle } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
@@ -25,11 +25,10 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
-  DialogClose,
+  DialogClose, // Keep DialogClose if it's used
 } from "@/components/ui/dialog";
 import { ScrollArea } from '@/components/ui/scroll-area';
-
+import { z } from 'zod'; // Added missing Zod import
 
 interface EmployeeFormProps {
   employee?: Employee;
@@ -41,6 +40,8 @@ interface EmployeeFormProps {
 }
 
 type EmployeeFormShape = EmployeeFormData;
+
+const NO_MANAGER_VALUE = "__NO_MANAGER__"; // Special value for "None" option in manager select
 
 export function EmployeeForm({
   employee,
@@ -78,7 +79,6 @@ export function EmployeeForm({
     }
   };
 
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const formSchemaForValidation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true })
     .extend({
         reportingManagerId: z.string().uuid("Invalid manager ID format.").nullable().optional(),
@@ -109,7 +109,7 @@ export function EmployeeForm({
           setIsLoadingManagers(true);
           console.log("[EmployeeForm - fetchManagers] Fetching potential managers...");
           try {
-            const response = await fetch('/api/employees'); // API derives tenant context
+            const response = await fetch('/api/employees');
             if (!response.ok) {
               const errorData = await response.json().catch(() => ({}));
               console.error("[EmployeeForm - fetchManagers] API error:", errorData);
@@ -121,17 +121,19 @@ export function EmployeeForm({
             setPotentialManagers(filteredData);
             console.log(`[EmployeeForm - fetchManagers] Potential managers after filtering: ${filteredData.length}`);
 
-            // If editing and employee has a reportingManagerId, find and set their name
+            // Set initial selected manager name
             if (isEditMode && employee?.reportingManagerId) {
-                const currentManager = filteredData.find(m => m.id === employee.reportingManagerId);
+                const currentManager = filteredData.find(m => m.id === employee.reportingManagerId) || data.find(m => m.id === employee.reportingManagerId); // Check original list too
                 if (currentManager) {
                     setSelectedManagerName(currentManager.name);
-                } else if (potentialManagers.length > 0) { // Fallback if manager not in filtered list (e.g. inactive)
-                    const originalManager = potentialManagers.find(m => m.id === employee.reportingManagerId) || data.find(m => m.id === employee.reportingManagerId);
-                    if(originalManager) setSelectedManagerName(`${originalManager.name} (Current)`);
+                     console.log(`[EmployeeForm - useEffect] Set selectedManagerName for edit mode: ${currentManager.name}`);
+                } else {
+                    setSelectedManagerName("");
+                    console.log(`[EmployeeForm - useEffect] Current manager ID ${employee.reportingManagerId} not found in list for edit mode.`);
                 }
             } else if (!isEditMode) {
                  setSelectedManagerName(""); // Clear for new employee form
+                 console.log(`[EmployeeForm - useEffect] Cleared selectedManagerName for new employee form.`);
             }
 
           } catch (error) {
@@ -147,7 +149,8 @@ export function EmployeeForm({
         };
         fetchManagers();
     }
-  }, [isEditMode, employee?.id, employee?.reportingManagerId, toast, currentUserRole]); // Removed potentialManagers from deps
+  }, [isEditMode, employee?.id, employee?.reportingManagerId, toast, currentUserRole]);
+
 
   const potentialManagersFiltered = React.useMemo(() => {
     if (!managerLookupSearchTerm) return potentialManagers;
@@ -163,12 +166,13 @@ export function EmployeeForm({
     setIsLoading(true);
     console.log("[Employee Form] Submitting data (raw from form):", data);
 
+    // Ensure reportingManagerId is null if it's the placeholder value or empty
     const payload = {
       ...data,
       phone: data.phone || undefined,
       gender: data.gender || undefined,
       dateOfBirth: data.dateOfBirth || null,
-      reportingManagerId: data.reportingManagerId, // Should be UUID string or null
+      reportingManagerId: data.reportingManagerId === NO_MANAGER_VALUE || data.reportingManagerId === "" ? null : data.reportingManagerId,
       workLocation: data.workLocation || undefined,
     };
     console.log("[Employee Form] Payload to be sent to action:", payload);
@@ -403,7 +407,7 @@ export function EmployeeForm({
                     <div className="flex items-center gap-2">
                         <Input
                             readOnly
-                            value={selectedManagerName || (isLoadingManagers ? "Loading..." : "None selected")}
+                            value={selectedManagerName || (isLoadingManagers && !field.value ? "Loading..." : (field.value ? selectedManagerName : "None selected"))}
                             placeholder="Select a manager"
                             className="flex-grow bg-muted cursor-default"
                         />
@@ -423,7 +427,7 @@ export function EmployeeForm({
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => {
-                                    field.onChange(null);
+                                    field.onChange(null); // Set to null
                                     setSelectedManagerName("");
                                 }}
                                 disabled={isEmployeeRole}
@@ -605,3 +609,4 @@ export function EmployeeForm({
     </Form>
   );
 }
+
