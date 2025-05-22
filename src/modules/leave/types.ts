@@ -1,49 +1,38 @@
 
 import { z } from 'zod';
+import type { Gender } from '@/modules/employees/types'; // Import Gender type
 
 // --- Leave Type ---
-export interface LeaveType {
-  id: string;
-  tenantId: string; // Add tenant ID
-  name: string;
-  description?: string;
-  requiresApproval: boolean;
-  defaultBalance?: number; // e.g., initial days granted per year/period
-  accrualRate?: number; // e.g., days accrued per month
-}
+export const leaveTypeSchema = z.object({
+  id: z.string().optional(),
+  tenantId: z.string().uuid(),
+  name: z.string().min(2, "Name must be at least 2 characters"),
+  description: z.string().optional(),
+  requiresApproval: z.boolean().default(true),
+  defaultBalance: z.coerce.number().min(0, "Default balance cannot be negative").optional().default(0),
+  accrualRate: z.coerce.number().min(0, "Accrual rate cannot be negative").optional().default(0),
+  applicableGender: z.custom<Gender>().optional().nullable().describe("Specify if this leave type is only for a particular gender."), // Allow null for 'All'
+});
+
+export type LeaveType = z.infer<typeof leaveTypeSchema>;
+
 
 // --- Leave Request ---
 export type LeaveRequestStatus = 'Pending' | 'Approved' | 'Rejected' | 'Cancelled';
 
-export interface LeaveRequest {
-  id: string;
-  tenantId: string; // Add tenant ID
-  employeeId: string; // Link to Employee
-  employeeName: string; // Denormalized for easier display
-  leaveTypeId: string; // Link to LeaveType
-  leaveTypeName: string; // Denormalized
-  startDate: string; // ISO string (e.g., '2024-07-15')
-  endDate: string; // ISO string
-  reason: string;
-  status: LeaveRequestStatus;
-  requestDate: string; // ISO string when the request was made
-  approverId?: string; // ID of the user who approved/rejected
-  approvalDate?: string; // ISO string when action was taken
-  comments?: string; // Approver comments
-  attachmentUrl?: string | null; // New field
-}
-
-// --- Zod Schema for Leave Request API Payload & Form ---
-// This schema defines the complete data structure including server-added context (tenantId, employeeId)
-// and ensures all IDs are validated as UUIDs.
-export const leaveRequestSchema = z.object({
-  tenantId: z.string().uuid("Invalid tenant identifier."),
-  employeeId: z.string().uuid("Invalid employee identifier."),
+// Base schema for API payload before server-side context is added
+export const leaveRequestPayloadSchema = z.object({
   leaveTypeId: z.string().uuid("Leave type must be a valid selection."),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date must be in YYYY-MM-DD format"),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format"),
   reason: z.string().min(5, "Reason must be at least 5 characters").max(200, "Reason cannot exceed 200 characters"),
   attachmentUrl: z.string().url("Invalid URL format for attachment.").optional().or(z.literal('')).nullable(),
+});
+
+// Schema including server-side context (tenantId, employeeId) for full validation
+export const leaveRequestSchema = leaveRequestPayloadSchema.extend({
+  tenantId: z.string().uuid("Invalid tenant identifier."),
+  employeeId: z.string().uuid("Invalid employee identifier."),
 });
 
 export const refinedLeaveRequestSchema = leaveRequestSchema.refine(data => {
@@ -57,7 +46,27 @@ export const refinedLeaveRequestSchema = leaveRequestSchema.refine(data => {
   path: ["endDate"],
 });
 
+// Type for the actual leave request object as stored/retrieved
+export interface LeaveRequest {
+  id: string;
+  tenantId: string;
+  employeeId: string;
+  employeeName: string; // Denormalized for easier display
+  leaveTypeId: string;
+  leaveTypeName: string; // Denormalized
+  startDate: string; // ISO string (e.g., '2024-07-15')
+  endDate: string; // ISO string
+  reason: string;
+  status: LeaveRequestStatus;
+  requestDate: string; // ISO string when the request was made
+  approverId?: string; // ID of the user who approved/rejected
+  approvalDate?: string; // ISO string when action was taken
+  comments?: string; // Approver comments
+  attachmentUrl?: string | null;
+}
 
+// Type for form data (client-side, before tenantId is added by server)
+// It includes employeeId because the form knows this.
 export type LeaveRequestFormData = z.infer<typeof refinedLeaveRequestSchema>;
 
 
@@ -66,7 +75,7 @@ export interface LeaveBalance {
     tenantId: string;
     employeeId: string;
     leaveTypeId: string;
-    leaveTypeName: string; // Made non-optional as it should always be fetched
+    leaveTypeName: string;
     balance: number;
     lastUpdated: string; // ISO string
 }

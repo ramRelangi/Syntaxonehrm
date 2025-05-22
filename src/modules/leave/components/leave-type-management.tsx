@@ -6,6 +6,8 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import type { LeaveType } from '@/modules/leave/types';
+import type { Gender } from '@/modules/employees/types'; // Import Gender
+import { genderSchema } from '@/modules/employees/types'; // Import Gender Schema
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,18 +49,22 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PlusCircle, Edit, Trash2, Loader2, Save } from 'lucide-react';
 
-const leaveTypeSchema = z.object({
+const leaveTypeFormSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(2, "Name must be at least 2 characters"),
   description: z.string().optional(),
   requiresApproval: z.boolean().default(true),
   defaultBalance: z.coerce.number().min(0, "Default balance cannot be negative").optional().default(0),
   accrualRate: z.coerce.number().min(0, "Accrual rate cannot be negative").optional().default(0),
+  applicableGender: z.custom<Gender>().optional().nullable(), // Zod schema for applicableGender
 });
 
-type LeaveTypeFormData = z.infer<typeof leaveTypeSchema>;
+type LeaveTypeFormData = z.infer<typeof leaveTypeFormSchema>;
+
+const ALL_GENDERS_VALUE = "__ALL_GENDERS__"; // Special value for 'All Genders' option
 
 interface LeaveTypeManagementProps {
   initialLeaveTypes: LeaveType[];
@@ -67,15 +73,14 @@ interface LeaveTypeManagementProps {
 
 export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeManagementProps) {
   const { toast } = useToast();
-  const leaveTypes = initialLeaveTypes; // Use prop directly
+  const leaveTypes = initialLeaveTypes;
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState<Record<string, boolean>>({});
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [editingLeaveType, setEditingLeaveType] = React.useState<LeaveType | null>(null);
 
   const form = useForm<LeaveTypeFormData>({
-    resolver: zodResolver(leaveTypeSchema),
-    // Default values set in useEffect based on editingLeaveType
+    resolver: zodResolver(leaveTypeFormSchema),
   });
 
   React.useEffect(() => {
@@ -87,6 +92,7 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
         requiresApproval: editingLeaveType.requiresApproval,
         defaultBalance: editingLeaveType.defaultBalance ?? 0,
         accrualRate: editingLeaveType.accrualRate ?? 0,
+        applicableGender: editingLeaveType.applicableGender ?? null,
       });
     } else {
       form.reset({
@@ -96,6 +102,7 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
         requiresApproval: true,
         defaultBalance: 0,
         accrualRate: 0,
+        applicableGender: null, // Default to null (All Genders)
       });
     }
   }, [editingLeaveType, form]);
@@ -103,10 +110,10 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
   const onSubmit = async (data: LeaveTypeFormData) => {
     setIsSubmitting(true);
     const isEditMode = !!editingLeaveType;
-    const apiUrl = isEditMode ? `/api/leave/types/${editingLeaveType.id}` : '/api/leave/types';
+    const apiUrl = isEditMode ? `/api/leave/types/${editingLeaveType!.id}` : '/api/leave/types';
     const method = isEditMode ? 'PUT' : 'POST';
 
-    const payload = { ...data };
+    const payload = { ...data, applicableGender: data.applicableGender === ALL_GENDERS_VALUE ? null : data.applicableGender };
     if (!isEditMode) delete payload.id;
 
     try {
@@ -123,9 +130,8 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
              if(responseText) result = JSON.parse(responseText);
         } catch(e) {
             if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-            result = {}; // OK but no JSON body
+            result = {};
         }
-
 
         if (!response.ok) {
              throw new Error(result?.error || result?.message || `HTTP error! Status: ${response.status}`);
@@ -140,7 +146,7 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
         setIsDialogOpen(false);
         setEditingLeaveType(null);
         form.reset();
-        onUpdate(); // Refresh parent state
+        onUpdate();
 
     } catch (error: any) {
         console.error("Leave Type Submit error:", error);
@@ -169,7 +175,7 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
              if(responseText) result = JSON.parse(responseText);
          } catch(e) {
             if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-            result = {}; // OK but no JSON body
+            result = {};
          }
 
         if (!response.ok) {
@@ -181,7 +187,7 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
             description: `${name} has been successfully deleted.`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
-        onUpdate(); // Refresh parent state
+        onUpdate();
 
     } catch (error: any) {
         console.error("Leave Type Delete error:", error);
@@ -203,7 +209,7 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
   const openAddDialog = () => {
     setEditingLeaveType(null);
     form.reset({
-      id: undefined, name: '', description: '', requiresApproval: true, defaultBalance: 0, accrualRate: 0,
+      id: undefined, name: '', description: '', requiresApproval: true, defaultBalance: 0, accrualRate: 0, applicableGender: null
     });
     setIsDialogOpen(true);
   };
@@ -230,7 +236,7 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
                 <PlusCircle className="mr-2 h-4 w-4" /> Add Leave Type
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
+          <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>{editingLeaveType ? 'Edit Leave Type' : 'Add New Leave Type'}</DialogTitle>
               <DialogDescription>
@@ -264,7 +270,7 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
                     <FormItem>
                       <FormLabel>Description (Optional)</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g., Standard paid time off" {...field} />
+                        <Input placeholder="e.g., Standard paid time off" {...field} value={field.value ?? ""} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -292,6 +298,30 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
                       <FormControl>
                         <Input type="number" min="0" step="0.01" placeholder="e.g., 1.67" {...field} />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="applicableGender"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Applicable Gender (Optional)</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value ?? ALL_GENDERS_VALUE}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select applicable gender or leave blank for all" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value={ALL_GENDERS_VALUE}>All Genders</SelectItem>
+                          {genderSchema.options.map(gender => (
+                            <SelectItem key={gender} value={gender}>{gender}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>If a gender is selected, this leave type will only be available to employees of that gender.</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -335,7 +365,6 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
         </Dialog>
       </CardHeader>
       <CardContent>
-         {/* Added overflow-auto for responsiveness */}
          <div className="overflow-auto">
             <Table>
             <TableHeader>
@@ -345,13 +374,14 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
                 <TableHead>Default Balance</TableHead>
                 <TableHead>Accrual Rate</TableHead>
                 <TableHead>Needs Approval?</TableHead>
+                <TableHead>Applicable Gender</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
             </TableHeader>
             <TableBody>
                 {leaveTypes.length === 0 ? (
                 <TableRow>
-                    <TableCell colSpan={6} className="h-24 text-center">
+                    <TableCell colSpan={7} className="h-24 text-center">
                     No leave types configured yet.
                     </TableCell>
                 </TableRow>
@@ -363,6 +393,7 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
                     <TableCell>{type.defaultBalance ?? 0} days</TableCell>
                     <TableCell>{type.accrualRate ?? 0} days/month</TableCell>
                     <TableCell>{type.requiresApproval ? 'Yes' : 'No'}</TableCell>
+                    <TableCell>{type.applicableGender || 'All'}</TableCell>
                     <TableCell className="text-right">
                         <Button variant="ghost" size="icon" onClick={() => openEditDialog(type)} className="mr-1 h-8 w-8">
                         <Edit className="h-4 w-4" />
@@ -370,8 +401,8 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
                         </Button>
                         <AlertDialog>
                         <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8" disabled={isDeleting[type.id]}>
-                                {isDeleting[type.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8" disabled={isDeleting[type.id!]}>
+                                {isDeleting[type.id!] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                                 <span className="sr-only">Delete</span>
                             </Button>
                         </AlertDialogTrigger>
@@ -383,9 +414,9 @@ export function LeaveTypeManagement({ initialLeaveTypes, onUpdate }: LeaveTypeMa
                             </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                            <AlertDialogCancel disabled={isDeleting[type.id]}>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleDelete(type.id, type.name)} disabled={isDeleting[type.id]} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                                {isDeleting[type.id] ? "Deleting..." : "Delete"}
+                            <AlertDialogCancel disabled={isDeleting[type.id!]}>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDelete(type.id!, type.name)} disabled={isDeleting[type.id!]} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                {isDeleting[type.id!] ? "Deleting..." : "Delete"}
                             </AlertDialogAction>
                             </AlertDialogFooter>
                         </AlertDialogContent>

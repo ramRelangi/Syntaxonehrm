@@ -15,18 +15,18 @@ import { HolidayManagement } from "@/modules/leave/components/holiday-management
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { LeaveType, LeaveRequest, LeaveBalance, Holiday } from "@/modules/leave/types";
+import type { Gender } from "@/modules/employees/types"; // Import Gender
 import { getHolidaysAction, getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances } from '@/modules/leave/actions';
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { cn } from '@/lib/utils';
 import { useSearchParams, useRouter } from "next/navigation";
 
 interface LeavePageClientProps {
   userId: string | null;
   isAdmin: boolean;
   tenantDomain: string | null;
+  employeeGender?: Gender | null; // Accept employee's gender
 }
 
-export default function LeavePageClient({ userId: initialUserId, isAdmin, tenantDomain }: LeavePageClientProps) {
+export default function LeavePageClient({ userId: initialUserId, isAdmin, tenantDomain, employeeGender }: LeavePageClientProps) {
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -34,7 +34,8 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
   const employeeIdFromQuery = searchParams.get('employeeId');
   const targetUserId = employeeIdFromQuery || initialUserId;
 
-  const [leaveTypes, setLeaveTypes] = React.useState<LeaveType[]>([]);
+  const [allLeaveTypes, setAllLeaveTypes] = React.useState<LeaveType[]>([]); // Store all fetched types
+  const [applicableLeaveTypes, setApplicableLeaveTypes] = React.useState<LeaveType[]>([]); // Filtered types for form
   const [allRequests, setAllRequests] = React.useState<LeaveRequest[]>([]);
   const [myRequests, setMyRequests] = React.useState<LeaveRequest[]>([]);
   const [myBalances, setMyBalances] = React.useState<LeaveBalance[]>([]);
@@ -43,7 +44,6 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
   const [fetchError, setFetchError] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState(employeeIdFromQuery ? 'my-requests' : 'request');
   const [currentEmployeeName, setCurrentEmployeeName] = React.useState<string | null>(null);
-
 
   const refetchData = React.useCallback(async () => {
       if (!targetUserId || !tenantDomain) {
@@ -63,7 +63,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
               getEmployeeLeaveBalances(targetUserId),
               getHolidaysAction(),
           ]);
-          setLeaveTypes(typesData);
+          setAllLeaveTypes(typesData); // Store all types
           setAllRequests(allReqData);
           setMyRequests(myReqData);
           setMyBalances(balancesData);
@@ -72,6 +72,8 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
           if (employeeIdFromQuery && myReqData.length > 0 && myReqData[0].employeeName) {
              setCurrentEmployeeName(myReqData[0].employeeName);
           } else if (employeeIdFromQuery) {
+             // If name is not available from request (e.g. no requests yet), show ID
+             // Potentially fetch employee name separately if needed here
              setCurrentEmployeeName(`Employee ID: ${employeeIdFromQuery}`);
           } else {
              setCurrentEmployeeName(null);
@@ -103,6 +105,33 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
     }
   }, [targetUserId, tenantDomain, refetchData]);
 
+  // Filter leave types based on employee gender
+  React.useEffect(() => {
+    if (allLeaveTypes.length > 0) {
+      let filteredTypes;
+      // If viewing another employee's leave and their gender isn't available, show all (admin might not have gender for other users easily here)
+      // Or, if it's the current user, use their gender.
+      const genderToFilterBy = employeeIdFromQuery && employeeIdFromQuery !== initialUserId ? undefined : employeeGender;
+
+      if (genderToFilterBy) {
+        filteredTypes = allLeaveTypes.filter(lt =>
+          !lt.applicableGender || lt.applicableGender === genderToFilterBy
+        );
+      } else {
+        // If no gender to filter by (e.g., admin viewing all or gender not available), show all types
+        // that are not explicitly for a *different* gender (more permissive for admin)
+        // Or, if we want strict "only applicable to all" if gender is unknown:
+        // filteredTypes = allLeaveTypes.filter(lt => !lt.applicableGender);
+        filteredTypes = allLeaveTypes; // Show all if gender is unknown or admin view of other
+      }
+      console.log(`[Leave Page Client] Employee Gender: ${genderToFilterBy}, All Types: ${allLeaveTypes.length}, Filtered Types: ${filteredTypes.length}`);
+      setApplicableLeaveTypes(filteredTypes);
+    } else {
+      setApplicableLeaveTypes([]);
+    }
+  }, [allLeaveTypes, employeeGender, employeeIdFromQuery, initialUserId]);
+
+
    const handleLeaveRequestSubmitted = () => {
      refetchData();
      setActiveTab('my-requests');
@@ -132,7 +161,6 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
         )}
       </div>
 
-
        {isLoading && !fetchError && (
            <div className="space-y-6 md:space-y-8">
               <Skeleton className="h-32 w-full" />
@@ -143,7 +171,6 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
        {fetchError && !isLoading && (
            <Card><CardContent className="p-4 text-destructive text-center">{fetchError}</CardContent></Card>
        )}
-
 
        {!isLoading && !fetchError && targetUserId && (
            <>
@@ -164,7 +191,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                     {myBalances.length > 0 ? (
                        myBalances.map(balance => (
                            <div key={balance.leaveTypeId} className="flex flex-col items-start gap-1 p-3 border rounded-md bg-secondary/50">
-                               <span className="font-medium text-sm">{balance.leaveTypeName}</span> {/* Use balance.leaveTypeName directly */}
+                               <span className="font-medium text-sm">{balance.leaveTypeName}</span>
                                <Badge variant="outline" className="text-lg">{balance.balance} days</Badge>
                            </div>
                        ))
@@ -173,7 +200,6 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                     )}
                  </CardContent>
               </Card>
-
 
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="leave-tabs">
                  <div className="overflow-x-auto pb-2">
@@ -215,7 +241,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                            <CardContent>
                                <LeaveRequestForm
                                    employeeId={targetUserId}
-                                   leaveTypes={leaveTypes}
+                                   leaveTypes={applicableLeaveTypes} // Use filtered types
                                    onSuccess={handleLeaveRequestSubmitted}
                                />
                            </CardContent>
@@ -226,7 +252,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                 <TabsContent value="my-requests">
                     <LeaveRequestList
                         requests={myRequests}
-                        leaveTypes={leaveTypes}
+                        leaveTypes={allLeaveTypes} // List can show all types, form is filtered
                         isAdminView={isAdmin && employeeIdFromQuery === initialUserId}
                         currentUserId={initialUserId}
                         tenantDomain={tenantDomain}
@@ -238,7 +264,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                    <TabsContent value="all-requests">
                        <LeaveRequestList
                            requests={allRequests}
-                           leaveTypes={leaveTypes}
+                           leaveTypes={allLeaveTypes}
                            isAdminView={true}
                            currentUserId={initialUserId}
                            tenantDomain={tenantDomain}
@@ -250,7 +276,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                 {isAdmin && (
                    <TabsContent value="manage-types">
                        <LeaveTypeManagement
-                           initialLeaveTypes={leaveTypes}
+                           initialLeaveTypes={allLeaveTypes}
                            onUpdate={handleLeaveTypeUpdated}
                        />
                    </TabsContent>

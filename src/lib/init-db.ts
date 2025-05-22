@@ -23,7 +23,7 @@ DROP TABLE IF EXISTS job_postings CASCADE;
 DROP TABLE IF EXISTS leave_balances CASCADE;
 DROP TABLE IF EXISTS leave_requests CASCADE;
 DROP TABLE IF EXISTS leave_types CASCADE;
-DROP TABLE IF EXISTS employees CASCADE; -- Drop employees before users if reporting_manager_id references users
+DROP TABLE IF EXISTS employees CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS tenants CASCADE;
 SELECT 'Existing tables dropped (if they existed).';
@@ -33,10 +33,10 @@ DROP TYPE IF EXISTS job_posting_status CASCADE;
 DROP TYPE IF EXISTS candidate_status CASCADE;
 DROP TYPE IF EXISTS leave_request_status CASCADE;
 DROP TYPE IF EXISTS employee_status CASCADE;
-DROP TYPE IF EXISTS gender_enum_type CASCADE; -- New gender enum
+DROP TYPE IF EXISTS gender_enum_type CASCADE;
 DROP TYPE IF EXISTS user_role CASCADE;
-DROP TYPE IF EXISTS employment_enum_type CASCADE; -- For job postings and employees
-DROP TYPE IF EXISTS experience_level_enum_type CASCADE; -- For job postings
+DROP TYPE IF EXISTS employment_enum_type CASCADE;
+DROP TYPE IF EXISTS experience_level_enum_type CASCADE;
 SELECT 'Existing custom types dropped (if they existed).';
 
 
@@ -122,7 +122,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS tenants (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
-    domain VARCHAR(100) UNIQUE NOT NULL, -- Unique, lowercase domain name
+    domain VARCHAR(100) UNIQUE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 SELECT 'tenants table created.';
@@ -132,14 +132,14 @@ CREATE INDEX IF NOT EXISTS idx_tenants_domain ON tenants(LOWER(domain));
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    email VARCHAR(255) NOT NULL, -- Email uniqueness enforced per tenant
+    email VARCHAR(255) NOT NULL,
     password_hash TEXT NOT NULL,
     name VARCHAR(255) NOT NULL,
     role user_role NOT NULL DEFAULT 'Employee',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tenant_id, email) -- Ensure email is unique within a tenant
+    UNIQUE (tenant_id, email)
 );
 SELECT 'users table created.';
 CREATE INDEX IF NOT EXISTS idx_users_tenant_id_email ON users(tenant_id, LOWER(email));
@@ -149,12 +149,12 @@ CREATE INDEX IF NOT EXISTS idx_users_tenant_id_email ON users(tenant_id, LOWER(e
 CREATE TABLE IF NOT EXISTS employees (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL UNIQUE, -- Link to the users table, can be null initially
-    employee_id VARCHAR(50), -- Official Employee ID, unique per tenant, generated dynamically
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL UNIQUE,
+    employee_id VARCHAR(50),
     name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL, -- Email uniqueness enforced per tenant
+    email VARCHAR(255) NOT NULL,
     phone VARCHAR(50),
-    gender gender_enum_type, -- New gender column
+    gender gender_enum_type,
     position VARCHAR(255) NOT NULL,
     department VARCHAR(255) NOT NULL,
     hire_date DATE NOT NULL,
@@ -169,8 +169,7 @@ CREATE TABLE IF NOT EXISTS employees (
     UNIQUE (tenant_id, employee_id)
 );
 SELECT 'employees table created.';
-CREATE INDEX IF NOT EXISTS idx_employees_tenant_id ON employees(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_employees_user_id ON employees(user_id);
+CREATE INDEX IF NOT EXISTS idx_employees_tenant_id_user_id ON employees(tenant_id, user_id);
 
 
 -- Leave Types Table
@@ -182,6 +181,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
     requires_approval BOOLEAN NOT NULL DEFAULT TRUE,
     default_balance NUMERIC(5, 2) DEFAULT 0,
     accrual_rate NUMERIC(5, 2) DEFAULT 0,
+    applicable_gender gender_enum_type, -- New column for gender specificity
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, name)
@@ -370,16 +370,17 @@ export async function initializeDatabase() {
     console.log('Attempting to connect to database for schema initialization...');
     client = await pool.connect();
     console.log('Connected to database. Executing schema creation script...');
-    // Execute the entire script as a single query
     await client.query(schemaSQL);
     console.log('Database schema creation script executed successfully.');
   } catch (err: any) {
     console.error('-----------------------------------------');
     console.error('Error during database schema initialization:', err.message);
-    console.error('Stack:', err.stack);
-    console.error('Error Details:', err); // Log the full error object
+    if (err.stack) console.error('Stack:', err.stack);
+    if (err.detail) console.error('Detail:', err.detail);
+    if (err.hint) console.error('Hint:', err.hint);
+    if (err.where) console.error('Where:', err.where);
+    console.error('Full Error Object:', err);
     console.error('-----------------------------------------');
-    // Re-throw the error so it can be caught by the caller (e.g., registerTenantAction)
     throw err;
   } finally {
     if (client) {
@@ -389,7 +390,6 @@ export async function initializeDatabase() {
   }
 }
 
-// Check if the script is being run directly (e.g., `npm run db:init`)
 if (require.main === module) {
   initializeDatabase().then(() => {
     console.log("Manual DB initialization complete.");
@@ -400,5 +400,3 @@ if (require.main === module) {
     process.exit(1);
   });
 }
-
-    
