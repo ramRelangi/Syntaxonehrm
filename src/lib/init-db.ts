@@ -33,6 +33,7 @@ DROP TYPE IF EXISTS job_posting_status CASCADE;
 DROP TYPE IF EXISTS candidate_status CASCADE;
 DROP TYPE IF EXISTS leave_request_status CASCADE;
 DROP TYPE IF EXISTS employee_status CASCADE;
+DROP TYPE IF EXISTS gender_enum_type CASCADE; -- New gender enum
 DROP TYPE IF EXISTS user_role CASCADE;
 DROP TYPE IF EXISTS employment_enum_type CASCADE; -- For job postings and employees
 DROP TYPE IF EXISTS experience_level_enum_type CASCADE; -- For job postings
@@ -48,6 +49,15 @@ DO $$ BEGIN
 EXCEPTION
     WHEN duplicate_object THEN
         RAISE NOTICE 'user_role type already exists, skipping creation.';
+END $$;
+
+-- Gender Enum
+DO $$ BEGIN
+    CREATE TYPE gender_enum_type AS ENUM ('Male', 'Female', 'Other', 'Prefer not to say');
+    RAISE NOTICE 'gender_enum_type type created.';
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'gender_enum_type type already exists, skipping creation.';
 END $$;
 
 -- Employee Status Enum
@@ -144,6 +154,7 @@ CREATE TABLE IF NOT EXISTS employees (
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL, -- Email uniqueness enforced per tenant
     phone VARCHAR(50),
+    gender gender_enum_type, -- New gender column
     position VARCHAR(255) NOT NULL,
     department VARCHAR(255) NOT NULL,
     hire_date DATE NOT NULL,
@@ -389,3 +400,5 @@ if (require.main === module) {
     process.exit(1);
   });
 }
+
+    

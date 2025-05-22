@@ -5,16 +5,16 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
-import { employeeSchema, type EmployeeFormData, employmentTypeSchema } from '@/modules/employees/types';
-import type { Employee } from '@/modules/employees/types';
-import type { UserRole } from '@/modules/auth/types'; // Import UserRole
+import { employeeSchema, type EmployeeFormData, employmentTypeSchema, genderSchema } from '@/modules/employees/types'; // Import genderSchema
+import type { Employee, Gender } from '@/modules/employees/types'; // Import Gender type
+import type { UserRole } from '@/modules/auth/types';
 import { addEmployee, updateEmployee } from '@/modules/employees/actions';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, CalendarIcon, Save, UserPlus } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
@@ -26,7 +26,7 @@ interface EmployeeFormProps {
   formTitle: string;
   formDescription: string;
   tenantDomain: string;
-  currentUserRole: UserRole | null; // Add currentUserRole prop
+  currentUserRole: UserRole | null;
 }
 
 type EmployeeFormShape = EmployeeFormData;
@@ -39,7 +39,7 @@ export function EmployeeForm({
   formTitle,
   formDescription,
   tenantDomain,
-  currentUserRole, // Receive role
+  currentUserRole,
 }: EmployeeFormProps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -51,8 +51,6 @@ export function EmployeeForm({
 
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
-
-  // Determine if fields should be disabled based on role
   const isEmployeeRole = currentUserRole === 'Employee';
 
   const getFormattedDate = (dateString?: string | null): string => {
@@ -74,6 +72,7 @@ export function EmployeeForm({
       name: employee?.name ?? "",
       email: employee?.email ?? "",
       phone: employee?.phone ?? "",
+      gender: employee?.gender ?? undefined, // Add gender default
       position: employee?.position ?? "",
       department: employee?.department ?? "",
       hireDate: getFormattedDate(employee?.hireDate),
@@ -90,7 +89,7 @@ export function EmployeeForm({
         const fetchManagers = async () => {
           setIsLoadingManagers(true);
           try {
-            const response = await fetch('/api/employees'); // API handles tenant context
+            const response = await fetch('/api/employees');
             if (!response.ok) {
               throw new Error('Failed to fetch potential managers');
             }
@@ -120,6 +119,7 @@ export function EmployeeForm({
     const payload = {
       ...data,
       phone: data.phone || undefined,
+      gender: data.gender || undefined, // Ensure gender is passed
       dateOfBirth: data.dateOfBirth || null,
       reportingManagerId: data.reportingManagerId === NO_MANAGER_VALUE || data.reportingManagerId === "" ? null : data.reportingManagerId,
       workLocation: data.workLocation || undefined,
@@ -159,7 +159,7 @@ export function EmployeeForm({
         });
 
         const targetPath = `/${tenantDomain}/employees`;
-        router.push(isEditMode ? `/${tenantDomain}/employees/${employee.id}` : targetPath); // Go to detail page if editing
+        router.push(isEditMode ? `/${tenantDomain}/employees/${employee.id}` : targetPath);
         router.refresh();
 
     } catch (error: any) {
@@ -228,13 +228,80 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Phone Number</FormLabel>
                   <FormControl>
-                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} disabled={isEmployeeRole && !isEditMode} />
+                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} disabled={isEmployeeRole && !isEditMode && !!employee?.phone} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
           </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+             <FormField
+              control={form.control}
+              name="gender"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Gender</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value ?? undefined} // Handle null/undefined for placeholder
+                    disabled={isEmployeeRole && !isEditMode && !!employee?.gender}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select gender" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {genderSchema.options.map(option => (
+                        <SelectItem key={option} value={option}>{option}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="dateOfBirth"
+              render={({ field }) => (
+                <FormItem className="flex flex-col pt-2">
+                  <FormLabel>Date of Birth</FormLabel>
+                  <Popover open={dobDatePickerOpen} onOpenChange={setDobDatePickerOpen}>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant={"outline"}
+                          className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
+                          disabled={isEmployeeRole && !isEditMode && !!employee?.dateOfBirth}
+                        >
+                          {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
+                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
+                        onSelect={(date) => {
+                           field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
+                           setDobDatePickerOpen(false);
+                        }}
+                        captionLayout="dropdown-buttons" fromYear={1950} toYear={new Date().getFullYear() - 18}
+                        initialFocus
+                        disabled={isEmployeeRole && !isEditMode && !!employee?.dateOfBirth}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
              <FormField
@@ -280,43 +347,6 @@ export function EmployeeForm({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField
-              control={form.control}
-              name="dateOfBirth"
-              render={({ field }) => (
-                <FormItem className="flex flex-col pt-2">
-                  <FormLabel>Date of Birth</FormLabel>
-                  <Popover open={dobDatePickerOpen} onOpenChange={setDobDatePickerOpen}>
-                    <PopoverTrigger asChild>
-                      <FormControl>
-                        <Button
-                          variant={"outline"}
-                          className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
-                          disabled={isEmployeeRole && !isEditMode}
-                        >
-                          {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
-                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                        </Button>
-                      </FormControl>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
-                        onSelect={(date) => {
-                           field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
-                           setDobDatePickerOpen(false);
-                        }}
-                        captionLayout="dropdown-buttons" fromYear={1950} toYear={new Date().getFullYear() - 18}
-                        initialFocus
-                        disabled={isEmployeeRole && !isEditMode}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
              <FormField
                 control={form.control}
                 name="reportingManagerId"
@@ -346,14 +376,11 @@ export function EmployeeForm({
                     </FormItem>
                 )}
                 />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
              <FormField
               control={form.control}
               name="workLocation"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="pt-2">
                   <FormLabel>Work Location</FormLabel>
                   <FormControl>
                     <Input placeholder="e.g. Main Office, Remote" {...field} value={field.value ?? ""} disabled={isEmployeeRole} />
@@ -362,6 +389,9 @@ export function EmployeeForm({
                 </FormItem>
               )}
             />
+          </div>
+
+           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <FormField
               control={form.control}
               name="employmentType"
@@ -384,14 +414,11 @@ export function EmployeeForm({
                 </FormItem>
               )}
             />
-          </div>
-
-           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
              <FormField
                control={form.control}
                name="hireDate"
                render={({ field }) => (
-                 <FormItem className="flex flex-col pt-2">
+                 <FormItem className="flex flex-col">
                    <FormLabel>Hire Date *</FormLabel>
                    <Popover open={hireDatePickerOpen} onOpenChange={setHireDatePickerOpen}>
                      <PopoverTrigger asChild>
@@ -423,11 +450,12 @@ export function EmployeeForm({
                  </FormItem>
                )}
              />
-             <FormField
+           </div>
+            <FormField
               control={form.control}
               name="status"
               render={({ field }) => (
-                <FormItem className="pt-2">
+                <FormItem>
                   <FormLabel>Status *</FormLabel>
                   <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRole}>
                     <FormControl>
@@ -445,14 +473,13 @@ export function EmployeeForm({
                 </FormItem>
               )}
             />
-           </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-4 border-t">
           <Button type="button" variant="outline" onClick={() => router.back()} disabled={isLoading}>
             Cancel
           </Button>
-          <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode)}>
+          <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode && !isEmployeeRole) || (isEmployeeRole && !form.formState.isDirty && !form.watch('phone') && !form.watch('gender') && !form.watch('dateOfBirth'))}>
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />)
@@ -464,3 +491,5 @@ export function EmployeeForm({
     </Form>
   );
 }
+
+    

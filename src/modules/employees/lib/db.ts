@@ -1,6 +1,7 @@
 
 import pool from '@/lib/db';
-import type { Employee, EmployeeFormData } from '@/modules/employees/types';
+import type { Employee, EmployeeFormData, Gender } from '@/modules/employees/types';
+import { initializeEmployeeBalancesForAllTypes } from '@/modules/leave/lib/db'; // Import the new function
 
 // Case-insensitive UUID regex
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -15,6 +16,7 @@ function mapRowToEmployee(row: any): Employee {
         name: row.name,
         email: row.email,
         phone: row.phone ?? undefined,
+        gender: row.gender as Gender ?? undefined, // Map gender
         position: row.position,
         department: row.department,
         hireDate: new Date(row.hire_date).toISOString().split('T')[0],
@@ -109,11 +111,11 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
         const newEmployeeId = await generateNextEmployeeId(employeeData.tenantId, client);
         const query = `
             INSERT INTO employees (
-                tenant_id, user_id, employee_id, name, email, phone, position, department,
+                tenant_id, user_id, employee_id, name, email, phone, gender, position, department,
                 hire_date, status, date_of_birth, reporting_manager_id,
                 work_location, employment_type
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING *;
         `;
         const values = [
@@ -123,6 +125,7 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
             employeeData.name,
             employeeData.email,
             employeeData.phone || null,
+            employeeData.gender || null, // Add gender
             employeeData.position,
             employeeData.department,
             employeeData.hireDate,
@@ -133,8 +136,14 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
             employeeData.employmentType || 'Full-time',
         ];
         const res = await client.query(query, values);
+        const newEmployee = mapRowToEmployee(res.rows[0]);
+
+        // Initialize leave balances for the new employee
+        await initializeEmployeeBalancesForAllTypes(newEmployee.tenantId, newEmployee.id, client);
+        console.log(`[DB addEmployee] Initialized leave balances for new employee ${newEmployee.id}`);
+
         await client.query('COMMIT');
-        return mapRowToEmployee(res.rows[0]);
+        return newEmployee;
     } catch (err: any) {
         await client.query('ROLLBACK');
         console.error('Error adding employee:', err);
@@ -169,7 +178,7 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
     const values: any[] = [];
     let valueIndex = 1;
     const columnMap: { [K in keyof EmployeeFormData]?: string } = {
-        name: 'name', email: 'email', phone: 'phone', position: 'position', department: 'department',
+        name: 'name', email: 'email', phone: 'phone', gender: 'gender', position: 'position', department: 'department',
         hireDate: 'hire_date', status: 'status', dateOfBirth: 'date_of_birth',
         reportingManagerId: 'reporting_manager_id', workLocation: 'work_location', employmentType: 'employment_type',
     };
@@ -180,7 +189,7 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
             if (dbKey) {
                 setClauses.push(`${dbKey} = $${valueIndex}`);
                 let value = updates[key as keyof EmployeeFormData];
-                if ((key === 'phone' || key === 'dateOfBirth' || key === 'reportingManagerId' || key === 'workLocation') && value === '') {
+                if ((key === 'phone' || key === 'dateOfBirth' || key === 'reportingManagerId' || key === 'workLocation' || key === 'gender') && value === '') {
                     value = null;
                 }
                 values.push(value);
@@ -278,3 +287,5 @@ export async function getEmployeeByUserId(userId: string, tenantId: string): Pro
         client.release();
     }
 }
+
+    

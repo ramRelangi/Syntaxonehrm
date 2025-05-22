@@ -56,6 +56,41 @@ export async function getLeaveTypeById(id: string, tenantId: string): Promise<Le
     }
 }
 
+// Renamed initializeBalancesForNewType to initializeEmployeeBalancesForAllTypes
+// and it's now exported to be called by employee creation logic.
+export async function initializeEmployeeBalancesForAllTypes(tenantId: string, employeeId: string, client?: any) {
+    if (!tenantId || !uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
+    if (!employeeId || !uuidRegex.test(employeeId)) throw new Error("Invalid employee identifier.");
+    
+    const conn = client || await pool.connect();
+    try {
+        console.log(`[DB initializeEmployeeBalancesForAllTypes] Initializing balances for employee ${employeeId} in tenant ${tenantId}.`);
+        const leaveTypes = await getAllLeaveTypes(tenantId); // This uses its own client, which is fine for this read.
+        
+        if (leaveTypes.length === 0) {
+            console.log(`[DB initializeEmployeeBalancesForAllTypes] No leave types found for tenant ${tenantId}. Skipping balance initialization for employee ${employeeId}.`);
+            return;
+        }
+
+        const insertQuery = `
+            INSERT INTO leave_balances (tenant_id, employee_id, leave_type_id, balance, last_updated)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (tenant_id, employee_id, leave_type_id) DO NOTHING;
+        `;
+        for (const lt of leaveTypes) {
+             await conn.query(insertQuery, [tenantId, employeeId, lt.id, lt.defaultBalance ?? 0]);
+             console.log(`[DB initializeEmployeeBalancesForAllTypes] Ensured balance for employee ${employeeId}, type ${lt.name} (${lt.id}).`);
+        }
+        console.log(`[DB initializeEmployeeBalancesForAllTypes] Finished initializing/ensuring balances for employee ${employeeId}.`);
+    } catch (err) {
+        console.error(`Error initializing all balances for employee ${employeeId} (tenant ${tenantId}):`, err);
+        if (!client) throw err; // Only throw if we created the connection here
+    } finally {
+        if (!client) conn.release();
+    }
+}
+
+
 export async function addLeaveType(typeData: Omit<LeaveType, 'id'>): Promise<LeaveType> {
     if (!typeData.tenantId || !uuidRegex.test(typeData.tenantId)) {
         console.error(`[DB addLeaveType] Invalid tenantId format: ${typeData.tenantId}`);
@@ -80,7 +115,7 @@ export async function addLeaveType(typeData: Omit<LeaveType, 'id'>): Promise<Lea
         const res = await client.query(query, values);
         const newType = mapRowToLeaveType(res.rows[0]);
         // Initialize balances for all existing employees of this tenant for this new leave type
-        await initializeBalancesForNewType(newType.tenantId, newType.id, newType.defaultBalance ?? 0, client);
+        await initializeBalancesForNewTypeForAllEmployees(newType.tenantId, newType.id, newType.defaultBalance ?? 0, client);
         await client.query('COMMIT');
         return newType;
     } catch (err: any) {
@@ -94,6 +129,29 @@ export async function addLeaveType(typeData: Omit<LeaveType, 'id'>): Promise<Lea
         client.release();
     }
 }
+
+// New helper function to initialize balances for ALL employees when a NEW leave type is created
+async function initializeBalancesForNewTypeForAllEmployees(tenantId: string, leaveTypeId: string, defaultBalance: number, client: any) {
+    if (!tenantId || !uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
+    if (!leaveTypeId || !uuidRegex.test(leaveTypeId)) throw new Error("Invalid leave type identifier.");
+
+    console.log(`[DB initializeBalancesForNewTypeForAllEmployees] Initializing balances for new leave type ${leaveTypeId} for ALL employees in tenant ${tenantId}.`);
+    const query = `
+        INSERT INTO leave_balances (tenant_id, employee_id, leave_type_id, balance, last_updated)
+        SELECT e.tenant_id, e.id, $1, $2, NOW()
+        FROM employees e
+        WHERE e.tenant_id = $3
+        ON CONFLICT (tenant_id, employee_id, leave_type_id) DO NOTHING;
+    `;
+    try {
+        const res = await client.query(query, [leaveTypeId, defaultBalance, tenantId]);
+        console.log(`[DB initializeBalancesForNewTypeForAllEmployees] ${res.rowCount} balance records created/ensured for new type ${leaveTypeId}.`);
+    } catch (err) {
+        console.error(`Error initializing balances for new type ${leaveTypeId} for all employees in tenant ${tenantId}:`, err);
+        throw err; // Propagate error to be caught by transaction
+    }
+}
+
 
 export async function updateLeaveType(id: string, tenantId: string, updates: Partial<Omit<LeaveType, 'id' | 'tenantId'>>): Promise<LeaveType | undefined> {
     if (!id || !uuidRegex.test(id)) {
@@ -139,6 +197,9 @@ export async function updateLeaveType(id: string, tenantId: string, updates: Par
     `;
     try {
         const res = await client.query(query, values);
+        // TODO: Consider if defaultBalance changes, how to update existing employee balances.
+        // This might involve a more complex migration or adjustment logic.
+        // For now, changes to defaultBalance only affect *new* employees or future balance initializations.
         return res.rows.length > 0 ? mapRowToLeaveType(res.rows[0]) : undefined;
     } catch (err: any) {
         console.error(`Error updating leave type ${id} for tenant ${tenantId}:`, err);
@@ -462,29 +523,9 @@ export async function cancelLeaveRequest(id: string, tenantId: string, userId: s
      }
 }
 
-async function initializeBalancesForNewType(tenantId: string, leaveTypeId: string, defaultBalance: number, client?: any) {
-    if (!tenantId || !uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
-    if (!leaveTypeId || !uuidRegex.test(leaveTypeId)) throw new Error("Invalid leave type identifier.");
-    
-    const conn = client || await pool.connect();
-    const query = `
-        INSERT INTO leave_balances (tenant_id, employee_id, leave_type_id, balance, last_updated)
-        SELECT e.tenant_id, e.id, $1, $2, NOW()
-        FROM employees e
-        WHERE e.tenant_id = $3
-        ON CONFLICT (tenant_id, employee_id, leave_type_id) DO NOTHING;
-    `;
-    try {
-        await conn.query(query, [leaveTypeId, defaultBalance, tenantId]);
-        console.log(`Initialized balances for new leave type ${leaveTypeId} for tenant ${tenantId}`);
-    } catch (err) {
-        console.error(`Error initializing balances for new type ${leaveTypeId} (tenant ${tenantId}):`, err);
-        if (!client) throw err; // Only throw if we created the connection here
-    } finally {
-        if (!client) conn.release();
-    }
-}
-
+// This was renamed to initializeEmployeeBalancesForAllTypes and moved to be exported for employee creation.
+// The function below is the original initializeEmployeeBalances, now kept as an internal helper if needed
+// or can be merged/removed if initializeEmployeeBalancesForAllTypes covers all use cases.
 async function initializeEmployeeBalances(tenantId: string, employeeId: string, client?: any): Promise<void> {
     if (!tenantId || !uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
     if (!employeeId || !uuidRegex.test(employeeId)) throw new Error("Invalid employee identifier.");
@@ -520,7 +561,10 @@ export async function getLeaveBalancesForEmployee(tenantId: string, employeeId: 
     
     const client = await pool.connect();
     try {
-        await initializeEmployeeBalances(tenantId, employeeId, client);
+        // Ensure balances are initialized before fetching.
+        // This will create records with default balances if they don't exist.
+        await initializeEmployeeBalancesForAllTypes(tenantId, employeeId, client);
+
         const query = `
             SELECT lb.tenant_id, lb.employee_id, lb.leave_type_id, lb.balance, lb.last_updated, lt.name as leave_type_name
             FROM leave_balances lb
@@ -533,7 +577,7 @@ export async function getLeaveBalancesForEmployee(tenantId: string, employeeId: 
             tenantId: row.tenant_id,
             employeeId: row.employee_id,
             leaveTypeId: row.leave_type_id,
-            leaveTypeName: row.leave_type_name, // This should now be populated
+            leaveTypeName: row.leave_type_name,
             balance: parseFloat(row.balance),
             lastUpdated: new Date(row.last_updated).toISOString(),
         }));
@@ -552,13 +596,15 @@ async function getSpecificLeaveBalance(tenantId: string, employeeId: string, lea
     
     const conn = client || await pool.connect();
     try {
-        await initializeEmployeeBalances(tenantId, employeeId, conn); // Ensure balance record exists
+        // Ensure balance record exists before querying, using the specific function for a single employee
+        await initializeEmployeeBalancesForAllTypes(tenantId, employeeId, conn); 
         const query = `SELECT balance FROM leave_balances WHERE tenant_id = $1 AND employee_id = $2 AND leave_type_id = $3`;
         const res = await conn.query(query, [tenantId, employeeId, leaveTypeId]);
         if (res.rows.length > 0) {
             return parseFloat(res.rows[0].balance);
         }
-        // Should not happen if initializeEmployeeBalances worked, but as a fallback
+        // This path should ideally not be hit if initializeEmployeeBalancesForAllTypes works correctly.
+        // Fallback to leave type's default balance if record is somehow still missing.
         const leaveType = await getLeaveTypeById(leaveTypeId, tenantId); // Uses its own client
         return leaveType?.defaultBalance ?? 0;
     } catch (err) {
@@ -583,18 +629,17 @@ async function adjustLeaveBalance(tenantId: string, employeeId: string, leaveTyp
     `;
     try {
         // Ensure the balance record exists before trying to update it.
-        await initializeEmployeeBalances(tenantId, employeeId, conn);
+        await initializeEmployeeBalancesForAllTypes(tenantId, employeeId, conn);
         
         const res = await conn.query(query, [amount, tenantId, employeeId, leaveTypeId]);
          if (res.rowCount === 0) {
-             // This case should be less likely now due to prior initialization
              console.warn(`Balance record not found for tenant ${tenantId}, employee ${employeeId}, type ${leaveTypeId} during adjustment, even after init. This is unexpected.`);
              throw new Error(`Failed to adjust balance for tenant ${tenantId}, employee ${employeeId}, type ${leaveTypeId}. Balance record missing.`);
          }
         console.log(`Adjusted balance for tenant ${tenantId}, employee ${employeeId}, type ${leaveTypeId} by ${amount}.`);
     } catch (err) {
         console.error(`Error adjusting balance for tenant ${tenantId}, employee ${employeeId}, type ${leaveTypeId}:`, err);
-        if (!client) throw err; // Only throw if we created the connection here
+        if (!client) throw err;
     } finally {
         if (!client) conn.release();
     }
@@ -618,7 +663,7 @@ export async function runMonthlyAccrual() {
         await client.query('BEGIN');
         let updatedCount = 0;
         for (const row of accrualRes.rows) {
-             await initializeEmployeeBalances(row.tenant_id, row.employee_id, client);
+             await initializeEmployeeBalancesForAllTypes(row.tenant_id, row.employee_id, client);
              const updateQuery = `
                 UPDATE leave_balances
                 SET balance = balance + $1, last_updated = NOW()
@@ -785,3 +830,5 @@ export async function deleteHoliday(id: string, tenantId: string): Promise<boole
         client.release();
     }
 }
+
+    

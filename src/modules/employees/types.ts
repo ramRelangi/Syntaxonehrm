@@ -1,35 +1,40 @@
 
 import { z } from 'zod';
 
-export const employmentTypeSchema = z.enum(['Full-time', 'Part-time', 'Contract', 'Internship', 'Temporary']); // Extended
+export const employmentTypeSchema = z.enum(['Full-time', 'Part-time', 'Contract', 'Internship', 'Temporary']);
 export type EmploymentType = z.infer<typeof employmentTypeSchema>;
+
+// New Gender Enum Schema
+export const genderSchema = z.enum(['Male', 'Female', 'Other', 'Prefer not to say']);
+export type Gender = z.infer<typeof genderSchema>;
 
 export interface Employee {
   id: string;
   tenantId: string;
-  userId?: string; // Link to the user account for login
-  employeeId?: string; // Official Employee ID, unique per tenant, dynamically generated
+  userId?: string;
+  employeeId?: string;
   name: string;
   email: string;
   phone?: string;
+  gender?: Gender; // New gender field
   position: string;
   department: string;
-  hireDate: string; // Store as ISO string (e.g., '2024-01-15')
+  hireDate: string;
   status: 'Active' | 'Inactive' | 'On Leave';
-  dateOfBirth?: string; // YYYY-MM-DD
-  reportingManagerId?: string | null; // UUID of another employee (manager)
+  dateOfBirth?: string;
+  reportingManagerId?: string | null;
   workLocation?: string;
   employmentType?: EmploymentType;
 }
 
-// Define Zod schema for validation (aligned with Employee type)
 export const employeeSchema = z.object({
   tenantId: z.string().uuid(),
-  userId: z.string().uuid().optional().nullable(), // user_id can be null if employee doesn't have login yet
-  employeeId: z.string().max(50, "Employee ID cannot exceed 50 characters").optional().nullable(), // Auto-generated, so optional in form
+  userId: z.string().uuid().optional().nullable(),
+  employeeId: z.string().max(50).optional().nullable(),
   name: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Invalid email address"),
   phone: z.string().optional().or(z.literal("")).nullable(),
+  gender: genderSchema.optional().nullable(), // New gender field validation
   position: z.string().min(1, "Position is required"),
   department: z.string().min(1, "Department is required"),
   hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Hire date must be in YYYY-MM-DD format"),
@@ -40,6 +45,6 @@ export const employeeSchema = z.object({
   employmentType: employmentTypeSchema.optional().default('Full-time'),
 });
 
-// FormData might not include ID, but needs tenantId for actions. employeeId is auto-generated.
-// userId will be associated during the addEmployee action.
 export type EmployeeFormData = Omit<z.infer<typeof employeeSchema>, 'id' | 'tenantId' | 'employeeId' | 'userId'>;
+
+    
