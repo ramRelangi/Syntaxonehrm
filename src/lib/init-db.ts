@@ -9,8 +9,6 @@ dotenv.config(); // Ensure .env variables are loaded
 const pgcryptoExtensionSQL = `CREATE EXTENSION IF NOT EXISTS pgcrypto;`;
 
 // SQL for ENUM type creation (PostgreSQL specific)
-// Each ENUM creation is a separate DO block to avoid issues with some SQL parsers/drivers
-// if they were all in one giant string with other DDL.
 const enumCreationSQLs = [
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role_enum') THEN CREATE TYPE user_role_enum AS ENUM ('Admin', 'Manager', 'Employee'); END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'gender_enum_type') THEN CREATE TYPE gender_enum_type AS ENUM ('Male', 'Female', 'Other', 'Prefer not to say'); END IF; END $$;`,
@@ -31,8 +29,7 @@ const enumCreationSQLs = [
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'experience_level_enum_type') THEN CREATE TYPE experience_level_enum_type AS ENUM ('Entry-Level', 'Mid-Level', 'Senior-Level', 'Lead', 'Principal', 'Manager', 'Director'); END IF; END $$;`
 ];
 
-
-const mainSchemaSQL = `
+const dropTablesSQL = `
 -- Drop existing tables in reverse order of creation/dependency, with CASCADE
 DROP TABLE IF EXISTS role_permissions CASCADE;
 DROP TABLE IF EXISTS permissions CASCADE;
@@ -77,7 +74,7 @@ DROP TABLE IF EXISTS departments CASCADE;
 DROP TABLE IF EXISTS employee_documents CASCADE;
 DROP TABLE IF EXISTS employee_address CASCADE;
 
-DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS users CASCADE; -- Users table might be dropped before employees due to FK from employees to users.
 DROP TABLE IF EXISTS employees CASCADE;
 
 DROP TABLE IF EXISTS email_templates CASCADE;
@@ -89,7 +86,9 @@ DROP TABLE IF EXISTS subscription_plans CASCADE;
 
 DROP TABLE IF EXISTS tenant_configurations CASCADE;
 DROP TABLE IF EXISTS tenants CASCADE;
+`;
 
+const mainSchemaSQL = `
 -- Tenant Management
 CREATE TABLE tenants (
     tenant_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -155,17 +154,52 @@ CREATE TABLE subscription_invoices (
     CONSTRAINT unique_invoice_number UNIQUE (invoice_number)
 );
 
+-- Core Employee Tables (Tenant-specific)
+CREATE TABLE employees (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL,
+    user_id UUID UNIQUE, -- Link to users table (FK added after users table creation)
+    employee_id VARCHAR(20), -- Human-readable ID, to be generated, tenant-unique
+    first_name VARCHAR(50) NOT NULL,
+    middle_name VARCHAR(50),
+    last_name VARCHAR(50) NOT NULL,
+    name VARCHAR(155) GENERATED ALWAYS AS (first_name || COALESCE(' ' || middle_name, '') || ' ' || last_name) STORED,
+    date_of_birth DATE,
+    gender gender_enum_type,
+    marital_status VARCHAR(20),
+    nationality VARCHAR(50),
+    blood_group VARCHAR(10),
+    personal_email VARCHAR(100),
+    email VARCHAR(100), -- Changed from official_email
+    phone VARCHAR(20), -- Changed from phone_number
+    emergency_contact_name VARCHAR(100),
+    emergency_contact_number VARCHAR(20),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    position VARCHAR(100),
+    department VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive', 'On Leave')),
+    reporting_manager_id UUID, -- Self-referential FK
+    work_location VARCHAR(100),
+    employment_type employment_type_enum DEFAULT 'Full-time',
+    hire_date DATE,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+    -- FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL, -- Added after users table
+    FOREIGN KEY (reporting_manager_id) REFERENCES employees(id) ON DELETE SET NULL,
+    CONSTRAINT unique_tenant_employee_code UNIQUE (tenant_id, employee_id),
+    CONSTRAINT unique_employees_tenant_id_email UNIQUE (tenant_id, email)
+);
+
 -- System & User Management (Tenant-aware)
--- Note: The employees table definition below needs to be created first before the FK from users to employees can be fully resolved.
--- The ALTER TABLE statement later adds this FK.
 CREATE TABLE users (
     user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID, -- Nullable for system users, FK to tenants
-    employee_id UUID UNIQUE, -- This will reference employees.id (the PK of employees table)
+    tenant_id UUID,
+    employee_id UUID UNIQUE, -- employee_id from employees table (FK will be added after employees table)
     username VARCHAR(50) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     email VARCHAR(100) NOT NULL,
-    name VARCHAR(100), -- Full name of the user
+    name VARCHAR(100),
     role user_role_enum NOT NULL DEFAULT 'Employee',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     last_login TIMESTAMP WITH TIME ZONE,
@@ -175,49 +209,13 @@ CREATE TABLE users (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL,
     CONSTRAINT unique_tenant_username UNIQUE (tenant_id, username),
     CONSTRAINT unique_tenant_email UNIQUE (tenant_id, email)
 );
 
--- Core Employee Tables (Tenant-specific)
-CREATE TABLE employees (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Renamed from employee_id for consistency as PK
-    tenant_id UUID NOT NULL,
-    user_id UUID UNIQUE, -- Link to users.user_id
-    employee_id VARCHAR(20), -- Human-readable ID, to be generated, tenant-unique
-    first_name VARCHAR(50) NOT NULL,
-    middle_name VARCHAR(50),
-    last_name VARCHAR(50) NOT NULL,
-    name VARCHAR(155) GENERATED ALWAYS AS (TRIM(first_name || COALESCE(' ' || middle_name, '') || ' ' || last_name)) STORED,
-    date_of_birth DATE,
-    gender gender_enum_type,
-    marital_status VARCHAR(20),
-    nationality VARCHAR(50),
-    blood_group VARCHAR(10),
-    personal_email VARCHAR(100),
-    email VARCHAR(100), -- Official email, used for login/communication
-    phone VARCHAR(20),
-    emergency_contact_name VARCHAR(100),
-    emergency_contact_number VARCHAR(20),
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    position VARCHAR(100),
-    department VARCHAR(100), -- Denormalized, actual department link is in employment_details
-    status VARCHAR(20) NOT NULL DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive', 'On Leave')), -- Consider ENUM type
-    reporting_manager_id UUID, -- References employees.id (PK)
-    work_location VARCHAR(100),
-    employment_type employment_type_enum DEFAULT 'Full-time',
-    hire_date DATE,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL,
-    FOREIGN KEY (reporting_manager_id) REFERENCES employees(id) ON DELETE SET NULL,
-    CONSTRAINT unique_tenant_employee_code UNIQUE (tenant_id, employee_id),
-    CONSTRAINT unique_employees_tenant_id_email UNIQUE (tenant_id, email)
-);
-
--- Add FK from users to employees now that employees table exists
-ALTER TABLE users ADD CONSTRAINT fk_users_employee_id FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL;
+-- Add FK from employees to users now that users table exists
+ALTER TABLE employees ADD CONSTRAINT fk_employees_user_id FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL;
 
 
 CREATE TABLE employee_address (
@@ -485,8 +483,8 @@ CREATE TABLE employee_leave_balance (
     tenant_id UUID NOT NULL,
     employee_id UUID NOT NULL,
     leave_type_id UUID NOT NULL,
-    policy_id UUID, -- Made optional as balance might exist without specific policy
-    year INT, -- Made optional
+    policy_id UUID, 
+    year INT,
     opening_balance NUMERIC(5,2) NOT NULL DEFAULT 0,
     earned_balance NUMERIC(5,2) NOT NULL DEFAULT 0,
     consumed_balance NUMERIC(5,2) NOT NULL DEFAULT 0,
@@ -674,7 +672,7 @@ CREATE TABLE job_applications (
     candidate_id UUID NOT NULL,
     job_id UUID NOT NULL,
     application_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    status candidate_application_status_enum NOT NULL DEFAULT 'Applied',
+    status candidate_application_status_enum NOT NULL DEFAULT 'Applied', -- Changed from current_stage
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
@@ -682,10 +680,10 @@ CREATE TABLE job_applications (
     FOREIGN KEY (job_id) REFERENCES job_openings(id) ON DELETE CASCADE
 );
 
--- Roles and Permissions (Advanced - optional if simple role on users table is sufficient initially)
+-- Roles and Permissions
 CREATE TABLE roles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID,
+    tenant_id UUID, -- Nullable for system-wide roles
     role_name VARCHAR(50) NOT NULL,
     description TEXT,
     is_system BOOLEAN NOT NULL DEFAULT FALSE,
@@ -700,7 +698,7 @@ CREATE TABLE user_roles (
     user_id UUID NOT NULL,
     role_id UUID NOT NULL,
     assigned_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    assigned_by UUID, -- Should be users.user_id
+    assigned_by UUID,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
@@ -725,7 +723,7 @@ CREATE TABLE role_permissions (
     role_id UUID NOT NULL,
     permission_id UUID NOT NULL,
     assigned_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    assigned_by UUID, -- Should be users.user_id
+    assigned_by UUID,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
@@ -912,14 +910,14 @@ CREATE INDEX IF NOT EXISTS idx_employees_active ON employees(tenant_id, is_activ
 CREATE INDEX IF NOT EXISTS idx_employment_details_employee ON employment_details(tenant_id, employee_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_records_date ON attendance_records(tenant_id, date);
 CREATE INDEX IF NOT EXISTS idx_leave_applications_status ON leave_requests(tenant_id, status);
-CREATE INDEX IF NOT EXISTS idx_job_applications_stage ON job_applications(tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_job_applications_stage ON job_applications(tenant_id, status); -- Changed from current_stage
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(tenant_id, email);
 `;
 
 // Async function to execute the schema (can be called from initializeDatabase)
-async function executeSchema(client: any, schemaSQL: string) {
-  await client.query(schemaSQL);
+async function executeSchema(client: any, sql: string) { // Renamed parameter to avoid conflict
+  await client.query(sql);
 }
 
 // Main async function to initialize the database schema
@@ -928,6 +926,20 @@ export async function initializeDatabase() {
   const client = await pool.connect();
   console.log('Connected to database. Executing schema creation script...');
   try {
+    // Execute DROP TABLE statements first, outside the main transaction
+    console.log('Executing DROP TABLE statements...');
+    const dropStatements = dropTablesSQL.split(';').map(s => s.trim()).filter(s => s.length > 0);
+    for (const statement of dropStatements) {
+      try {
+        console.log(`Executing: ${statement};`);
+        await client.query(`${statement};`); // Add semicolon back for individual execution
+        console.log(`Successfully executed: ${statement};`);
+      } catch (dropError: any) {
+        console.warn(`Warning during DROP TABLE: ${dropError.message}. This might be okay if the table didn't exist.`);
+      }
+    }
+    console.log('Finished executing DROP TABLE statements.');
+
     // Execute pgcrypto extension creation
     console.log('Executing pgcrypto extension creation...');
     await client.query(pgcryptoExtensionSQL);
@@ -941,34 +953,36 @@ export async function initializeDatabase() {
         await client.query(enumSQL);
         console.log(`Successfully executed ENUM creation for: ${enumName}.`);
       } catch (enumErr: any) {
-        // Ignore "already exists" errors for ENUM types, as they are harmless if run multiple times
-        if (enumErr.code === '42710') { // 42710 is for "duplicate_object"
+        if (enumErr.code === '42710') {
           console.warn(`Warning: ENUM type ${enumName} already exists. Skipping creation.`);
         } else {
           console.error(`Error creating ENUM ${enumName}:`, enumErr.message);
-          throw enumErr; // Re-throw other errors
+          throw enumErr;
         }
       }
     }
     console.log('Finished executing ENUM creation DO $$...END$$ blocks.');
 
-
-    // Execute main DDL script (tables, functions, triggers)
+    // Execute main DDL script (tables, functions, triggers) in a transaction
     console.log('Executing main DDL script (tables, functions, triggers)...');
-    await client.query('BEGIN'); // Start transaction for main schema
+    await client.query('BEGIN');
     await executeSchema(client, mainSchemaSQL); // Call helper to execute main schema
-    await client.query('COMMIT'); // Commit transaction for main schema
+    await client.query('COMMIT');
     console.log('Main DDL script executed successfully and transaction committed.');
 
   } catch (err: any) {
     console.error('-----------------------------------------');
-    console.error('Error during main DDL script (tables, functions, triggers):', (err as Error).message);
+    console.error('Error during database schema initialization:', (err as Error).message);
     console.error('Stack:', (err as Error).stack);
     console.error('Full Error Object:', err);
     console.error('-----------------------------------------');
-    await client.query('ROLLBACK'); // Rollback transaction on error
-    console.error('Error during database schema initialization, transaction rolled back.');
-    throw err; // Re-throw the error to be caught by the caller
+    try {
+      await client.query('ROLLBACK');
+      console.error('Transaction rolled back due to error.');
+    } catch (rollbackErr) {
+      console.error('Error during ROLLBACK:', rollbackErr);
+    }
+    throw err;
   } finally {
     client.release();
     console.log('Database client released after schema initialization.');
@@ -984,7 +998,7 @@ async function manualDbInit() {
   } catch (error) {
     console.error('Manual DB initialization failed:', error);
   } finally {
-    await pool.end(); // Close the pool after script execution
+    await pool.end();
     console.log('Database pool closed after manual initialization.');
   }
 }
