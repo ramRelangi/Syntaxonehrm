@@ -1,4 +1,3 @@
-
 'use server';
 
 import type { Employee, EmployeeFormData } from '@/modules/employees/types';
@@ -6,7 +5,7 @@ import { employeeSchema } from '@/modules/employees/types';
 import {
   getAllEmployees as dbGetAllEmployees,
   getEmployeeById as dbGetEmployeeById,
-  addEmployeeInternal as dbAddEmployeeInternal, // Corrected import
+  addEmployeeInternal as dbAddEmployeeInternal,
   updateEmployee as dbUpdateEmployee,
   deleteEmployee as dbDeleteEmployee,
   getEmployeeByUserId as dbGetEmployeeByUserId,
@@ -16,17 +15,17 @@ import { revalidatePath } from 'next/cache';
 import {
     getSessionData,
     sendEmployeeWelcomeEmail,
-    // Ensure these specific helpers are also available if used directly elsewhere, though getSessionData is preferred
     getTenantIdFromSession,
     isAdminFromSession,
     getUserIdFromSession,
     getUserRoleFromSession,
     getEmployeeProfileForCurrentUser,
 } from '@/modules/auth/actions';
+import { userRoleSchema } from '@/modules/auth/types'; // Added import
 import { addUser as dbAddUser } from '@/modules/auth/lib/db';
 import { generateTemporaryPassword } from '@/modules/auth/lib/utils';
 import bcrypt from 'bcrypt';
-import type { SessionData, UserRole } from '@/modules/auth/types'; // Import UserRole
+import type { SessionData, UserRole } from '@/modules/auth/types';
 
 const SALT_ROUNDS = 10;
 
@@ -100,12 +99,12 @@ export async function getEmployeeByIdAction(id: string): Promise<Employee | unde
         if (userRole === 'Employee') {
             console.log(`[Action getEmployeeByIdAction] Employee role. ID from URL: ${id}. Current user ID: ${currentUserId}`);
             if (id.toLowerCase() !== currentUserId.toLowerCase()) {
-                console.warn(`[Action getEmployeeByIdAction] Auth_Failed (Employee Role): Attempt to access profile for ID ${id} which does not match session userId ${currentUserId}. Assuming ${id} is an employee.id (PK).`);
+                console.warn(`[Action getEmployeeByIdAction] Auth_Failed (Employee Role): Attempt to access profile for ID ${id} which does not match session userId ${currentUserId}. Checking if PK ${id} belongs to current user...`);
                 // Fetch by employee.id (PK)
                 const potentialProfile = await dbGetEmployeeById(id.toLowerCase(), tenantId);
                 if (potentialProfile && potentialProfile.userId?.toLowerCase() === currentUserId.toLowerCase()) {
                     employeeProfile = potentialProfile;
-                    console.log(`[Action getEmployeeByIdAction] Employee role. Fetched employee PK ${id} and verified it belongs to session user ${currentUserId}.`);
+                    console.log(`[Action getEmployeeByIdAction] Employee role. Fetched employee PK ${id} and verified it belongs to session user ${currentUserId}. Name: ${employeeProfile.name}`);
                 } else if (potentialProfile) {
                     console.warn(`[Action getEmployeeByIdAction] Auth_Failed (Employee Role): Attempt to access profile for Employee PK ${id}. Record's linked user_id (${potentialProfile.userId}) != session userId (${currentUserId}).`);
                     throw new Error("Unauthorized: You can only view your own employee profile.");
@@ -135,6 +134,7 @@ export async function getEmployeeByIdAction(id: string): Promise<Employee | unde
 
         if (!employeeProfile) {
             console.log(`[Action getEmployeeByIdAction] Final check: No employee profile found for id ${id} in tenant ${tenantId} with role ${userRole}.`);
+            throw new Error("Employee not found.");
         }
         return employeeProfile;
 
@@ -144,10 +144,10 @@ export async function getEmployeeByIdAction(id: string): Promise<Employee | unde
             throw error;
         }
         let friendlyMessage = `Failed to fetch employee details.`;
-        if (error.code && typeof error.code === 'string') { // Check if error.code is string
+        if (error.code && typeof error.code === 'string') {
             friendlyMessage = `Database error (code ${error.code}) retrieving employee.`;
         } else if (error.message) {
-            const prefix = "Error: "; // Define prefix
+            const prefix = "Error: ";
             friendlyMessage = error.message.startsWith(prefix) ? error.message.substring(prefix.length) : error.message;
         }
         throw new Error(friendlyMessage);
@@ -205,18 +205,18 @@ export async function addEmployee(formData: EmployeeFormData): Promise<{ success
 
   const finalEmployeeData = {
     ...employeeDetailsValidated,
-    reportingManagerId: employeeDetailsValidated.reportingManagerId === "" ? null : employeeDetailsValidated.reportingManagerId,
+    reportingManagerId: employeeDetailsValidated.reportingManagerId === "" || employeeDetailsValidated.reportingManagerId === "__NO_MANAGER__" ? null : employeeDetailsValidated.reportingManagerId,
   };
 
   try {
     console.log("[Action addEmployee] Creating user and employee...");
 
-    const temporaryPassword = generateTemporaryPassword(12); // Ensure it's at least 6, 12 is good
+    const temporaryPassword = generateTemporaryPassword(12);
     console.log('[Action addEmployee] Generated temporary password length:', temporaryPassword.length);
     const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
     let newUser;
     try {
-        newUser = await dbAddUser({ // Using dbAddUser from auth/lib/db
+        newUser = await dbAddUser({
             tenantId,
             email,
             passwordHash,
@@ -230,13 +230,12 @@ export async function addEmployee(formData: EmployeeFormData): Promise<{ success
     }
     console.log(`[Action addEmployee] User account created with ID: ${newUser.id} and Role: ${actualRoleToSet}`);
 
-    const newEmployee = await dbAddEmployeeInternal({ // Use the aliased import
+    const newEmployee = await dbAddEmployeeInternal({
         ...finalEmployeeData,
         tenantId,
         userId: newUser.id,
         name,
         email,
-        role: actualRoleToSet,
     });
     console.log(`[Action addEmployee] Employee record added successfully (ID: ${newEmployee.id}, EmployeeID: ${newEmployee.employeeId}).`);
 
@@ -246,8 +245,8 @@ export async function addEmployee(formData: EmployeeFormData): Promise<{ success
             tenantId,
             newEmployee.name,
             newEmployee.email,
-            newUser.id, // Pass user.id as employeeSystemId (PK of users table)
-            newEmployee.employeeId!, // Pass the generated EMP-XXX ID
+            newUser.id,
+            newEmployee.employeeId!,
             temporaryPassword,
             tenantDomain
         );
@@ -313,7 +312,6 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
             console.warn(`[Action updateEmployee] Auth_Failed (Employee Role): Attempt to update employee PK ${id}. Record's user_id (${employeeToUpdate.userId}) != session userId (${currentUserIdPerformingAction}).`);
             return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'Unauthorized to update this employee profile.' }] };
         }
-        // Employee can only update specific fields
         const allowedUpdates: Partial<EmployeeFormData> = {};
         if (formData.phone !== undefined) allowedUpdates.phone = formData.phone;
         if (formData.dateOfBirth !== undefined) allowedUpdates.dateOfBirth = formData.dateOfBirth;
@@ -322,7 +320,7 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
         const disallowedKeys = Object.keys(formData).filter(key => !['phone', 'dateOfBirth', 'gender'].includes(key));
         if (disallowedKeys.length > 0 && Object.keys(formData).some(key => disallowedKeys.includes(key as keyof EmployeeFormData))) {
              console.warn(`[Action updateEmployee] Employee ${currentUserIdPerformingAction} attempted to update disallowed fields: ${disallowedKeys.join(', ')} on employee PK ${id}.`);
-             if (Object.keys(allowedUpdates).length === 0 && Object.keys(formData).length > 0) { // Check if any data was provided
+             if (Object.keys(allowedUpdates).length === 0 && Object.keys(formData).length > 0) {
                 return { success: false, errors: [{ code: 'custom', path: ['root'], message: `You are not allowed to update fields: ${disallowedKeys.join(', ')}.` }] };
              }
         }
@@ -333,9 +331,9 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
         }
          if (Object.keys(dataForValidation).length === 0 && Object.keys(formData).length === 0) {
             console.log(`[Action updateEmployee] No data submitted for update by employee ${currentUserIdPerformingAction}.`);
-            return { success: true, employee: employeeToUpdate, errors: [{ code: 'custom', path: ['root'], message: 'No changes submitted.' }] }; // No actual error, but no update.
+            return { success: true, employee: employeeToUpdate, errors: [{ code: 'custom', path: ['root'], message: 'No changes submitted.' }] };
         }
-    } else if (formData.role) { // Admin or Manager might be changing role
+    } else if (formData.role) {
          dataForValidation.role = formData.role;
     }
 
@@ -353,7 +351,7 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
 
   const finalDataToUpdate = {
     ...validation.data,
-    reportingManagerId: validation.data.reportingManagerId === "" ? null : validation.data.reportingManagerId,
+    reportingManagerId: validation.data.reportingManagerId === "" || validation.data.reportingManagerId === "__NO_MANAGER__" ? null : validation.data.reportingManagerId,
   };
 
 
