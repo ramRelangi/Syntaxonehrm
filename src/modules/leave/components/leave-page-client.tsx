@@ -1,11 +1,11 @@
-
 // src/modules/leave/components/leave-page-client.tsx
 "use client";
 
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar, PlusCircle, ListChecks, Settings, LandPlot } from "lucide-react";
+import { Calendar, PlusCircle, ListChecks, Settings, LandPlot, ArrowLeft } from "lucide-react"; // Added ArrowLeft
+import { Button } from "@/components/ui/button"; // Added missing Button import
 import { LeaveRequestForm } from "@/modules/leave/components/leave-request-form";
 import { LeaveRequestList } from "@/modules/leave/components/leave-request-list";
 import { Badge } from "@/components/ui/badge";
@@ -70,7 +70,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
           setHolidays(holidaysData);
 
           // If viewing specific employee's leave, try to get their name
-          if (employeeIdFromQuery && myReqData.length > 0) {
+          if (employeeIdFromQuery && myReqData.length > 0 && myReqData[0].employeeName) {
              setCurrentEmployeeName(myReqData[0].employeeName);
           } else if (employeeIdFromQuery) {
              // If no requests, name might not be available directly, could add another fetch or rely on context
