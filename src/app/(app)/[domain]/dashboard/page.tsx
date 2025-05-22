@@ -13,7 +13,7 @@ import { MOCK_SESSION_COOKIE } from '@/lib/auth'; // Keep constant import
 
 // Import Server Actions directly - Actions derive context implicitly
 import { getEmployees } from '@/modules/employees/actions';
-import { getLeaveRequests } from '@/modules/leave/actions';
+import { getLeaveRequestsAction as getLeaveRequests } from '@/modules/leave/actions';
 import { getJobPostings } from '@/modules/recruitment/actions';
 
 
