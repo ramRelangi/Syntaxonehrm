@@ -1,23 +1,23 @@
+
 // src/modules/leave/components/leave-page-client.tsx
 "use client";
 
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar, PlusCircle, ListChecks, Settings, LandPlot } from "lucide-react"; // Added LandPlot for Holidays
+import { Calendar, PlusCircle, ListChecks, Settings, LandPlot } from "lucide-react";
 import { LeaveRequestForm } from "@/modules/leave/components/leave-request-form";
 import { LeaveRequestList } from "@/modules/leave/components/leave-request-list";
 import { Badge } from "@/components/ui/badge";
 import { LeaveTypeManagement } from "@/modules/leave/components/leave-type-management";
-import { HolidayManagement } from "@/modules/leave/components/holiday-management"; // Import HolidayManagement
+import { HolidayManagement } from "@/modules/leave/components/holiday-management";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { LeaveType, LeaveRequest, LeaveBalance, Holiday } from "@/modules/leave/types"; // Added Holiday type
-import { getHolidaysAction, getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances } from '@/modules/leave/actions'; // Import all relevant actions
-// getSessionData is no longer directly called here
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Import Alert
-import { cn } from '@/lib/utils'; // Import cn utility
-
+import type { LeaveType, LeaveRequest, LeaveBalance, Holiday } from "@/modules/leave/types";
+import { getHolidaysAction, getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances } from '@/modules/leave/actions';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { cn } from '@/lib/utils';
+import { useSearchParams, useRouter } from "next/navigation"; // Import useSearchParams and useRouter
 
 interface LeavePageClientProps {
   userId: string | null;
@@ -25,9 +25,15 @@ interface LeavePageClientProps {
   tenantDomain: string | null;
 }
 
-export default function LeavePageClient({ userId, isAdmin, tenantDomain }: LeavePageClientProps) {
+export default function LeavePageClient({ userId: initialUserId, isAdmin, tenantDomain }: LeavePageClientProps) {
   const { toast } = useToast();
-  // userId, isAdmin, tenantDomain are now props
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  // Determine the target employeeId: from query param first, then from logged-in user prop
+  const employeeIdFromQuery = searchParams.get('employeeId');
+  const targetUserId = employeeIdFromQuery || initialUserId;
+
   const [leaveTypes, setLeaveTypes] = React.useState<LeaveType[]>([]);
   const [allRequests, setAllRequests] = React.useState<LeaveRequest[]>([]);
   const [myRequests, setMyRequests] = React.useState<LeaveRequest[]>([]);
@@ -35,34 +41,44 @@ export default function LeavePageClient({ userId, isAdmin, tenantDomain }: Leave
   const [holidays, setHolidays] = React.useState<Holiday[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [fetchError, setFetchError] = React.useState<string | null>(null);
-  const [activeTab, setActiveTab] = React.useState('request');
+  const [activeTab, setActiveTab] = React.useState(employeeIdFromQuery ? 'my-requests' : 'request');
+  const [currentEmployeeName, setCurrentEmployeeName] = React.useState<string | null>(null);
 
 
-  // Function to refetch all necessary data AFTER auth context is loaded using server actions
   const refetchData = React.useCallback(async () => {
-      if (!userId || !tenantDomain) {
-          console.log("[Leave Page Client] Skipping refetchData, userId or tenantDomain not available from props.");
-          setIsLoading(false); // Ensure loading stops if props aren't ready
+      if (!targetUserId || !tenantDomain) {
+          console.log("[Leave Page Client] Skipping refetchData, targetUserId or tenantDomain not available.");
+          setIsLoading(false);
           setFetchError("User or tenant information is missing.");
           return;
       }
-      console.log("[Leave Page Client] Refetching leave and holiday data for user:", userId);
+      console.log("[Leave Page Client] Refetching leave and holiday data for user:", targetUserId);
       setIsLoading(true);
       setFetchError(null);
       try {
-           // Use server actions directly instead of API calls
           const [typesData, allReqData, myReqData, balancesData, holidaysData] = await Promise.all([
-              getLeaveTypes(), // Action uses session context
-              isAdmin ? getLeaveRequests() : Promise.resolve([]), // Action uses session context
-              getLeaveRequests({ employeeId: userId }), // Action uses session context + filter
-              getEmployeeLeaveBalances(userId), // Action uses session context for tenant
-              getHolidaysAction(), // Action uses session context
+              getLeaveTypes(),
+              isAdmin && !employeeIdFromQuery ? getLeaveRequests() : Promise.resolve([]), // Only fetch all if admin and no specific employee queried
+              getLeaveRequests({ employeeId: targetUserId }),
+              getEmployeeLeaveBalances(targetUserId),
+              getHolidaysAction(),
           ]);
           setLeaveTypes(typesData);
           setAllRequests(allReqData);
           setMyRequests(myReqData);
           setMyBalances(balancesData);
           setHolidays(holidaysData);
+
+          // If viewing specific employee's leave, try to get their name
+          if (employeeIdFromQuery && myReqData.length > 0) {
+             setCurrentEmployeeName(myReqData[0].employeeName);
+          } else if (employeeIdFromQuery) {
+             // If no requests, name might not be available directly, could add another fetch or rely on context
+             setCurrentEmployeeName(`Employee ID: ${employeeIdFromQuery}`);
+          } else {
+             setCurrentEmployeeName(null); // Viewing own leave or admin general view
+          }
+
       } catch (err: any) {
           console.error("[Leave Page Client] Error during refetchData using actions:", err);
           const errorMsg = err.message || "Failed to load leave management data.";
@@ -75,23 +91,20 @@ export default function LeavePageClient({ userId, isAdmin, tenantDomain }: Leave
       } finally {
           setIsLoading(false);
       }
-  }, [toast, userId, isAdmin, tenantDomain]); // Keep dependencies
+  }, [toast, targetUserId, isAdmin, tenantDomain, employeeIdFromQuery]);
 
-  // Fetch data when userId and tenantDomain become available via props
   React.useEffect(() => {
-    if (userId && tenantDomain) {
+    if (targetUserId && tenantDomain) {
         refetchData();
     } else {
-        // If critical props are missing after initial render, show error or stop loading
         setIsLoading(false);
-        if (!userId || !tenantDomain) {
+        if (!targetUserId || !tenantDomain) {
              setFetchError("User or tenant context could not be established.");
-             console.error("[Leave Page Client] Critical props (userId, tenantDomain) missing.");
+             console.error("[Leave Page Client] Critical props (targetUserId, tenantDomain) missing.");
         }
     }
-  }, [userId, tenantDomain, refetchData]); // Depend on userId and tenantDomain
+  }, [targetUserId, tenantDomain, refetchData]);
 
-   // Callbacks for components to trigger refetch
    const handleLeaveRequestSubmitted = () => {
      refetchData();
      setActiveTab('my-requests');
@@ -101,15 +114,13 @@ export default function LeavePageClient({ userId, isAdmin, tenantDomain }: Leave
    const handleLeaveTypeUpdated = () => refetchData();
    const handleHolidayUpdated = () => refetchData();
 
-   // Derive leave type name map
    const leaveTypeNameMap = React.useMemo(() => {
      const map = new Map<string, string>();
      leaveTypes.forEach(lt => map.set(lt.id, lt.name));
      return map;
    }, [leaveTypes]);
 
-   // Conditional rendering based on loading and error states
-    if (!userId || !tenantDomain) { // Handle missing critical props early
+    if (!targetUserId || !tenantDomain) {
       return (
           <div className="flex flex-col gap-6 items-center justify-center min-h-[400px]">
                <Alert variant="destructive" className="max-w-md">
@@ -120,15 +131,28 @@ export default function LeavePageClient({ userId, isAdmin, tenantDomain }: Leave
       );
     }
 
+  const pageTitle = employeeIdFromQuery
+    ? currentEmployeeName
+        ? `Leave Management for ${currentEmployeeName}`
+        : `Leave Management for Employee`
+    : `Leave Management ${tenantDomain ? `for ${tenantDomain}` : ''}`;
+
 
   return (
-    <div className="flex flex-col gap-6 md:gap-8"> {/* Increased gap */}
-      <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
-          <Calendar className="h-6 w-6" /> Leave Management {tenantDomain ? `for ${tenantDomain}` : ''}
-      </h1>
+    <div className="flex flex-col gap-6 md:gap-8">
+      <div className="flex items-center justify-between flex-wrap">
+        <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
+            <Calendar className="h-6 w-6" /> {pageTitle}
+        </h1>
+        {employeeIdFromQuery && (
+            <Button variant="outline" onClick={() => router.back()}>
+                <ArrowLeft className="mr-2 h-4 w-4" /> Back
+            </Button>
+        )}
+      </div>
+
 
        {isLoading && !fetchError && (
-          // Show multiple skeletons for better loading perception
            <div className="space-y-6 md:space-y-8">
               <Skeleton className="h-32 w-full" />
               <Skeleton className="h-10 w-full max-w-lg" />
@@ -140,13 +164,20 @@ export default function LeavePageClient({ userId, isAdmin, tenantDomain }: Leave
        )}
 
 
-       {!isLoading && !fetchError && userId && (
+       {!isLoading && !fetchError && targetUserId && (
            <>
-             {/* Leave Balances Section - Responsive Grid */}
               <Card className="shadow-sm">
                  <CardHeader>
-                   <CardTitle>My Leave Balances</CardTitle>
-                   <CardDescription>Your current available leave balances.</CardDescription>
+                   <CardTitle>
+                        {employeeIdFromQuery && currentEmployeeName
+                            ? `${currentEmployeeName.startsWith('Employee ID:') ? '' : currentEmployeeName + "'s " }Leave Balances`
+                            : "My Leave Balances"}
+                   </CardTitle>
+                   <CardDescription>
+                        {employeeIdFromQuery
+                            ? `Current available leave balances for this employee.`
+                            : "Your current available leave balances."}
+                   </CardDescription>
                  </CardHeader>
                  <CardContent className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                     {myBalances.length > 0 ? (
@@ -163,19 +194,19 @@ export default function LeavePageClient({ userId, isAdmin, tenantDomain }: Leave
               </Card>
 
 
-              {/* Tabs for Request Form, Lists, and Type/Holiday Management */}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="leave-tabs">
-                 {/* Use a flex-wrap layout for the tabs list to handle different screen sizes better */}
-                 {/* Wrap TabsList in overflow-x-auto for small screens */}
                  <div className="overflow-x-auto pb-2">
                      <TabsList className="inline-flex h-auto w-max sm:w-full sm:grid sm:grid-cols-2 md:grid-cols-4">
-                       <TabsTrigger value="request" className="flex items-center gap-1">
-                            <PlusCircle className="h-4 w-4"/> Request Leave
-                        </TabsTrigger>
+                       {(!employeeIdFromQuery || employeeIdFromQuery === initialUserId) && ( // Only show "Request Leave" if viewing own leave or general
+                           <TabsTrigger value="request" className="flex items-center gap-1">
+                                <PlusCircle className="h-4 w-4"/> Request Leave
+                            </TabsTrigger>
+                       )}
                        <TabsTrigger value="my-requests" className="flex items-center gap-1">
-                           <ListChecks className="h-4 w-4"/> My Requests
+                           <ListChecks className="h-4 w-4"/>
+                           {employeeIdFromQuery && currentEmployeeName ? `${currentEmployeeName.startsWith('Employee ID:') ? 'Requests' : currentEmployeeName + "'s Requests"}` : 'My Requests'}
                         </TabsTrigger>
-                       {isAdmin && (
+                       {isAdmin && !employeeIdFromQuery && ( // Only show "Manage Requests" if admin AND not viewing specific employee's leave
                             <TabsTrigger value="all-requests" className="flex items-center gap-1">
                                <ListChecks className="h-4 w-4"/> Manage Requests
                             </TabsTrigger>
@@ -193,48 +224,48 @@ export default function LeavePageClient({ userId, isAdmin, tenantDomain }: Leave
                      </TabsList>
                  </div>
 
-                {/* Request Leave Tab */}
-                <TabsContent value="request">
-                   <Card className="shadow-sm mt-4"> {/* Add margin top */}
-                       <CardHeader>
-                           <CardTitle>Submit Leave Request</CardTitle>
-                           <CardDescription>Fill out the form below to request time off.</CardDescription>
-                       </CardHeader>
-                       <CardContent>
-                           <LeaveRequestForm
-                               employeeId={userId} // Pass confirmed userId
-                               leaveTypes={leaveTypes}
-                               onSuccess={handleLeaveRequestSubmitted}
-                           />
-                       </CardContent>
-                   </Card>
-                </TabsContent>
+                {(!employeeIdFromQuery || employeeIdFromQuery === initialUserId) && (
+                    <TabsContent value="request">
+                       <Card className="shadow-sm mt-4">
+                           <CardHeader>
+                               <CardTitle>Submit Leave Request</CardTitle>
+                               <CardDescription>Fill out the form below to request time off.</CardDescription>
+                           </CardHeader>
+                           <CardContent>
+                               <LeaveRequestForm
+                                   employeeId={targetUserId}
+                                   leaveTypes={leaveTypes}
+                                   onSuccess={handleLeaveRequestSubmitted}
+                               />
+                           </CardContent>
+                       </Card>
+                    </TabsContent>
+                )}
 
-                {/* My Requests Tab */}
                 <TabsContent value="my-requests">
                     <LeaveRequestList
                         requests={myRequests}
                         leaveTypes={leaveTypes}
-                        isAdminView={false}
-                        currentUserId={userId} // Pass confirmed userId
+                        isAdminView={isAdmin && employeeIdFromQuery === initialUserId} // Admin can manage their own requests too if viewing their page
+                        currentUserId={initialUserId} // Logged-in user's ID for cancel action
+                        tenantDomain={tenantDomain}
                         onUpdate={handleLeaveRequestUpdated}
                     />
                 </TabsContent>
 
-                {/* All Requests Tab (Admin Only) */}
-                {isAdmin && (
+                {isAdmin && !employeeIdFromQuery && (
                    <TabsContent value="all-requests">
                        <LeaveRequestList
                            requests={allRequests}
                            leaveTypes={leaveTypes}
                            isAdminView={true}
-                           currentUserId={userId} // Pass confirmed userId
+                           currentUserId={initialUserId}
+                           tenantDomain={tenantDomain}
                            onUpdate={handleLeaveRequestUpdated}
                        />
                    </TabsContent>
                 )}
 
-                {/* Manage Leave Types Tab (Admin Only) */}
                 {isAdmin && (
                    <TabsContent value="manage-types">
                        <LeaveTypeManagement
@@ -244,12 +275,11 @@ export default function LeavePageClient({ userId, isAdmin, tenantDomain }: Leave
                    </TabsContent>
                 )}
 
-                 {/* Manage Holidays Tab (Admin Only) */}
                 {isAdmin && (
                    <TabsContent value="manage-holidays">
                        <HolidayManagement
                            initialHolidays={holidays}
-                           onUpdate={handleHolidayUpdated} // Pass the refetch callback
+                           onUpdate={handleHolidayUpdated}
                        />
                    </TabsContent>
                 )}

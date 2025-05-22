@@ -7,20 +7,19 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { notFound, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { User, Mail, Phone, Briefcase, Building, Calendar, Activity, Pencil, ArrowLeft, UsersIcon, MapPin, Tag, UserCheck } from 'lucide-react'; // Added UsersIcon, MapPin, Tag, UserCheck
+import { User, Mail, Phone, Briefcase, Building, Calendar as CalendarIconLucide, Activity, Pencil, ArrowLeft, UsersIcon, MapPin, Tag, UserCheck, FileText as LeaveIcon } from 'lucide-react'; // Added LeaveIcon
 import { Badge } from "@/components/ui/badge";
 import { format, parseISO, isValid } from 'date-fns';
 import type { Employee, EmploymentType } from '@/modules/employees/types';
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Import Alert components
-import { AlertTriangle } from 'lucide-react'; // For error icon
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AlertTriangle } from 'lucide-react';
 
 interface EmployeeDetailPageProps {
   // Params are accessed via hook
 }
 
-// Helper to fetch data from API routes - CLIENT SIDE VERSION (API handles tenant context)
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T | undefined> {
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
     console.log(`[Employee Detail Page - fetchData] Attempting to fetch from: ${fullUrl}`);
@@ -31,6 +30,11 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T | und
 
         if (response.status === 404) {
             console.log(`[Employee Detail Page - fetchData] Resource not found (404) for ${fullUrl}.`);
+            // Explicitly log the error payload if any for 404s too, before returning undefined
+            const errorText = await response.text().catch(() => ""); // Try to get error text
+            if (errorText) {
+                console.error(`[Employee Detail Page - fetchData] 404 API Response body for ${fullUrl}:`, errorText);
+            }
             return undefined;
         }
         if (!response.ok) {
@@ -54,7 +58,7 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T | und
     } catch (error) {
         console.error(`[Employee Detail Page - fetchData] Error in fetchData for ${fullUrl}:`, error);
         if (error instanceof Error) {
-           throw error; // Re-throw to be caught by the caller
+           throw error;
         } else {
            throw new Error(`Failed to fetch ${fullUrl}: An unknown error occurred.`);
         }
@@ -62,7 +66,6 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T | und
 }
 
 
-// Helper function to determine badge variant based on status
 const getStatusVariant = (status?: Employee['status']): "default" | "secondary" | "outline" | "destructive" => {
   if (!status) return 'outline';
   switch (status) {
@@ -85,7 +88,7 @@ const getEmploymentTypeVariant = (type?: EmploymentType): "default" | "secondary
 export default function TenantEmployeeDetailPage() {
   const params = useParams();
   const tenantDomain = params.domain as string;
-  const employeeIdFromUrl = params.id as string; // This is the employee's user_id or employee_pk_id depending on context
+  const employeeIdFromUrl = params.id as string;
   const { toast } = useToast();
 
   const [employee, setEmployee] = React.useState<Employee | null>(null);
@@ -105,12 +108,10 @@ export default function TenantEmployeeDetailPage() {
       setIsLoading(true);
       setError(null);
       try {
-        // The API route /api/employees/[id] now handles if 'id' is a user_id (for Employee role's "My Profile")
-        // or an employee_pk_id (for Admin/Manager viewing or editing specific employee).
         const data = await fetchData<Employee | undefined>(`/api/employees/${employeeIdFromUrl}`);
         if (!data) {
           console.warn(`[TenantEmployeeDetailPage - fetchEffect] Employee not found for ID '${employeeIdFromUrl}'. Triggering notFound().`);
-          notFound(); // Use Next.js notFound for actual 404 page
+          notFound();
           return;
         }
         console.log(`[TenantEmployeeDetailPage - fetchEffect] Fetched employee. URL param id: '${employeeIdFromUrl}', Fetched Employee PK: '${data.id}', Fetched Employee UserID: '${data.userId}', Fetched Employee Name: '${data.name}'`);
@@ -118,7 +119,6 @@ export default function TenantEmployeeDetailPage() {
       } catch (err: any) {
         console.error(`[TenantEmployeeDetailPage - fetchEffect] Error loading employee profile for ID '${employeeIdFromUrl}':`, err);
         setError(err.message || "Failed to load employee data.");
-        // Only toast if it's not an authorization error which we will handle with specific UI
         if (!err.message?.toLowerCase().includes('unauthorized')) {
           toast({
             title: "Error Loading Profile",
@@ -206,7 +206,6 @@ export default function TenantEmployeeDetailPage() {
   }
 
    if (!employee) {
-      // This should ideally be caught by notFound() in useEffect, but as a fallback
       return (
          <div className="flex flex-col items-center justify-center min-h-[400px]">
              <Alert variant="default" className="max-w-md">
@@ -261,7 +260,6 @@ export default function TenantEmployeeDetailPage() {
            </h1>
            {employee.employeeId && <Badge variant="outline">ID: {employee.employeeId}</Badge>}
          </div>
-          {/* Ensure employee.id is used for the edit link. employee.id is the PK of the employees table. */}
           <Button asChild variant="outline">
              <Link href={`/${tenantDomain}/employees/${employee.id}/edit`}>
                  <Pencil className="mr-2 h-4 w-4"/> Edit Employee
@@ -285,7 +283,7 @@ export default function TenantEmployeeDetailPage() {
              <InfoItem icon={UsersIcon} label="Reporting Manager ID" value={employee.reportingManagerId} />
            </div>
            <div className="space-y-4">
-             <InfoItem icon={Calendar} label="Hire Date" value={formatDate(employee.hireDate)} />
+             <InfoItem icon={CalendarIconLucide} label="Hire Date" value={formatDate(employee.hireDate)} />
              <InfoItem icon={MapPin} label="Work Location" value={employee.workLocation} />
              <div className="flex items-start gap-3">
                  <Tag className="h-5 w-5 text-muted-foreground mt-0.5"/>
@@ -311,12 +309,25 @@ export default function TenantEmployeeDetailPage() {
                 <CardContent><p className="text-muted-foreground">Review data will be displayed here.</p></CardContent>
             </Card>
              <Card className="shadow-sm">
-                <CardHeader><CardTitle>Leave History</CardTitle>
-                <CardDescription><Link href={`/${tenantDomain}/leave?employeeId=${employeeIdFromUrl}`} className='text-primary hover:underline'>View leave history</Link></CardDescription></CardHeader>
-                <CardContent><p className="text-muted-foreground">Recent leave records will be displayed here.</p></CardContent>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <LeaveIcon className="h-5 w-5 text-primary"/> Leave Information
+                    </CardTitle>
+                    <CardDescription>View leave balances and request history.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {employee.userId ? (
+                        <Button asChild>
+                            <Link href={`/${tenantDomain}/leave?employeeId=${employee.userId}`}>
+                                View Leave Details
+                            </Link>
+                        </Button>
+                    ) : (
+                        <p className="text-muted-foreground">No user account linked to view leave details.</p>
+                    )}
+                </CardContent>
             </Card>
        </div>
     </div>
   );
 }
-

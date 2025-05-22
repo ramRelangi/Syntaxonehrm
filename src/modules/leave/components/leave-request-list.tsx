@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle, XCircle, Hourglass, Trash2, Eye, Loader2, Paperclip } from 'lucide-react'; // Added Paperclip
+import { CheckCircle, XCircle, Hourglass, Trash2, Loader2, Paperclip, User } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import Link from "next/link"; // Import Link
+import Link from "next/link";
 
 const getStatusVariant = (status: LeaveRequestStatus): "default" | "secondary" | "outline" | "destructive" => {
   switch (status) {
@@ -48,11 +48,12 @@ interface LeaveRequestListProps {
   requests: LeaveRequest[];
   leaveTypes: LeaveType[];
   isAdminView?: boolean;
-  currentUserId?: string;
+  currentUserId?: string | null; // Can be null if not logged in or not relevant
+  tenantDomain: string | null; // Added tenantDomain
   onUpdate: () => void;
 }
 
-export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, currentUserId, onUpdate }: LeaveRequestListProps) {
+export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, currentUserId, tenantDomain, onUpdate }: LeaveRequestListProps) {
   const { toast } = useToast();
   const [actionLoading, setActionLoading] = React.useState<Record<string, boolean>>({});
 
@@ -150,7 +151,7 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
 
   return (
      <TooltipProvider>
-         <Card className="shadow-sm mt-4"> {/* Added mt-4 for spacing consistency */}
+         <Card className="shadow-sm mt-4">
              <CardHeader>
                  <CardTitle>{isAdminView ? 'All Leave Requests' : 'My Leave Requests'}</CardTitle>
                  <CardDescription>
@@ -187,7 +188,18 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
 
                            return (
                              <TableRow key={req.id}>
-                                {isAdminView && <TableCell>{req.employeeName}</TableCell>}
+                                {isAdminView && (
+                                    <TableCell>
+                                        {tenantDomain && req.employeeId ? (
+                                            <Link href={`/${tenantDomain}/employees/${req.employeeId}`} className="text-primary hover:underline flex items-center gap-1">
+                                                <User className="h-4 w-4 text-muted-foreground" />
+                                                {req.employeeName}
+                                            </Link>
+                                        ) : (
+                                            req.employeeName
+                                        )}
+                                    </TableCell>
+                                )}
                                 <TableCell>{getLeaveTypeName(req.leaveTypeId)}</TableCell>
                                 <TableCell>
                                     {format(parseISO(req.startDate), "MMM d, yyyy")} - {format(parseISO(req.endDate), "MMM d, yyyy")}
