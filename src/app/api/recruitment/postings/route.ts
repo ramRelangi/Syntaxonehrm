@@ -1,24 +1,23 @@
-import { NextRequest, NextResponse } from 'next/server';
-// Import server action for GET
-import { getJobPostings, addJobPostingAction } from '@/modules/recruitment/actions';
-import { jobPostingSchema, type JobPostingFormData, type JobPostingStatus } from '@/modules/recruitment/types';
-// Removed DB function and auth helper import as action handles it
 
+import { NextRequest, NextResponse } from 'next/server';
+// Import server actions
+import { getJobOpenings, addJobOpeningAction } from '@/modules/recruitment/actions'; // Corrected imports
+import { jobOpeningSchema, type JobOpeningFormData, type JobOpeningStatus } from '@/modules/recruitment/types'; // Corrected type imports
 
 export async function GET(request: NextRequest) {
   try {
-    console.log(`GET /api/recruitment/postings - Fetching...`);
+    console.log(`GET /api/recruitment/postings - Fetching...`); // Log path as API defined
 
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status') as JobPostingStatus | undefined;
+    const status = searchParams.get('status') as JobOpeningStatus | undefined;
 
     // Call server action (action handles tenant context and auth internally)
-    const postings = await getJobPostings({ status });
-    return NextResponse.json(postings);
+    const jobOpenings = await getJobOpenings({ status }); // Corrected function call
+    return NextResponse.json(jobOpenings);
 
   } catch (error: any) {
-    console.error(`Error fetching job postings (API):`, error);
-    let message = 'Failed to fetch job postings';
+    console.error(`Error fetching job openings (API):`, error);
+    let message = 'Failed to fetch job openings';
     let status = 500;
 
     // Distinguish between auth errors and general errors caught here
@@ -35,24 +34,24 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    console.log(`POST /api/recruitment/postings - Adding...`);
+    console.log(`POST /api/recruitment/postings - Adding...`); // Log path as API defined
 
     // Action handles tenantId derivation and validation internally
     const body = await request.json();
     // Pass raw form data (without tenantId) to the action
-    const formData = body as Omit<JobPostingFormData, 'tenantId'>;
-    const result = await addJobPostingAction(formData); // Use the imported server action
+    const formData = body as Omit<JobOpeningFormData, 'tenantId'>; // Use JobOpeningFormData
+    const result = await addJobOpeningAction(formData); // Corrected function call
 
-    if (result.success && result.jobPosting) {
-      return NextResponse.json(result.jobPosting, { status: 201 });
+    if (result.success && result.jobOpening) { // Check for jobOpening
+      return NextResponse.json(result.jobOpening, { status: 201 });
     } else {
       console.error(`POST /api/recruitment/postings Action Error:`, result.errors);
-      let errorMessage = result.errors?.[0]?.message || 'Failed to add job posting';
+      let errorMessage = result.errors?.[0]?.message || 'Failed to add job opening';
       let statusCode = 400; // Default bad request
 
       if (errorMessage.includes('Unauthorized')) {
           statusCode = 403; // Forbidden
-          errorMessage = 'Unauthorized to add job posting.';
+          errorMessage = 'Unauthorized to add job opening.';
       } else if (!result.errors) {
           statusCode = 500;
           errorMessage = 'An unexpected error occurred.';
@@ -61,7 +60,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: errorMessage, details: result.errors }, { status: statusCode });
     }
   } catch (error: any) {
-    console.error(`Error adding job posting (API):`, error);
+    console.error(`Error adding job opening (API):`, error);
     let message = 'Internal server error';
     let status = 500;
     if (error instanceof SyntaxError) {
@@ -76,5 +75,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: status });
   }
 }
-
-    
