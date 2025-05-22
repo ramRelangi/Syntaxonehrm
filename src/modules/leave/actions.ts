@@ -1,4 +1,3 @@
-
 'use server';
 
 import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus, LeaveBalance, Holiday, HolidayFormData } from '@/modules/leave/types';
@@ -14,17 +13,19 @@ import {
   addLeaveType as dbAddLeaveType,
   updateLeaveType as dbUpdateLeaveType,
   deleteLeaveType as dbDeleteLeaveType,
-  getLeaveBalancesForEmployee as dbGetLeaveBalances, // This expects employee.id (PK)
+  getLeaveBalancesForEmployee as dbGetLeaveBalances,
   runMonthlyAccrual as dbRunMonthlyAccrual,
   getAllHolidays as dbGetAllHolidays,
   addHoliday as dbAddHoliday,
   updateHoliday as dbUpdateHoliday,
   deleteHoliday as dbDeleteHoliday,
 } from '@/modules/leave/lib/db';
-import { getEmployeeByUserId as dbGetEmployeeByUserId } from '@/modules/employees/lib/db'; // To get employee PK from user ID
+import { getEmployeeByUserId as dbGetEmployeeByUserId } from '@/modules/employees/lib/db';
+import { getEmployeeById as dbGetEmployeeByIdFromEmployeesModule } from '@/modules/employees/lib/db';
+
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
-import { getTenantIdFromSession, getUserIdFromSession, isAdminFromSession, getEmployeeProfileForCurrentUser } from '@/modules/auth/actions'; // getEmployeeProfileForCurrentUser can get employee PK
+import { getTenantIdFromSession, getUserIdFromSession, isAdminFromSession, getEmployeeProfileForCurrentUser } from '@/modules/auth/actions';
 
 // --- Leave Request Actions ---
 
@@ -35,36 +36,34 @@ export async function getLeaveRequestsAction(filters?: { employeeId?: string, st
      throw new Error("Tenant context not found.");
   }
   
-  let effectiveFilters = { ...filters };
+  let effectiveFilters: any = { ...filters }; // Use 'any' for effectiveFilters to allow adding new properties
 
   if (filters?.forManagerApproval) {
-    console.log(`[Action getLeaveRequestsAction] Filtering for manager approval.`);
-    const managerUserId = await getUserIdFromSession(); // This is the manager's users.id
+    console.log(`[Action getLeaveRequestsAction] Manager Approval Filter: Initiated.`);
+    const managerUserId = await getUserIdFromSession(); 
     if (!managerUserId) {
-        console.warn("[Action getLeaveRequestsAction] Could not determine manager's user ID for approval filter.");
+        console.warn("[Action getLeaveRequestsAction] Manager Approval Filter: Could not determine manager's user ID for approval filter.");
         throw new Error("Could not identify manager for approval filtering.");
     }
+    console.log(`[Action getLeaveRequestsAction] Manager Approval Filter: Manager's user_id from session: ${managerUserId}`);
     const managerEmployeeProfile = await dbGetEmployeeByUserId(managerUserId, tenantId);
     if (!managerEmployeeProfile) {
-        console.warn(`[Action getLeaveRequestsAction] Manager with user ID ${managerUserId} does not have an employee profile in tenant ${tenantId}. Cannot filter by reporting manager.`);
-        return []; // Or throw error, depending on desired behavior
+        console.warn(`[Action getLeaveRequestsAction] Manager Approval Filter: Manager with user ID ${managerUserId} does not have an employee profile in tenant ${tenantId}. Cannot filter by reporting manager. Their approval queue will be empty.`);
+        return []; 
     }
-    effectiveFilters.filterByReportingManagerEmployeeId = managerEmployeeProfile.id; // Pass manager's employee.id (PK)
-    delete effectiveFilters.forManagerApproval; // Remove the boolean flag
-    effectiveFilters.status = 'Pending'; // Manager approval is only for pending requests
-    console.log(`[Action getLeaveRequestsAction] Manager's employee PK for filtering: ${managerEmployeeProfile.id}`);
+    effectiveFilters.filterByReportingManagerEmployeeId = managerEmployeeProfile.id; 
+    delete effectiveFilters.forManagerApproval; 
+    effectiveFilters.status = 'Pending'; 
+    console.log(`[Action getLeaveRequestsAction] Manager Approval Filter: Filtering for requests reporting to Manager Name: "${managerEmployeeProfile.name}", Manager Employee PK (employees.id): "${managerEmployeeProfile.id}". Filters passed to DB:`, JSON.stringify(effectiveFilters));
   }
 
 
-  console.log(`[Action getLeaveRequestsAction] Fetching for tenant ${tenantId}, effective filters:`, effectiveFilters);
+  console.log(`[Action getLeaveRequestsAction] Fetching for tenant ${tenantId}, effective filters:`, JSON.stringify(effectiveFilters));
   try {
-      // If employeeId filter is present, it's likely a user_id. Convert to employee PK if necessary.
-      // However, dbGetAllLeaveRequests expects employeeId to be the employee PK.
-      // If the filter is for "my requests", it usually comes from a user context.
       if (effectiveFilters.employeeId) {
           const userMakingRequest = await dbGetEmployeeByUserId(effectiveFilters.employeeId, tenantId);
           if (userMakingRequest) {
-              effectiveFilters.employeeId = userMakingRequest.id; // Use PK for DB query
+              effectiveFilters.employeeId = userMakingRequest.id; 
               console.log(`[Action getLeaveRequestsAction] Converted filter employeeId (user_id ${filters?.employeeId}) to PK ${userMakingRequest.id}`);
           } else {
               console.warn(`[Action getLeaveRequestsAction] No employee profile found for user_id ${filters?.employeeId} to filter requests. Returning empty.`);
@@ -100,16 +99,15 @@ export async function addLeaveRequestAction(formData: Omit<LeaveRequestFormData,
   const tenantId = await getTenantIdFromSession();
   if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
 
-  const userId = await getUserIdFromSession(); // This is the user_id
+  const userId = await getUserIdFromSession(); 
   if (!userId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Could not identify employee.' }] };
 
-  // Fetch the employee's primary key (employees.id)
   const employeeProfile = await dbGetEmployeeByUserId(userId, tenantId);
   if (!employeeProfile) {
     console.error(`[Action addLeaveRequestAction] No employee profile found for userId ${userId} in tenant ${tenantId}.`);
     return { success: false, errors: [{ code: 'custom', path: ['employeeId'], message: 'Employee profile not found.' }] };
   }
-  const employeePrimaryKey = employeeProfile.id; // This is the employees.id to be used
+  const employeePrimaryKey = employeeProfile.id; 
 
   const dataWithContext = { ...formData, tenantId, employeeId: employeePrimaryKey };
 
@@ -121,9 +119,9 @@ export async function addLeaveRequestAction(formData: Omit<LeaveRequestFormData,
   }
 
   try {
-    const newRequest = await dbAddLeaveRequest(validation.data); // dbAddLeaveRequest expects employeeId to be the PK
+    const newRequest = await dbAddLeaveRequest(validation.data); 
     revalidatePath(`/${tenantId}/leave`);
-    revalidatePath(`/api/leave/balances/${employeePrimaryKey}`); // Revalidate balance endpoint for the user (using employee PK)
+    revalidatePath(`/api/leave/balances/${employeePrimaryKey}`); 
     return { success: true, request: newRequest };
   } catch (error: any) {
     console.error("[Action addLeaveRequestAction] Error adding leave request:", error);
@@ -139,10 +137,9 @@ export async function updateLeaveRequestStatusAction(
   const tenantId = await getTenantIdFromSession();
   if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
 
-  const approverUserId = await getUserIdFromSession(); // This is the user_id of the person taking action
+  const approverUserId = await getUserIdFromSession(); 
   if (!approverUserId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Approver ID not found.' }] };
 
-  // Authorization: Check if current user is Admin or the reporting manager of the request's employee
   const requestToUpdate = await dbGetLeaveRequestById(id, tenantId);
   if (!requestToUpdate) {
       return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Leave request not found.' }] };
@@ -152,11 +149,10 @@ export async function updateLeaveRequestStatusAction(
   let isReportingManager = false;
   if (!isAdmin) {
       const managerProfile = await dbGetEmployeeByUserId(approverUserId, tenantId);
-      if (managerProfile && requestToUpdate.employeeId) { // requestToUpdate.employeeId is PK
-          const submittingEmployee = await dbGetEmployeeByUserId(requestToUpdate.employeeId, tenantId); // This is wrong - need employee from request.employeeId
-          const actualSubmittingEmployee = await dbGetEmployeeById(requestToUpdate.employeeId, tenantId);
-
-          if (actualSubmittingEmployee && actualSubmittingEmployee.reportingManagerId === managerProfile.id) {
+      if (managerProfile && requestToUpdate.employeeId) { 
+          // requestToUpdate.employeeId is the PK of the submitting employee
+          const submittingEmployee = await dbGetEmployeeByIdFromEmployeesModule(requestToUpdate.employeeId, tenantId); 
+          if (submittingEmployee && submittingEmployee.reportingManagerId === managerProfile.id) {
               isReportingManager = true;
           }
       }
@@ -172,11 +168,10 @@ export async function updateLeaveRequestStatusAction(
   }
 
   try {
-    // Pass approver's user_id to the DB layer
     const updatedRequest = await dbUpdateLeaveRequestStatus(id, tenantId, status, comments, approverUserId);
     if (updatedRequest) {
       revalidatePath(`/${tenantId}/leave`);
-      revalidatePath(`/api/leave/balances/${updatedRequest.employeeId}`); // employeeId on request is the PK
+      revalidatePath(`/api/leave/balances/${updatedRequest.employeeId}`); 
       return { success: true, request: updatedRequest };
     } else {
       return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Leave request not found or cannot be updated.' }] };
@@ -191,20 +186,18 @@ export async function cancelLeaveRequestAction(id: string): Promise<{ success: b
   const tenantId = await getTenantIdFromSession();
   if (!tenantId) return { success: false, error: 'Tenant context not found.' };
 
-  const userId = await getUserIdFromSession(); // This is user_id of the person cancelling
+  const userId = await getUserIdFromSession(); 
   if (!userId) return { success: false, error: 'Could not identify user.' };
   
   try {
-    // dbCancelLeaveRequest now expects the user_id of the person initiating the cancel for ownership check.
     const updatedRequest = await dbCancelLeaveRequest(id, tenantId, userId); 
     if (updatedRequest) {
         revalidatePath(`/${tenantId}/leave`);
-        if (updatedRequest.employeeId) { // employeeId here is the PK
+        if (updatedRequest.employeeId) { 
           revalidatePath(`/api/leave/balances/${updatedRequest.employeeId}`);
         }
         return { success: true };
     } else {
-        // This path might not be reachable if dbCancelLeaveRequest throws an error on failure
         return { success: false, error: 'Failed to cancel request (unexpected, request might not be cancellable or not found).' };
     }
   } catch (error: any) {
@@ -313,21 +306,19 @@ export async function deleteLeaveTypeAction(id: string): Promise<{ success: bool
 
 
 // --- Leave Balance Actions ---
-// Parameter 'employeeId' here is expected to be user_id from the client (e.g., from query param or session)
-export async function getEmployeeLeaveBalancesAction(employeeId: string): Promise<LeaveBalance[]> {
+export async function getEmployeeLeaveBalancesAction(employeeId: string): Promise<LeaveBalance[]> { // employeeId is userId
     const tenantId = await getTenantIdFromSession();
     if (!tenantId) {
        console.error("[Action getEmployeeLeaveBalancesAction] Tenant ID could not be determined from session.");
        throw new Error("Tenant context not found.");
     }
     
-    // Fetch the employee's primary key (employees.id) using the provided employeeId (which is user_id)
     const employeeProfile = await dbGetEmployeeByUserId(employeeId, tenantId);
     if (!employeeProfile) {
         console.warn(`[Action getEmployeeLeaveBalancesAction] No employee profile found for user ID ${employeeId} in tenant ${tenantId}. Returning empty balances.`);
         return [];
     }
-    const employeePrimaryKey = employeeProfile.id; // This is the employees.id (PK)
+    const employeePrimaryKey = employeeProfile.id; 
 
     console.log(`[Action getEmployeeLeaveBalancesAction] Fetching balances for employee PK ${employeePrimaryKey}, tenant ${tenantId}`);
     try {
@@ -352,7 +343,7 @@ export async function runAccrualProcessAction(): Promise<{ success: boolean; err
     console.log(`[Action runAccrualProcessAction] Triggering accrual process for tenant ${tenantId}...`);
     try {
         await dbRunMonthlyAccrual(tenantId);
-        revalidatePath(`/${tenantId}/leave`, 'layout'); // Revalidate the whole leave layout
+        revalidatePath(`/${tenantId}/leave`, 'layout'); 
         return { success: true };
     } catch (error: any) {
         console.error(`[Action runAccrualProcessAction] Error running accrual for tenant ${tenantId}:`, error);
