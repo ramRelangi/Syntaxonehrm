@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { employeeSchema, type EmployeeFormData, employmentTypeSchema, genderSchema } from '@/modules/employees/types';
 import type { Employee, Gender } from '@/modules/employees/types';
 import type { UserRole } from '@/modules/auth/types';
-// import { addEmployee, updateEmployee } from '@/modules/employees/actions'; // Actions are called via API
+import { userRoleSchema } from '@/modules/auth/types'; // Import userRoleSchema
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -39,7 +39,8 @@ interface EmployeeFormProps {
   currentUserRole: UserRole | null;
 }
 
-type EmployeeFormShape = Omit<EmployeeFormData, 'tenantId' | 'userId' | 'employeeId'>;
+// FormShape matches EmployeeFormData for consistency now that role is included.
+type EmployeeFormShape = EmployeeFormData;
 
 const NO_MANAGER_VALUE = "__NO_MANAGER__";
 
@@ -65,7 +66,8 @@ export function EmployeeForm({
 
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
-  const isEmployeeRole = currentUserRole === 'Employee';
+  const isEmployeeRoleActing = currentUserRole === 'Employee'; // User currently logged in has Employee role
+  const isUserAdmin = currentUserRole === 'Admin';
 
   const getFormattedDate = (dateString?: string | null): string => {
     if (!dateString) return "";
@@ -96,57 +98,49 @@ export function EmployeeForm({
       hireDate: getFormattedDate(employee?.hireDate),
       status: employee?.status ?? "Active",
       dateOfBirth: getFormattedDate(employee?.dateOfBirth),
-      reportingManagerId: employee?.reportingManagerId || null, // Ensure it's null if not set
+      reportingManagerId: employee?.reportingManagerId || null,
       workLocation: employee?.workLocation ?? "",
       employmentType: employee?.employmentType ?? "Full-time",
+      role: employee?.role ?? 'Employee', // Default to 'Employee' for new, or use existing
     },
   });
 
-  // Effect to fetch potential managers
   React.useEffect(() => {
-    // Only run if the user is Admin or Manager
     if (currentUserRole === 'Admin' || currentUserRole === 'Manager') {
       const fetchManagers = async () => {
         setIsLoadingManagers(true);
-        console.log(`[EmployeeForm - fetchManagers effect] Role: ${currentUserRole}. Fetching managers. isEditMode: ${isEditMode}`);
+        console.log(`[EmployeeForm - fetchManagers effect] Role: ${currentUserRole}. Fetching managers. isEditMode: ${isEditMode}, employeeId: ${employee?.id}`);
         try {
-          const response = await fetch('/api/employees'); // API call fetches for the current tenant
+          const response = await fetch('/api/employees');
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({ message: 'Failed to fetch employees for manager list.' }));
             console.error("[EmployeeForm - fetchManagers] API error:", errorData);
             throw new Error(errorData.message || 'Failed to fetch potential managers');
           }
           const data: Employee[] = await response.json();
-          console.log(`[EmployeeForm - fetchManagers] Raw data from API: ${data.length} employees`);
+          console.log(`[EmployeeForm - fetchManagers] Employees fetched from API: ${data.length}`);
           
           const filteredData = data.filter(e => 
             e.status === 'Active' && 
-            (isEditMode ? e.id !== employee?.id : true) // Exclude self if editing
+            (isEditMode ? e.id !== employee?.id : true)
           );
           setPotentialManagers(filteredData);
-          console.log(`[EmployeeForm - fetchManagers] Filtered potential managers: ${filteredData.length}`);
+          console.log(`[EmployeeForm - fetchManagers] Potential managers after filtering: ${filteredData.length}`);
 
-          // Set initial selected manager name for EDIT mode
           if (isEditMode && employee?.reportingManagerId) {
-            // Search in the original data list to get the name, even if the manager is now inactive
-            const currentManager = data.find(m => m.id === employee.reportingManagerId); 
+            const currentManager = data.find(m => m.id === employee.reportingManagerId);
             if (currentManager) {
               setSelectedManagerName(currentManager.name + (currentManager.status !== 'Active' ? ' (Inactive)' : ''));
-              // form.setValue('reportingManagerId', currentManager.id); // Ensure form value is set
-              console.log(`[EmployeeForm - fetchManagers] Edit mode: Set selectedManagerName to '${currentManager.name + (currentManager.status !== 'Active' ? ' (Inactive)' : '')}' for manager ID ${employee.reportingManagerId}`);
             } else {
-              setSelectedManagerName(""); // Manager ID exists in employee record but manager not found in list
-              form.setValue('reportingManagerId', null); // Clear form value if manager not found
-              console.warn(`[EmployeeForm - fetchManagers] Edit mode: Manager with ID ${employee.reportingManagerId} not found in fetched list. Cleared selection.`);
+              setSelectedManagerName("");
+              form.setValue('reportingManagerId', null);
+              console.warn(`[EmployeeForm - fetchManagers] Edit mode: Manager with ID ${employee.reportingManagerId} not found. Cleared selection.`);
             }
           } else if (!isEditMode) {
-            // For ADD mode, ensure no manager is pre-selected
             setSelectedManagerName("");
-            // Set the form value to null as well, if it's not already
             if (form.getValues('reportingManagerId') !== null) {
                 form.setValue('reportingManagerId', null, { shouldValidate: true, shouldDirty: true });
             }
-            console.log("[EmployeeForm - fetchManagers] Add mode: Cleared selectedManagerName and ensured form value is null.");
           }
 
         } catch (error) {
@@ -162,9 +156,8 @@ export function EmployeeForm({
       };
       fetchManagers();
     } else {
-      // If user is not Admin/Manager, or role not yet determined, clear potential managers
       setPotentialManagers([]);
-      setIsLoadingManagers(false); // Ensure loading state is reset
+      setIsLoadingManagers(false);
       console.log(`[EmployeeForm - fetchManagers effect] Role is ${currentUserRole}. Not fetching managers or cleared list.`);
     }
   }, [currentUserRole, isEditMode, employee?.id, employee?.reportingManagerId, toast, form]);
@@ -184,17 +177,19 @@ export function EmployeeForm({
     setIsLoading(true);
     console.log("[Employee Form] Submitting data (raw from form):", data);
 
+    // Ensure reportingManagerId is null if NO_MANAGER_VALUE was selected
+    const actualReportingManagerId = data.reportingManagerId === NO_MANAGER_VALUE ? null : data.reportingManagerId;
+
     const payload = {
       ...data,
       phone: data.phone || undefined,
       gender: data.gender || undefined,
       dateOfBirth: data.dateOfBirth || null,
-      reportingManagerId: data.reportingManagerId, // Should be null or a UUID string from form state
+      reportingManagerId: actualReportingManagerId,
       workLocation: data.workLocation || undefined,
     };
     console.log("[Employee Form] Payload to be sent to API:", payload);
 
-    // Call API route instead of action directly
     const apiUrl = isEditMode && employee?.id ? `/api/employees/${employee.id}` : '/api/employees';
     const method = isEditMode ? 'PUT' : 'POST';
 
@@ -293,7 +288,7 @@ export function EmployeeForm({
               <FormItem>
                 <FormLabel>Full Name *</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g. Jane Doe" {...field} disabled={isEmployeeRole && isEditMode} />
+                  <Input placeholder="e.g. Jane Doe" {...field} disabled={isEmployeeRoleActing && isEditMode} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -307,7 +302,7 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Email Address *</FormLabel>
                   <FormControl>
-                    <Input type="email" placeholder="e.g. jane.doe@company.com" {...field} disabled={isEmployeeRole && isEditMode} />
+                    <Input type="email" placeholder="e.g. jane.doe@company.com" {...field} disabled={isEmployeeRoleActing && isEditMode} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -320,7 +315,7 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Phone Number</FormLabel>
                   <FormControl>
-                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} disabled={isEmployeeRole && isEditMode && currentUserRole !== 'Admin' && currentUserRole !== 'Manager'} />
+                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -338,7 +333,6 @@ export function EmployeeForm({
                   <Select
                     onValueChange={field.onChange}
                     value={field.value ?? undefined}
-                    disabled={isEmployeeRole && isEditMode && currentUserRole !== 'Admin' && currentUserRole !== 'Manager'}
                   >
                     <FormControl>
                       <SelectTrigger>
@@ -346,6 +340,7 @@ export function EmployeeForm({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
+                      <SelectItem value={NO_MANAGER_VALUE}>-- Not Specified --</SelectItem>
                       {genderSchema.options.map(option => (
                         <SelectItem key={option} value={option}>{option}</SelectItem>
                       ))}
@@ -367,7 +362,6 @@ export function EmployeeForm({
                         <Button
                           variant={"outline"}
                           className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
-                          disabled={isEmployeeRole && isEditMode && currentUserRole !== 'Admin' && currentUserRole !== 'Manager'}
                         >
                           {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
                           <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
@@ -384,7 +378,6 @@ export function EmployeeForm({
                         }}
                         captionLayout="dropdown-buttons" fromYear={1950} toYear={new Date().getFullYear() - 18}
                         initialFocus
-                        disabled={isEmployeeRole && isEditMode && currentUserRole !== 'Admin' && currentUserRole !== 'Manager'}
                       />
                     </PopoverContent>
                   </Popover>
@@ -402,7 +395,7 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Position / Job Title *</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. Software Engineer" {...field} disabled={isEmployeeRole} />
+                    <Input placeholder="e.g. Software Engineer" {...field} disabled={isEmployeeRoleActing} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -414,7 +407,7 @@ export function EmployeeForm({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Department *</FormLabel>
-                   <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRole}>
+                   <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRoleActing}>
                      <FormControl>
                        <SelectTrigger>
                          <SelectValue placeholder="Select department" />
@@ -436,6 +429,32 @@ export function EmployeeForm({
               )}
             />
           </div>
+          
+          {isUserAdmin && !isEditMode && ( // Only show Role for Admins when creating a new employee
+            <FormField
+              control={form.control}
+              name="role"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>User Role *</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select role" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {userRoleSchema.options.map(roleValue => (
+                        <SelectItem key={roleValue} value={roleValue}>{roleValue}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          )}
+
 
         <FormField
             control={form.control}
@@ -446,22 +465,22 @@ export function EmployeeForm({
                     <div className="flex items-center gap-2">
                         <Input
                             readOnly
-                            value={selectedManagerName || (isLoadingManagers && !field.value ? "Loading..." : (field.value ? selectedManagerName : "None selected"))}
+                            value={selectedManagerName || (isLoadingManagers && !field.value ? "Loading..." : (field.value && field.value !== NO_MANAGER_VALUE ? selectedManagerName : "None selected"))}
                             placeholder="Select a manager"
                             className="flex-grow bg-background border border-input cursor-default"
-                            onClick={() => { if (!isEmployeeRole) setIsManagerLookupOpen(true);}} // Open dialog on click if not employee
+                            onClick={() => { if (!isEmployeeRoleActing) setIsManagerLookupOpen(true);}}
                         />
                         <Button
                             type="button"
                             variant="outline"
                             onClick={() => setIsManagerLookupOpen(true)}
-                            disabled={isLoadingManagers || isEmployeeRole}
+                            disabled={isLoadingManagers || isEmployeeRoleActing}
                             className="shrink-0"
                         >
                             <Search className="mr-2 h-4 w-4" />
                             {selectedManagerName ? "Change" : "Select"}
                         </Button>
-                        {selectedManagerName && (
+                        {(selectedManagerName || field.value === NO_MANAGER_VALUE) && ( // Show clear if name or "None" selected
                             <Button
                                 type="button"
                                 variant="ghost"
@@ -470,7 +489,7 @@ export function EmployeeForm({
                                     field.onChange(null); 
                                     setSelectedManagerName("");
                                 }}
-                                disabled={isEmployeeRole}
+                                disabled={isEmployeeRoleActing}
                                 className="shrink-0 text-muted-foreground hover:text-destructive"
                                 title="Clear manager selection"
                             >
@@ -504,7 +523,20 @@ export function EmployeeForm({
                         {isLoadingManagers ? (
                              <div className="p-4 text-center text-sm text-muted-foreground">Loading managers... <Loader2 className="inline h-4 w-4 animate-spin" /></div>
                         ) : potentialManagersFiltered.length > 0 ? (
-                            potentialManagersFiltered.map((manager) => (
+                           <>
+                            <Button
+                                key={NO_MANAGER_VALUE}
+                                variant="ghost"
+                                className="w-full justify-start h-auto py-2 px-3 text-left hover:bg-accent"
+                                onClick={() => {
+                                    form.setValue('reportingManagerId', null, { shouldValidate: true, shouldDirty: true });
+                                    setSelectedManagerName("-- None --");
+                                    setIsManagerLookupOpen(false);
+                                }}
+                            >
+                                -- None --
+                            </Button>
+                            {potentialManagersFiltered.map((manager) => (
                                 <Button
                                     key={manager.id}
                                     variant="ghost"
@@ -520,7 +552,8 @@ export function EmployeeForm({
                                       <span className="text-xs text-muted-foreground">{manager.position} ({manager.employeeId || manager.email})</span>
                                     </div>
                                 </Button>
-                            ))
+                            ))}
+                           </>
                         ) : (
                             <p className="p-4 text-center text-sm text-muted-foreground">
                                 {"No active managers found" + (managerSearchTerm ? " matching your search." : ".")}
@@ -542,7 +575,7 @@ export function EmployeeForm({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Employment Type *</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRole}>
+                  <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRoleActing}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select employment type" />
@@ -570,7 +603,7 @@ export function EmployeeForm({
                          <Button
                            variant={"outline"}
                            className={cn("w-full pl-3 text-left font-normal",!field.value && "text-muted-foreground")}
-                           disabled={isEmployeeRole}
+                           disabled={isEmployeeRoleActing}
                          >
                            {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
@@ -585,7 +618,7 @@ export function EmployeeForm({
                             field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
                             setHireDatePickerOpen(false);
                          }}
-                         disabled={(date) => (date > new Date() || date < new Date("1900-01-01")) || isEmployeeRole}
+                         disabled={(date) => (date > new Date() || date < new Date("1900-01-01")) || isEmployeeRoleActing}
                          initialFocus
                        />
                      </PopoverContent>
@@ -604,7 +637,7 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Work Location</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. Main Office, Remote" {...field} value={field.value ?? ""} disabled={isEmployeeRole} />
+                    <Input placeholder="e.g. Main Office, Remote" {...field} value={field.value ?? ""} disabled={isEmployeeRoleActing} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -616,7 +649,7 @@ export function EmployeeForm({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Status *</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRole}>
+                  <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRoleActing}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select status" />
@@ -639,7 +672,7 @@ export function EmployeeForm({
           <Button type="button" variant="outline" onClick={() => router.back()} disabled={isLoading}>
             Cancel
           </Button>
-          <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode && !isEmployeeRole) || (isEmployeeRole && !form.formState.isDirty )}>
+          <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode && !isEmployeeRoleActing) || (isEmployeeRoleActing && !form.formState.isDirty )}>
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />)
@@ -651,5 +684,3 @@ export function EmployeeForm({
     </Form>
   );
 }
-
-    

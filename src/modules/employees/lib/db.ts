@@ -2,6 +2,7 @@
 import pool from '@/lib/db';
 import type { Employee, EmployeeFormData, Gender } from '@/modules/employees/types';
 import { initializeEmployeeBalancesForAllTypes } from '@/modules/leave/lib/db';
+import type { UserRole } from '@/modules/auth/types'; // Import UserRole
 
 // Case-insensitive UUID regex
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -25,6 +26,9 @@ function mapRowToEmployee(row: any): Employee {
         reportingManagerId: row.reporting_manager_id ?? null,
         workLocation: row.work_location ?? undefined,
         employmentType: row.employment_type as Employee['employmentType'] ?? 'Full-time',
+        // Role is not directly stored on the employees table in this schema version,
+        // it's on the users table. If needed here, a JOIN would be required.
+        // role: row.role as UserRole ?? 'Employee', 
     };
 }
 
@@ -96,7 +100,8 @@ async function generateNextEmployeeId(tenantId: string, client: any): Promise<st
 }
 
 
-export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employeeId'> & { tenantId: string, userId: string }): Promise<Employee> {
+// This internal function now omits `role` as it's handled during user creation.
+export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employeeId' | 'role'> & { tenantId: string, userId: string }): Promise<Employee> {
     if (!uuidRegex.test(employeeData.tenantId)) {
         console.error(`[DB addEmployee] Invalid tenantId format: ${employeeData.tenantId}`);
         throw new Error("Invalid tenant identifier format.");
@@ -129,7 +134,7 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
             employeeData.position,
             employeeData.department,
             employeeData.hireDate,
-            employeeData.status,
+            employeeData.status || 'Active', // Default status if not provided
             employeeData.dateOfBirth || null,
             employeeData.reportingManagerId || null,
             employeeData.workLocation || null,
@@ -138,7 +143,6 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
         const res = await client.query(query, values);
         const newEmployee = mapRowToEmployee(res.rows[0]);
 
-        // Initialize leave balances for the new employee using their PK (newEmployee.id)
         await initializeEmployeeBalancesForAllTypes(newEmployee.tenantId, newEmployee.id, client);
         console.log(`[DB addEmployee] Initialized leave balances for new employee ${newEmployee.id}`);
 
@@ -164,6 +168,7 @@ export async function addEmployee(employeeData: Omit<EmployeeFormData, 'employee
     }
 }
 
+// This function expects formData to potentially include a role, but it will be ignored for employees table update
 export async function updateEmployee(id: string, tenantId: string, updates: Partial<EmployeeFormData>): Promise<Employee | undefined> {
     if (!uuidRegex.test(id)) {
         console.error(`[DB updateEmployee] Invalid employee ID (PK) format: ${id}`);
@@ -181,9 +186,10 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
         name: 'name', email: 'email', phone: 'phone', gender: 'gender', position: 'position', department: 'department',
         hireDate: 'hire_date', status: 'status', dateOfBirth: 'date_of_birth',
         reportingManagerId: 'reporting_manager_id', workLocation: 'work_location', employmentType: 'employment_type',
+        // Role is NOT in employees table, so it's ignored here. Role updates happen on users table.
     };
     for (const key in updates) {
-        if (key === 'tenantId' || key === 'employeeId' || key === 'userId') continue;
+        if (key === 'tenantId' || key === 'employeeId' || key === 'userId' || key === 'role') continue; // Skip role here
         if (Object.prototype.hasOwnProperty.call(updates, key)) {
             const dbKey = columnMap[key as keyof EmployeeFormData];
             if (dbKey) {
