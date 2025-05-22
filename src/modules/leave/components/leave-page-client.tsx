@@ -1,11 +1,12 @@
+
 // src/modules/leave/components/leave-page-client.tsx
 "use client";
 
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar, PlusCircle, ListChecks, Settings, LandPlot, ArrowLeft } from "lucide-react"; // Added ArrowLeft
-import { Button } from "@/components/ui/button"; // Added missing Button import
+import { Calendar, PlusCircle, ListChecks, Settings, LandPlot, ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { LeaveRequestForm } from "@/modules/leave/components/leave-request-form";
 import { LeaveRequestList } from "@/modules/leave/components/leave-request-list";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +18,7 @@ import type { LeaveType, LeaveRequest, LeaveBalance, Holiday } from "@/modules/l
 import { getHolidaysAction, getLeaveRequests, getLeaveTypes, getEmployeeLeaveBalances } from '@/modules/leave/actions';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from '@/lib/utils';
-import { useSearchParams, useRouter } from "next/navigation"; // Import useSearchParams and useRouter
+import { useSearchParams, useRouter } from "next/navigation";
 
 interface LeavePageClientProps {
   userId: string | null;
@@ -30,7 +31,6 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // Determine the target employeeId: from query param first, then from logged-in user prop
   const employeeIdFromQuery = searchParams.get('employeeId');
   const targetUserId = employeeIdFromQuery || initialUserId;
 
@@ -58,7 +58,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
       try {
           const [typesData, allReqData, myReqData, balancesData, holidaysData] = await Promise.all([
               getLeaveTypes(),
-              isAdmin && !employeeIdFromQuery ? getLeaveRequests() : Promise.resolve([]), // Only fetch all if admin and no specific employee queried
+              isAdmin && !employeeIdFromQuery ? getLeaveRequests() : Promise.resolve([]),
               getLeaveRequests({ employeeId: targetUserId }),
               getEmployeeLeaveBalances(targetUserId),
               getHolidaysAction(),
@@ -69,14 +69,12 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
           setMyBalances(balancesData);
           setHolidays(holidaysData);
 
-          // If viewing specific employee's leave, try to get their name
           if (employeeIdFromQuery && myReqData.length > 0 && myReqData[0].employeeName) {
              setCurrentEmployeeName(myReqData[0].employeeName);
           } else if (employeeIdFromQuery) {
-             // If no requests, name might not be available directly, could add another fetch or rely on context
              setCurrentEmployeeName(`Employee ID: ${employeeIdFromQuery}`);
           } else {
-             setCurrentEmployeeName(null); // Viewing own leave or admin general view
+             setCurrentEmployeeName(null);
           }
 
       } catch (err: any) {
@@ -113,23 +111,6 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
    const handleLeaveRequestUpdated = () => refetchData();
    const handleLeaveTypeUpdated = () => refetchData();
    const handleHolidayUpdated = () => refetchData();
-
-   const leaveTypeNameMap = React.useMemo(() => {
-     const map = new Map<string, string>();
-     leaveTypes.forEach(lt => map.set(lt.id, lt.name));
-     return map;
-   }, [leaveTypes]);
-
-    if (!targetUserId || !tenantDomain) {
-      return (
-          <div className="flex flex-col gap-6 items-center justify-center min-h-[400px]">
-               <Alert variant="destructive" className="max-w-md">
-                  <AlertTitle>Initialization Error</AlertTitle>
-                  <AlertDescription>{fetchError || "Could not load user or tenant context."}</AlertDescription>
-              </Alert>
-          </div>
-      );
-    }
 
   const pageTitle = employeeIdFromQuery
     ? currentEmployeeName
@@ -183,7 +164,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                     {myBalances.length > 0 ? (
                        myBalances.map(balance => (
                            <div key={balance.leaveTypeId} className="flex flex-col items-start gap-1 p-3 border rounded-md bg-secondary/50">
-                               <span className="font-medium text-sm">{balance.leaveTypeName || leaveTypeNameMap.get(balance.leaveTypeId) || 'Unknown Type'}</span>
+                               <span className="font-medium text-sm">{balance.leaveTypeName}</span> {/* Use balance.leaveTypeName directly */}
                                <Badge variant="outline" className="text-lg">{balance.balance} days</Badge>
                            </div>
                        ))
@@ -197,7 +178,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="leave-tabs">
                  <div className="overflow-x-auto pb-2">
                      <TabsList className="inline-flex h-auto w-max sm:w-full sm:grid sm:grid-cols-2 md:grid-cols-4">
-                       {(!employeeIdFromQuery || employeeIdFromQuery === initialUserId) && ( // Only show "Request Leave" if viewing own leave or general
+                       {(!employeeIdFromQuery || employeeIdFromQuery === initialUserId) && (
                            <TabsTrigger value="request" className="flex items-center gap-1">
                                 <PlusCircle className="h-4 w-4"/> Request Leave
                             </TabsTrigger>
@@ -206,7 +187,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                            <ListChecks className="h-4 w-4"/>
                            {employeeIdFromQuery && currentEmployeeName ? `${currentEmployeeName.startsWith('Employee ID:') ? 'Requests' : currentEmployeeName + "'s Requests"}` : 'My Requests'}
                         </TabsTrigger>
-                       {isAdmin && !employeeIdFromQuery && ( // Only show "Manage Requests" if admin AND not viewing specific employee's leave
+                       {isAdmin && !employeeIdFromQuery && (
                             <TabsTrigger value="all-requests" className="flex items-center gap-1">
                                <ListChecks className="h-4 w-4"/> Manage Requests
                             </TabsTrigger>
@@ -246,8 +227,8 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                     <LeaveRequestList
                         requests={myRequests}
                         leaveTypes={leaveTypes}
-                        isAdminView={isAdmin && employeeIdFromQuery === initialUserId} // Admin can manage their own requests too if viewing their page
-                        currentUserId={initialUserId} // Logged-in user's ID for cancel action
+                        isAdminView={isAdmin && employeeIdFromQuery === initialUserId}
+                        currentUserId={initialUserId}
                         tenantDomain={tenantDomain}
                         onUpdate={handleLeaveRequestUpdated}
                     />

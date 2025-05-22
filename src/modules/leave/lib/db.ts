@@ -76,11 +76,15 @@ export async function addLeaveType(typeData: Omit<LeaveType, 'id'>): Promise<Lea
         typeData.accrualRate ?? 0,
     ];
     try {
+        await client.query('BEGIN');
         const res = await client.query(query, values);
         const newType = mapRowToLeaveType(res.rows[0]);
-        await initializeBalancesForNewType(newType.tenantId, newType.id, newType.defaultBalance ?? 0);
+        // Initialize balances for all existing employees of this tenant for this new leave type
+        await initializeBalancesForNewType(newType.tenantId, newType.id, newType.defaultBalance ?? 0, client);
+        await client.query('COMMIT');
         return newType;
     } catch (err: any) {
+        await client.query('ROLLBACK');
         console.error('Error adding leave type:', err);
         if (err.code === '23505' && err.constraint === 'leave_types_tenant_id_name_key') {
              throw new Error(`Leave type name "${typeData.name}" already exists for this tenant.`);
@@ -160,15 +164,18 @@ export async function deleteLeaveType(id: string, tenantId: string): Promise<boo
     try {
         const checkUsageQuery = `
             SELECT EXISTS (SELECT 1 FROM leave_requests WHERE leave_type_id = $1 AND tenant_id = $2) AS used_in_requests,
-                   EXISTS (SELECT 1 FROM leave_balances WHERE leave_type_id = $1 AND tenant_id = $2) AS used_in_balances;
+                   EXISTS (SELECT 1 FROM leave_balances WHERE leave_type_id = $1 AND tenant_id = $2 AND balance != 0) AS used_in_balances_with_value;
         `;
         const usageRes = await client.query(checkUsageQuery, [id, tenantId]);
-        if (usageRes.rows[0].used_in_requests || usageRes.rows[0].used_in_balances) {
-            console.warn(`Attempted to delete leave type ${id} for tenant ${tenantId} which is currently in use.`);
-            throw new Error('Leave type cannot be deleted because it is currently in use.');
+        if (usageRes.rows[0].used_in_requests || usageRes.rows[0].used_in_balances_with_value) {
+            console.warn(`Attempted to delete leave type ${id} for tenant ${tenantId} which is currently in use or has non-zero balances.`);
+            throw new Error('Leave type cannot be deleted because it is in use or has associated balances.');
         }
+        // If not in use, proceed with deletion
         const deleteQuery = 'DELETE FROM leave_types WHERE id = $1 AND tenant_id = $2';
         const res = await client.query(deleteQuery, [id, tenantId]);
+        // Also delete any zero-balance records for this type
+        await client.query('DELETE FROM leave_balances WHERE leave_type_id = $1 AND tenant_id = $2 AND balance = 0', [id, tenantId]);
         return res.rowCount > 0;
     } catch (err) {
         console.error(`Error deleting leave type ${id} for tenant ${tenantId}:`, err);
@@ -194,7 +201,7 @@ function mapRowToLeaveRequest(row: any): LeaveRequest {
         approverId: row.approver_id ?? undefined,
         approvalDate: row.approval_date ? new Date(row.approval_date).toISOString() : undefined,
         comments: row.comments ?? undefined,
-        attachmentUrl: row.attachment_url ?? undefined, // Added
+        attachmentUrl: row.attachment_url ?? undefined,
     };
 }
 
@@ -284,42 +291,54 @@ export async function addLeaveRequest(requestData: Omit<LeaveRequest, 'id' | 're
         throw new Error("Invalid leave type identifier.");
     }
     const client = await pool.connect();
-    const leaveType = await getLeaveTypeById(requestData.leaveTypeId, requestData.tenantId);
-    if (!leaveType) throw new Error("Invalid leaveTypeId for this tenant");
-
-    const requestedDays = differenceInDays(new Date(requestData.endDate), new Date(requestData.startDate)) + 1;
-    if (leaveType.requiresApproval) {
-         const currentBalance = await getSpecificLeaveBalance(requestData.tenantId, requestData.employeeId, requestData.leaveTypeId);
-         if (currentBalance === undefined || currentBalance < requestedDays) {
-              throw new Error('Insufficient leave balance.');
-         }
-    }
-    const initialStatus: LeaveRequestStatus = leaveType.requiresApproval ? 'Pending' : 'Approved';
-
-    const query = `
-        INSERT INTO leave_requests (tenant_id, employee_id, leave_type_id, start_date, end_date, reason, status, attachment_url, request_date)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-        RETURNING id;
-    `;
-    const values = [
-        requestData.tenantId,
-        requestData.employeeId,
-        requestData.leaveTypeId,
-        requestData.startDate,
-        requestData.endDate,
-        requestData.reason,
-        initialStatus,
-        requestData.attachmentUrl || null, // Added
-    ];
     try {
         await client.query('BEGIN');
+        const leaveType = await getLeaveTypeById(requestData.leaveTypeId, requestData.tenantId); // Use client from this transaction? No, new connection is fine.
+        if (!leaveType) {
+            await client.query('ROLLBACK');
+            throw new Error("Invalid leaveTypeId for this tenant");
+        }
+
+        const requestedDays = differenceInDays(new Date(requestData.endDate), new Date(requestData.startDate)) + 1;
+        if (requestedDays <= 0) {
+            await client.query('ROLLBACK');
+            throw new Error('End date must be after start date.');
+        }
+
+        const currentBalance = await getSpecificLeaveBalance(requestData.tenantId, requestData.employeeId, requestData.leaveTypeId, client);
+        if (currentBalance === undefined || currentBalance < requestedDays) {
+            await client.query('ROLLBACK');
+            throw new Error('Insufficient leave balance.');
+        }
+
+        const initialStatus: LeaveRequestStatus = leaveType.requiresApproval ? 'Pending' : 'Approved';
+
+        const query = `
+            INSERT INTO leave_requests (tenant_id, employee_id, leave_type_id, start_date, end_date, reason, status, attachment_url, request_date)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+            RETURNING id;
+        `;
+        const values = [
+            requestData.tenantId,
+            requestData.employeeId,
+            requestData.leaveTypeId,
+            requestData.startDate,
+            requestData.endDate,
+            requestData.reason,
+            initialStatus,
+            requestData.attachmentUrl || null,
+        ];
+        
         const res = await client.query(query, values);
         const newId = res.rows[0].id;
+
         if (initialStatus === 'Approved') {
+             console.log(`[DB addLeaveRequest] Leave type does not require approval. Deducting ${requestedDays} days.`);
              await adjustLeaveBalance(requestData.tenantId, requestData.employeeId, requestData.leaveTypeId, -requestedDays, client);
         }
+        
         await client.query('COMMIT');
-        const newRequest = await getLeaveRequestById(newId, requestData.tenantId);
+        const newRequest = await getLeaveRequestById(newId, requestData.tenantId); // Use a new client connection for this read
         if (!newRequest) throw new Error("Failed to retrieve newly added leave request.");
         return newRequest;
     } catch (err) {
@@ -338,46 +357,57 @@ export async function updateLeaveRequestStatus(
     comments?: string,
     approverId?: string
 ): Promise<LeaveRequest | undefined> {
-    if (!id || !uuidRegex.test(id)) {
-        console.error(`[DB updateLeaveRequestStatus] Invalid leave request ID format: ${id}`);
-        throw new Error("Invalid leave request identifier.");
-    }
-    if (!tenantId || !uuidRegex.test(tenantId)) {
-        console.error(`[DB updateLeaveRequestStatus] Invalid tenantId format: ${tenantId}`);
-        throw new Error("Invalid tenant identifier.");
-    }
-    if (approverId && !uuidRegex.test(approverId)) {
-        console.error(`[DB updateLeaveRequestStatus] Invalid approverId format: ${approverId}`);
-        throw new Error("Invalid approver identifier.");
-    }
+    if (!id || !uuidRegex.test(id)) throw new Error("Invalid leave request identifier.");
+    if (!tenantId || !uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
+    if (approverId && !uuidRegex.test(approverId)) throw new Error("Invalid approver identifier.");
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        const currentRequest = await getLeaveRequestById(id, tenantId);
-        if (!currentRequest) {
-            throw new Error('Leave request not found or does not belong to this tenant.');
-        }
+        const currentRequest = await getLeaveRequestById(id, tenantId); // Uses its own client, fine for read
+        if (!currentRequest) throw new Error('Leave request not found.');
+
         const previousStatus = currentRequest.status;
-        if (previousStatus !== 'Pending' && status !== 'Cancelled') {
-             throw new Error(`Cannot change status from ${previousStatus} to ${status}.`);
+        const requestedDays = differenceInDays(new Date(currentRequest.endDate), new Date(currentRequest.startDate)) + 1;
+
+        if (previousStatus === status) {
+            console.warn(`[DB updateLeaveRequestStatus] Request ${id} is already in ${status} state. No update performed.`);
+            await client.query('ROLLBACK'); // No changes needed
+            return currentRequest;
         }
+        
+        // Logic for status transitions and balance adjustments
+        if (previousStatus === 'Pending' && status === 'Approved') {
+            await adjustLeaveBalance(tenantId, currentRequest.employeeId, currentRequest.leaveTypeId, -requestedDays, client);
+        } else if (previousStatus === 'Approved' && (status === 'Rejected' || status === 'Cancelled')) {
+            await adjustLeaveBalance(tenantId, currentRequest.employeeId, currentRequest.leaveTypeId, requestedDays, client); // Credit back
+        } else if (previousStatus !== 'Pending' && status !== 'Cancelled') {
+             // Example: Cannot approve a rejected/cancelled request directly, or re-reject an approved one without cancel.
+            await client.query('ROLLBACK');
+            throw new Error(`Invalid status transition from ${previousStatus} to ${status}.`);
+        }
+
+
         const updateQuery = `
             UPDATE leave_requests
             SET status = $1, comments = $2, approver_id = $3, approval_date = NOW(), updated_at = NOW()
-            WHERE id = $4 AND tenant_id = $5 AND status = 'Pending'
-            RETURNING *;
+            WHERE id = $4 AND tenant_id = $5 
+            RETURNING *; 
         `;
+        // Ensure status is not re-updated if only comments/approver change on already processed request.
+        // This is complex if an admin is just adding comments to an already approved/rejected request.
+        // For simplicity, this query assumes status update is the primary action.
         const updateValues = [status, comments || null, approverId || null, id, tenantId];
         const res = await client.query(updateQuery, updateValues);
+
         if (res.rowCount === 0) {
-             throw new Error('Leave request could not be updated (status might have changed or tenant mismatch).');
+            await client.query('ROLLBACK');
+            // This might happen if the status was not 'Pending' and we tried an invalid transition before, or concurrent update.
+            throw new Error('Leave request could not be updated (status might have changed or tenant mismatch).');
         }
-        const requestedDays = differenceInDays(new Date(currentRequest.endDate), new Date(currentRequest.startDate)) + 1;
-        if (previousStatus === 'Pending' && status === 'Approved') {
-            await adjustLeaveBalance(tenantId, currentRequest.employeeId, currentRequest.leaveTypeId, -requestedDays, client);
-        }
+        
         await client.query('COMMIT');
-        return await getLeaveRequestById(id, tenantId);
+        return await getLeaveRequestById(id, tenantId); // Re-fetch with potentially new client
     } catch (err) {
         await client.query('ROLLBACK');
         console.error(`Error updating status for leave request ${id} (tenant ${tenantId}):`, err);
@@ -388,43 +418,43 @@ export async function updateLeaveRequestStatus(
 }
 
 export async function cancelLeaveRequest(id: string, tenantId: string, userId: string): Promise<LeaveRequest | undefined> {
-    if (!id || !uuidRegex.test(id)) {
-        console.error(`[DB cancelLeaveRequest] Invalid leave request ID format: ${id}`);
-        throw new Error("Invalid leave request identifier.");
-    }
-    if (!tenantId || !uuidRegex.test(tenantId)) {
-        console.error(`[DB cancelLeaveRequest] Invalid tenantId format: ${tenantId}`);
-        throw new Error("Invalid tenant identifier.");
-    }
-    if (!userId || !uuidRegex.test(userId)) {
-        console.error(`[DB cancelLeaveRequest] Invalid userId format: ${userId}`);
-        throw new Error("Invalid user identifier.");
-    }
+    if (!id || !uuidRegex.test(id)) throw new Error("Invalid leave request identifier.");
+    if (!tenantId || !uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
+    if (!userId || !uuidRegex.test(userId)) throw new Error("Invalid user identifier.");
+
      const client = await pool.connect();
      try {
-        const request = await getLeaveRequestById(id, tenantId);
-        if (!request) {
-             throw new Error('Leave request not found or does not belong to this tenant.');
+        await client.query('BEGIN');
+        const request = await getLeaveRequestById(id, tenantId); // Uses its own client
+        if (!request) throw new Error('Leave request not found or does not belong to this tenant.');
+        if (request.employeeId !== userId) throw new Error('You are not authorized to cancel this request.');
+        
+        const previousStatus = request.status;
+        if (previousStatus === 'Cancelled' || previousStatus === 'Rejected') {
+            await client.query('ROLLBACK');
+            throw new Error(`Request is already ${previousStatus} and cannot be cancelled again.`);
         }
-        if (request.employeeId !== userId) {
-             throw new Error('You are not authorized to cancel this request.');
+
+        const requestedDays = differenceInDays(new Date(request.endDate), new Date(request.startDate)) + 1;
+        if (previousStatus === 'Approved') {
+             await adjustLeaveBalance(tenantId, request.employeeId, request.leaveTypeId, requestedDays, client); // Credit back
         }
-        if (request.status !== 'Pending') {
-             throw new Error('Only pending requests can be cancelled.');
-        }
+
          const updateQuery = `
             UPDATE leave_requests
-            SET status = 'Cancelled', comments = $1, approval_date = NOW(), updated_at = NOW()
-            WHERE id = $2 AND tenant_id = $3 AND status = 'Pending'
+            SET status = 'Cancelled', comments = COALESCE(comments || E'\\nCancelled by user.', 'Cancelled by user.'), approval_date = NOW(), updated_at = NOW(), approver_id = $1
+            WHERE id = $2 AND tenant_id = $3
             RETURNING *;
          `;
-         const cancelComment = `Cancelled by user ${userId}.`;
-         const res = await client.query(updateQuery, [cancelComment, id, tenantId]);
+         const res = await client.query(updateQuery, [userId, id, tenantId]);
          if (res.rowCount === 0) {
-            throw new Error('Leave request could not be cancelled (status might have changed or tenant mismatch).');
+            await client.query('ROLLBACK');
+            throw new Error('Leave request could not be cancelled (it might have been processed by an admin).');
          }
-         return await getLeaveRequestById(id, tenantId);
+         await client.query('COMMIT');
+         return await getLeaveRequestById(id, tenantId); // Re-fetch
      } catch (err) {
+         await client.query('ROLLBACK');
          console.error(`Error cancelling leave request ${id} (tenant ${tenantId}):`, err);
          throw err;
      } finally {
@@ -432,42 +462,33 @@ export async function cancelLeaveRequest(id: string, tenantId: string, userId: s
      }
 }
 
-async function initializeBalancesForNewType(tenantId: string, leaveTypeId: string, defaultBalance: number) {
-    if (!tenantId || !uuidRegex.test(tenantId)) {
-        console.error(`[DB initializeBalancesForNewType] Invalid tenantId format: ${tenantId}`);
-        throw new Error("Invalid tenant identifier.");
-    }
-    if (!leaveTypeId || !uuidRegex.test(leaveTypeId)) {
-        console.error(`[DB initializeBalancesForNewType] Invalid leaveTypeId format: ${leaveTypeId}`);
-        throw new Error("Invalid leave type identifier.");
-    }
-    const client = await pool.connect();
+async function initializeBalancesForNewType(tenantId: string, leaveTypeId: string, defaultBalance: number, client?: any) {
+    if (!tenantId || !uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
+    if (!leaveTypeId || !uuidRegex.test(leaveTypeId)) throw new Error("Invalid leave type identifier.");
+    
+    const conn = client || await pool.connect();
     const query = `
         INSERT INTO leave_balances (tenant_id, employee_id, leave_type_id, balance, last_updated)
-        SELECT tenant_id, id, $1, $2, NOW()
-        FROM employees
-        WHERE tenant_id = $3
+        SELECT e.tenant_id, e.id, $1, $2, NOW()
+        FROM employees e
+        WHERE e.tenant_id = $3
         ON CONFLICT (tenant_id, employee_id, leave_type_id) DO NOTHING;
     `;
     try {
-        await client.query(query, [leaveTypeId, defaultBalance, tenantId]);
+        await conn.query(query, [leaveTypeId, defaultBalance, tenantId]);
         console.log(`Initialized balances for new leave type ${leaveTypeId} for tenant ${tenantId}`);
     } catch (err) {
         console.error(`Error initializing balances for new type ${leaveTypeId} (tenant ${tenantId}):`, err);
+        if (!client) throw err; // Only throw if we created the connection here
     } finally {
-        client.release();
+        if (!client) conn.release();
     }
 }
 
 async function initializeEmployeeBalances(tenantId: string, employeeId: string, client?: any): Promise<void> {
-    if (!tenantId || !uuidRegex.test(tenantId)) {
-        console.error(`[DB initializeEmployeeBalances] Invalid tenantId format: ${tenantId}`);
-        throw new Error("Invalid tenant identifier.");
-    }
-    if (!employeeId || !uuidRegex.test(employeeId)) {
-        console.error(`[DB initializeEmployeeBalances] Invalid employeeId format: ${employeeId}`);
-        throw new Error("Invalid employee identifier.");
-    }
+    if (!tenantId || !uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
+    if (!employeeId || !uuidRegex.test(employeeId)) throw new Error("Invalid employee identifier.");
+    
     const conn = client || await pool.connect();
     try {
         const empCheck = await conn.query('SELECT 1 FROM employees WHERE id = $1 AND tenant_id = $2', [employeeId, tenantId]);
@@ -475,7 +496,7 @@ async function initializeEmployeeBalances(tenantId: string, employeeId: string, 
             console.warn(`[DB initializeEmployeeBalances] Employee ${employeeId} not found for tenant ${tenantId}. Skipping balance initialization.`);
             return;
         }
-        const leaveTypes = await getAllLeaveTypes(tenantId);
+        const leaveTypes = await getAllLeaveTypes(tenantId); // Uses its own client
         const query = `
             INSERT INTO leave_balances (tenant_id, employee_id, leave_type_id, balance, last_updated)
             VALUES ($1, $2, $3, $4, NOW())
@@ -487,21 +508,16 @@ async function initializeEmployeeBalances(tenantId: string, employeeId: string, 
         console.log(`Ensured balances exist for employee ${employeeId} in tenant ${tenantId}`);
     } catch (err) {
         console.error(`Error ensuring balances for employee ${employeeId} (tenant ${tenantId}):`, err);
-        throw err;
+        if (!client) throw err;
     } finally {
         if (!client) conn.release();
     }
 }
 
 export async function getLeaveBalancesForEmployee(tenantId: string, employeeId: string): Promise<LeaveBalance[]> {
-    if (!tenantId || !uuidRegex.test(tenantId)) {
-        console.error(`[DB getLeaveBalancesForEmployee] Invalid tenantId format: ${tenantId}`);
-        throw new Error("Invalid tenant identifier.");
-    }
-    if (!employeeId || !uuidRegex.test(employeeId)) {
-        console.error(`[DB getLeaveBalancesForEmployee] Invalid employeeId format: ${employeeId}`);
-        throw new Error("Invalid employee identifier.");
-    }
+    if (!tenantId || !uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
+    if (!employeeId || !uuidRegex.test(employeeId)) throw new Error("Invalid employee identifier.");
+    
     const client = await pool.connect();
     try {
         await initializeEmployeeBalances(tenantId, employeeId, client);
@@ -517,7 +533,7 @@ export async function getLeaveBalancesForEmployee(tenantId: string, employeeId: 
             tenantId: row.tenant_id,
             employeeId: row.employee_id,
             leaveTypeId: row.leave_type_id,
-            leaveTypeName: row.leave_type_name,
+            leaveTypeName: row.leave_type_name, // This should now be populated
             balance: parseFloat(row.balance),
             lastUpdated: new Date(row.last_updated).toISOString(),
         }));
@@ -529,49 +545,36 @@ export async function getLeaveBalancesForEmployee(tenantId: string, employeeId: 
     }
 }
 
-async function getSpecificLeaveBalance(tenantId: string, employeeId: string, leaveTypeId: string): Promise<number | undefined> {
-     if (!tenantId || !uuidRegex.test(tenantId)) {
-        console.error(`[DB getSpecificLeaveBalance] Invalid tenantId format: ${tenantId}`);
-        throw new Error("Invalid tenant identifier.");
-    }
-    if (!employeeId || !uuidRegex.test(employeeId)) {
-        console.error(`[DB getSpecificLeaveBalance] Invalid employeeId format: ${employeeId}`);
-        throw new Error("Invalid employee identifier.");
-    }
-    if (!leaveTypeId || !uuidRegex.test(leaveTypeId)) {
-        console.error(`[DB getSpecificLeaveBalance] Invalid leaveTypeId format: ${leaveTypeId}`);
-        throw new Error("Invalid leave type identifier.");
-    }
-    const client = await pool.connect();
+async function getSpecificLeaveBalance(tenantId: string, employeeId: string, leaveTypeId: string, client?: any): Promise<number | undefined> {
+    if (!tenantId || !uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
+    if (!employeeId || !uuidRegex.test(employeeId)) throw new Error("Invalid employee identifier.");
+    if (!leaveTypeId || !uuidRegex.test(leaveTypeId)) throw new Error("Invalid leave type identifier.");
+    
+    const conn = client || await pool.connect();
     try {
-        await initializeEmployeeBalances(tenantId, employeeId, client);
+        await initializeEmployeeBalances(tenantId, employeeId, conn); // Ensure balance record exists
         const query = `SELECT balance FROM leave_balances WHERE tenant_id = $1 AND employee_id = $2 AND leave_type_id = $3`;
-        const res = await client.query(query, [tenantId, employeeId, leaveTypeId]);
+        const res = await conn.query(query, [tenantId, employeeId, leaveTypeId]);
         if (res.rows.length > 0) {
             return parseFloat(res.rows[0].balance);
         }
-        return undefined;
+        // Should not happen if initializeEmployeeBalances worked, but as a fallback
+        const leaveType = await getLeaveTypeById(leaveTypeId, tenantId); // Uses its own client
+        return leaveType?.defaultBalance ?? 0;
     } catch (err) {
         console.error(`Error fetching specific balance for tenant ${tenantId}, employee ${employeeId}, type ${leaveTypeId}:`, err);
-        throw err;
+        if (!client) throw err;
+        return undefined; // Indicate error if client was provided
     } finally {
-        client.release();
+        if (!client) conn.release();
     }
 }
 
 async function adjustLeaveBalance(tenantId: string, employeeId: string, leaveTypeId: string, amount: number, client?: any): Promise<void> {
-    if (!tenantId || !uuidRegex.test(tenantId)) {
-        console.error(`[DB adjustLeaveBalance] Invalid tenantId format: ${tenantId}`);
-        throw new Error("Invalid tenant identifier.");
-    }
-    if (!employeeId || !uuidRegex.test(employeeId)) {
-        console.error(`[DB adjustLeaveBalance] Invalid employeeId format: ${employeeId}`);
-        throw new Error("Invalid employee identifier.");
-    }
-    if (!leaveTypeId || !uuidRegex.test(leaveTypeId)) {
-        console.error(`[DB adjustLeaveBalance] Invalid leaveTypeId format: ${leaveTypeId}`);
-        throw new Error("Invalid leave type identifier.");
-    }
+    if (!tenantId || !uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
+    if (!employeeId || !uuidRegex.test(employeeId)) throw new Error("Invalid employee identifier.");
+    if (!leaveTypeId || !uuidRegex.test(leaveTypeId)) throw new Error("Invalid leave type identifier.");
+    
     const conn = client || await pool.connect();
     const query = `
         UPDATE leave_balances
@@ -579,19 +582,19 @@ async function adjustLeaveBalance(tenantId: string, employeeId: string, leaveTyp
         WHERE tenant_id = $2 AND employee_id = $3 AND leave_type_id = $4;
     `;
     try {
+        // Ensure the balance record exists before trying to update it.
+        await initializeEmployeeBalances(tenantId, employeeId, conn);
+        
         const res = await conn.query(query, [amount, tenantId, employeeId, leaveTypeId]);
          if (res.rowCount === 0) {
-             console.warn(`Balance record not found for tenant ${tenantId}, employee ${employeeId}, type ${leaveTypeId} during adjustment. Attempting init.`);
-             await initializeEmployeeBalances(tenantId, employeeId, conn);
-             const retryRes = await conn.query(query, [amount, tenantId, employeeId, leaveTypeId]);
-             if (retryRes.rowCount === 0) {
-                 throw new Error(`Failed to adjust balance even after initialization attempt for tenant ${tenantId}, employee ${employeeId}, type ${leaveTypeId}.`);
-             }
+             // This case should be less likely now due to prior initialization
+             console.warn(`Balance record not found for tenant ${tenantId}, employee ${employeeId}, type ${leaveTypeId} during adjustment, even after init. This is unexpected.`);
+             throw new Error(`Failed to adjust balance for tenant ${tenantId}, employee ${employeeId}, type ${leaveTypeId}. Balance record missing.`);
          }
         console.log(`Adjusted balance for tenant ${tenantId}, employee ${employeeId}, type ${leaveTypeId} by ${amount}.`);
     } catch (err) {
         console.error(`Error adjusting balance for tenant ${tenantId}, employee ${employeeId}, type ${leaveTypeId}:`, err);
-        throw err;
+        if (!client) throw err; // Only throw if we created the connection here
     } finally {
         if (!client) conn.release();
     }

@@ -37,9 +37,9 @@ export interface LeaveRequest {
 // This schema defines the complete data structure including server-added context (tenantId, employeeId)
 // and ensures all IDs are validated as UUIDs.
 export const leaveRequestSchema = z.object({
-  tenantId: z.string().uuid("Invalid tenant identifier."), // Added and validated as UUID
-  employeeId: z.string().uuid("Invalid employee identifier."), // Validated as UUID
-  leaveTypeId: z.string().uuid("Leave type must be a valid selection."), // Validated as UUID
+  tenantId: z.string().uuid("Invalid tenant identifier."),
+  employeeId: z.string().uuid("Invalid employee identifier."),
+  leaveTypeId: z.string().uuid("Leave type must be a valid selection."),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date must be in YYYY-MM-DD format"),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format"),
   reason: z.string().min(5, "Reason must be at least 5 characters").max(200, "Reason cannot exceed 200 characters"),
@@ -63,11 +63,11 @@ export type LeaveRequestFormData = z.infer<typeof refinedLeaveRequestSchema>;
 
 // --- Leave Balance ---
 export interface LeaveBalance {
-    tenantId: string; // Add tenant ID
+    tenantId: string;
     employeeId: string;
     leaveTypeId: string;
-    leaveTypeName?: string; // Optional: Name for display
-    balance: number; // e.g., number of days or hours
+    leaveTypeName: string; // Made non-optional as it should always be fetched
+    balance: number;
     lastUpdated: string; // ISO string
 }
 
