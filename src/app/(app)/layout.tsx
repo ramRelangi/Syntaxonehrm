@@ -12,7 +12,7 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarTrigger,
-  SidebarInset, // Ensure SidebarInset is imported
+  SidebarInset,
 } from '@/components/ui/sidebar';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Home, Users, FileText, Briefcase, Calendar, BarChart2, LogOut, UploadCloud, Settings, Mail, UserCog } from 'lucide-react';
@@ -36,21 +36,18 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
   const { toast } = useToast();
   const isMobile = useIsMobile();
 
-  // Simulate user data - replace with actual data from session/context
   const user = {
-    name: userId || 'User', // Use userId if available, fallback to 'User'
-    email: 'user@example.com', // Placeholder, ideally from session
+    name: userId || 'User',
+    email: 'user@example.com',
     initials: userId ? userId.substring(0, 1).toUpperCase() : 'U',
-    avatarUrl: '', // Placeholder
+    avatarUrl: '',
   };
   console.log(`[AppLayout] Rendering. UserRole: ${userRole}, UserID: ${userId}, TenantDomain: ${tenantDomain}`);
 
-
   const handleLogout = async () => {
     try {
-      await logoutAction(); // Server action handles redirect
+      await logoutAction();
       toast({ title: "Logged Out", description: "You have been successfully logged out." });
-      // No client-side redirect needed here if action handles it.
     } catch (error) {
       console.error("Logout failed:", error);
       toast({ title: "Logout Failed", description: "Could not log out. Please try again.", variant: "destructive" });
@@ -70,10 +67,8 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
 
   let employeeLink;
   if (userRole === 'Employee' && userId) {
-    // For employee role, the "My Profile" link uses their userId.
     employeeLink = { href: `/${tenantDomain}/employees/${userId}`, label: 'My Profile', icon: UserCog, roles: ['Employee'] };
   } else {
-    // For Admin/Manager, "Employees" links to the general employee list.
     employeeLink = { href: `/${tenantDomain}/employees`, label: 'Employees', icon: Users, roles: ['Admin', 'Manager'] };
   }
 
@@ -81,13 +76,11 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
     ...baseNavItems.filter(item => item.roles.includes(userRole || '')),
   ];
 
-  // Insert employeeLink after Dashboard if it's applicable and Dashboard exists
   if (employeeLink && employeeLink.roles.includes(userRole || '')) {
       const dashboardIndex = navItems.findIndex(item => item.label === 'Dashboard');
       if (dashboardIndex !== -1) {
           navItems.splice(dashboardIndex + 1, 0, employeeLink);
       } else {
-          // If dashboard isn't shown for some reason, add it to the beginning
           navItems.unshift(employeeLink);
       }
   }
@@ -166,14 +159,12 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
             </SidebarFooter>
         </Sidebar>
 
-        {/* Modified SidebarInset to be a flex column */}
         <SidebarInset className="flex-1 overflow-y-auto flex flex-col">
               <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4 md:hidden">
                 <SidebarTrigger />
                  <h1 className="flex-1 text-lg font-semibold">{tenantDomain || 'SyntaxHive Hrm'}</h1>
               </header>
-              {/* Main content area will take remaining space and scroll if needed */}
-            <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full">
+            <main className="flex-1 p-4 md:p-6 max-w-screen-2xl mx-auto w-full">
                  {children}
             </main>
         </SidebarInset>
