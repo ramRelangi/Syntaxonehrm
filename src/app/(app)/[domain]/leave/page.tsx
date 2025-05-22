@@ -5,6 +5,7 @@ import { getSessionData, getEmployeeProfileForCurrentUser } from '@/modules/auth
 import dynamic from 'next/dynamic';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Gender } from '@/modules/employees/types'; // Import Gender type
+import type { UserRole } from '@/modules/auth/types'; // Import UserRole type
 
 const LeavePageClient = dynamic(() => import('@/modules/leave/components/leave-page-client'), {
   loading: () => (
@@ -25,7 +26,7 @@ interface TenantLeavePageProps {
 export default async function TenantLeavePage({ params }: TenantLeavePageProps) {
   const session = await getSessionData();
 
-  if (!session?.userId || !session.tenantId || !session.tenantDomain) {
+  if (!session?.userId || !session.tenantId || !session.tenantDomain || !session.userRole) {
     const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
     const protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http:';
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `http://localhost:9002`;
@@ -41,8 +42,7 @@ export default async function TenantLeavePage({ params }: TenantLeavePageProps) 
     redirect(loginUrl);
   }
 
-  const isAdmin = session.userRole === 'Admin';
-  let employeeGender: Gender | undefined = undefined;
+  let employeeGender: Gender | undefined | null = undefined;
 
   // Fetch employee profile to get gender
   try {
@@ -58,9 +58,12 @@ export default async function TenantLeavePage({ params }: TenantLeavePageProps) 
   return (
     <LeavePageClient
       userId={session.userId}
-      isAdmin={isAdmin}
+      isAdmin={session.userRole === 'Admin'} // More specific than isAdminFromSession which might be less direct
+      currentUserRole={session.userRole} // Pass the user's role
       tenantDomain={session.tenantDomain}
       employeeGender={employeeGender} // Pass the gender to the client component
     />
   );
 }
+
+    

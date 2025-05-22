@@ -23,6 +23,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import Link from "next/link";
+import { updateLeaveRequestStatusAction, cancelLeaveRequestAction } from "@/modules/leave/actions"; // Import server actions
 
 const getStatusVariant = (status: LeaveRequestStatus): "default" | "secondary" | "outline" | "destructive" => {
   switch (status) {
@@ -48,12 +49,13 @@ interface LeaveRequestListProps {
   requests: LeaveRequest[];
   leaveTypes: LeaveType[];
   isAdminView?: boolean;
-  currentUserId?: string | null; // Can be null if not logged in or not relevant
-  tenantDomain: string | null; // Added tenantDomain
+  isManagerApprovalView?: boolean; // New prop for manager's approval queue view
+  currentUserId?: string | null;
+  tenantDomain: string | null;
   onUpdate: () => void;
 }
 
-export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, currentUserId, tenantDomain, onUpdate }: LeaveRequestListProps) {
+export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, isManagerApprovalView = false, currentUserId, tenantDomain, onUpdate }: LeaveRequestListProps) {
   const { toast } = useToast();
   const [actionLoading, setActionLoading] = React.useState<Record<string, boolean>>({});
 
@@ -65,27 +67,14 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
 
   const handleStatusUpdate = async (id: string, status: 'Approved' | 'Rejected') => {
      setActionLoading(prev => ({ ...prev, [`${id}-${status}`]: true }));
-     const comments = status === 'Rejected' ? 'Rejected by admin' : 'Approved by admin';
+     const comments = status === 'Rejected' ? 'Rejected by manager/admin' : 'Approved by manager/admin';
 
      try {
-         const response = await fetch(`/api/leave/requests/${id}/status`, {
-             method: 'PATCH',
-             headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ status, comments }),
-         });
+         // Call server action directly
+         const result = await updateLeaveRequestStatusAction(id, status, comments);
 
-         let result: any;
-         let responseText: string | null = null;
-         try {
-            responseText = await response.text();
-             if(responseText) result = JSON.parse(responseText);
-         } catch (e) {
-            if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-            result = {};
-         }
-
-         if (!response.ok) {
-             throw new Error(result?.error || result?.message || `HTTP error! Status: ${response.status}`);
+         if (!result.success) {
+             throw new Error(result.errors?.[0]?.message || `Failed to update request to ${status}`);
          }
 
          toast({
@@ -109,22 +98,10 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
   const handleCancel = async (id: string) => {
      setActionLoading(prev => ({ ...prev, [`${id}-cancel`]: true }));
      try {
-         const response = await fetch(`/api/leave/requests/${id}/cancel`, {
-             method: 'PATCH',
-         });
+         const result = await cancelLeaveRequestAction(id); // Call server action
 
-          let result: any;
-          let responseText: string | null = null;
-          try {
-            responseText = await response.text();
-            if(responseText) result = JSON.parse(responseText);
-          } catch (e) {
-            if (!response.ok) throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-            result = {};
-          }
-
-         if (!response.ok) {
-             throw new Error(result?.error || result?.message || `HTTP error! Status: ${response.status}`);
+         if (!result.success) {
+             throw new Error(result.error || `Could not cancel the request.`);
          }
 
          toast({
@@ -149,13 +126,15 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
       return leaveTypeMap.get(leaveTypeId) || requests.find(r => r.leaveTypeId === leaveTypeId)?.leaveTypeName || 'Unknown Type';
   };
 
+  const showActionButtonsForAdminOrManager = isAdminView || isManagerApprovalView;
+
   return (
      <TooltipProvider>
          <Card className="shadow-sm mt-4">
              <CardHeader>
-                 <CardTitle>{isAdminView ? 'All Leave Requests' : 'My Leave Requests'}</CardTitle>
+                 <CardTitle>{isManagerApprovalView ? 'Requests Pending Your Approval' : (isAdminView ? 'All Leave Requests' : 'My Leave Requests')}</CardTitle>
                  <CardDescription>
-                     {isAdminView ? 'Review and manage employee leave requests.' : 'View your past and pending leave requests.'}
+                     {isManagerApprovalView ? 'Review and action leave requests submitted by your direct reports.' : (isAdminView ? 'Review and manage all employee leave requests.' : 'View your past and pending leave requests.')}
                  </CardDescription>
              </CardHeader>
              <CardContent>
@@ -163,7 +142,7 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                      <Table>
                      <TableHeader>
                          <TableRow>
-                             {isAdminView && <TableHead>Employee</TableHead>}
+                             {(isAdminView || isManagerApprovalView) && <TableHead>Employee</TableHead>}
                              <TableHead>Type</TableHead>
                              <TableHead>Dates</TableHead>
                              <TableHead>Reason</TableHead>
@@ -175,7 +154,7 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                      <TableBody>
                          {requests.length === 0 ? (
                              <TableRow>
-                                 <TableCell colSpan={isAdminView ? 7 : 6} className="h-24 text-center">
+                                 <TableCell colSpan={(isAdminView || isManagerApprovalView) ? 7 : 6} className="h-24 text-center">
                                  No leave requests found.
                                  </TableCell>
                              </TableRow>
@@ -188,7 +167,7 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
 
                            return (
                              <TableRow key={req.id}>
-                                {isAdminView && (
+                                {(isAdminView || isManagerApprovalView) && (
                                     <TableCell>
                                         {tenantDomain && req.employeeId ? (
                                             <Link href={`/${tenantDomain}/employees/${req.employeeId}`} className="text-primary hover:underline flex items-center gap-1">
@@ -231,7 +210,7 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                                     </Badge>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                    {isAdminView && req.status === 'Pending' && (
+                                    {showActionButtonsForAdminOrManager && req.status === 'Pending' && (
                                         <div className="flex gap-1 justify-end">
                                             <Button
                                                 variant="ghost"
@@ -255,7 +234,8 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
                                             </Button>
                                         </div>
                                     )}
-                                    {!isAdminView && req.employeeId === currentUserId && req.status === 'Pending' && (
+                                    {/* User can cancel their own pending request */}
+                                    {!isAdminView && !isManagerApprovalView && req.employeeId === currentUserId && req.status === 'Pending' && (
                                         <AlertDialog>
                                             <AlertDialogTrigger asChild>
                                                 <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={isAnyActionLoading}>
@@ -304,3 +284,5 @@ export function LeaveRequestList({ requests, leaveTypes, isAdminView = false, cu
      </TooltipProvider>
   );
 }
+
+    

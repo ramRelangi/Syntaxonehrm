@@ -5,7 +5,7 @@
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar, PlusCircle, ListChecks, Settings, LandPlot, ArrowLeft } from "lucide-react";
+import { Calendar, PlusCircle, ListChecks, Settings, LandPlot, ArrowLeft, Users } from "lucide-react"; // Added Users icon
 import { Button } from "@/components/ui/button";
 import { LeaveRequestForm } from "@/modules/leave/components/leave-request-form";
 import { LeaveRequestList } from "@/modules/leave/components/leave-request-list";
@@ -15,29 +15,33 @@ import { HolidayManagement } from "@/modules/leave/components/holiday-management
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { LeaveType, LeaveRequest, LeaveBalance, Holiday } from "@/modules/leave/types";
-import type { Gender } from "@/modules/employees/types"; // Import Gender
-import { getHolidaysAction, getLeaveRequestsAction as getLeaveRequests, getLeaveTypesAction as getLeaveTypes, getEmployeeLeaveBalancesAction } from '@/modules/leave/actions';
+import type { Gender } from "@/modules/employees/types";
+import type { UserRole } from "@/modules/auth/types"; // Import UserRole
+import { getHolidaysAction, getLeaveRequestsAction, getLeaveTypesAction, getEmployeeLeaveBalancesAction } from '@/modules/leave/actions';
 import { useSearchParams, useRouter } from "next/navigation";
 
 interface LeavePageClientProps {
   userId: string | null;
-  isAdmin: boolean;
+  isAdmin: boolean; // Keep for quick admin checks
+  currentUserRole: UserRole | null; // Pass specific role
   tenantDomain: string | null;
-  employeeGender?: Gender | null; // Accept employee's gender
+  employeeGender?: Gender | null;
 }
 
-export default function LeavePageClient({ userId: initialUserId, isAdmin, tenantDomain, employeeGender }: LeavePageClientProps) {
+export default function LeavePageClient({ userId: initialUserId, isAdmin, currentUserRole, tenantDomain, employeeGender }: LeavePageClientProps) {
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const router = useRouter();
 
   const employeeIdFromQuery = searchParams.get('employeeId');
+  // targetUserId should be the user_id of the employee whose leave we are viewing/managing
   const targetUserId = employeeIdFromQuery || initialUserId;
 
-  const [allLeaveTypes, setAllLeaveTypes] = React.useState<LeaveType[]>([]); // Store all fetched types
-  const [applicableLeaveTypes, setApplicableLeaveTypes] = React.useState<LeaveType[]>([]); // Filtered types for form
-  const [allRequests, setAllRequests] = React.useState<LeaveRequest[]>([]);
-  const [myRequests, setMyRequests] = React.useState<LeaveRequest[]>([]);
+  const [allLeaveTypes, setAllLeaveTypes] = React.useState<LeaveType[]>([]);
+  const [applicableLeaveTypes, setApplicableLeaveTypes] = React.useState<LeaveType[]>([]);
+  const [allRequests, setAllRequests] = React.useState<LeaveRequest[]>([]); // For admin viewing all
+  const [myRequests, setMyRequests] = React.useState<LeaveRequest[]>([]); // For user's own or specific employee's
+  const [requestsPendingMyApproval, setRequestsPendingMyApproval] = React.useState<LeaveRequest[]>([]); // For manager's approval queue
   const [myBalances, setMyBalances] = React.useState<LeaveBalance[]>([]);
   const [holidays, setHolidays] = React.useState<Holiday[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -56,24 +60,40 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
       setIsLoading(true);
       setFetchError(null);
       try {
-          const [typesData, allReqData, myReqData, balancesData, holidaysData] = await Promise.all([
-              getLeaveTypes(),
-              isAdmin && !employeeIdFromQuery ? getLeaveRequests() : Promise.resolve([]),
-              getLeaveRequests({ employeeId: targetUserId }),
+          const promises = [
+              getLeaveTypesAction(),
+              getLeaveRequestsAction({ employeeId: targetUserId }), // Always fetch requests for targetUserId
               getEmployeeLeaveBalancesAction(targetUserId),
               getHolidaysAction(),
-          ]);
-          setAllLeaveTypes(typesData); // Store all types
-          setAllRequests(allReqData);
+          ];
+
+          // Fetch all requests if admin and not viewing a specific employee
+          if (isAdmin && !employeeIdFromQuery) {
+              promises.push(getLeaveRequestsAction()); // Fetches all for tenant
+          } else {
+              promises.push(Promise.resolve([])); // Placeholder for allRequests if not needed
+          }
+
+          // Fetch requests pending manager approval if user is Manager or Admin
+          if (currentUserRole === 'Manager' || currentUserRole === 'Admin') {
+              promises.push(getLeaveRequestsAction({ forManagerApproval: true }));
+          } else {
+              promises.push(Promise.resolve([])); // Placeholder
+          }
+
+
+          const [typesData, myReqData, balancesData, holidaysData, allReqDataFromFetch, managerApprovalData] = await Promise.all(promises);
+          
+          setAllLeaveTypes(typesData);
+          setAllRequests(allReqDataFromFetch);
           setMyRequests(myReqData);
+          setRequestsPendingMyApproval(managerApprovalData);
           setMyBalances(balancesData);
           setHolidays(holidaysData);
 
           if (employeeIdFromQuery && myReqData.length > 0 && myReqData[0].employeeName) {
              setCurrentEmployeeName(myReqData[0].employeeName);
           } else if (employeeIdFromQuery) {
-             // If name is not available from request (e.g. no requests yet), show ID
-             // Potentially fetch employee name separately if needed here
              setCurrentEmployeeName(`Employee ID: ${employeeIdFromQuery}`);
           } else {
              setCurrentEmployeeName(null);
@@ -91,7 +111,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
       } finally {
           setIsLoading(false);
       }
-  }, [toast, targetUserId, isAdmin, tenantDomain, employeeIdFromQuery]);
+  }, [toast, targetUserId, isAdmin, tenantDomain, employeeIdFromQuery, currentUserRole]);
 
   React.useEffect(() => {
     if (targetUserId && tenantDomain) {
@@ -105,12 +125,9 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
     }
   }, [targetUserId, tenantDomain, refetchData]);
 
-  // Filter leave types based on employee gender
   React.useEffect(() => {
     if (allLeaveTypes.length > 0) {
       let filteredTypes;
-      // If viewing another employee's leave and their gender isn't available, show all (admin might not have gender for other users easily here)
-      // Or, if it's the current user, use their gender.
       const genderToFilterBy = employeeIdFromQuery && employeeIdFromQuery !== initialUserId ? undefined : employeeGender;
 
       if (genderToFilterBy) {
@@ -118,11 +135,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
           !lt.applicableGender || lt.applicableGender === genderToFilterBy
         );
       } else {
-        // If no gender to filter by (e.g., admin viewing all or gender not available), show all types
-        // that are not explicitly for a *different* gender (more permissive for admin)
-        // Or, if we want strict "only applicable to all" if gender is unknown:
-        // filteredTypes = allLeaveTypes.filter(lt => !lt.applicableGender);
-        filteredTypes = allLeaveTypes; // Show all if gender is unknown or admin view of other
+        filteredTypes = allLeaveTypes;
       }
       console.log(`[Leave Page Client] Employee Gender: ${genderToFilterBy}, All Types: ${allLeaveTypes.length}, Filtered Types: ${filteredTypes.length}`);
       setApplicableLeaveTypes(filteredTypes);
@@ -203,7 +216,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
 
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="leave-tabs">
                  <div className="overflow-x-auto pb-2">
-                     <TabsList className="inline-flex h-auto w-max sm:w-full sm:grid sm:grid-cols-2 md:grid-cols-4">
+                     <TabsList className="inline-flex h-auto w-max sm:w-full sm:grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5"> {/* Adjusted grid columns */}
                        {(!employeeIdFromQuery || employeeIdFromQuery === initialUserId) && (
                            <TabsTrigger value="request" className="flex items-center gap-1">
                                 <PlusCircle className="h-4 w-4"/> Request Leave
@@ -213,12 +226,17 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                            <ListChecks className="h-4 w-4"/>
                            {employeeIdFromQuery && currentEmployeeName ? `${currentEmployeeName.startsWith('Employee ID:') ? 'Requests' : currentEmployeeName + "'s Requests"}` : 'My Requests'}
                         </TabsTrigger>
-                       {isAdmin && !employeeIdFromQuery && (
+                       {(currentUserRole === 'Admin' || currentUserRole === 'Manager') && !employeeIdFromQuery && (
                             <TabsTrigger value="all-requests" className="flex items-center gap-1">
-                               <ListChecks className="h-4 w-4"/> Manage Requests
+                               <Users className="h-4 w-4"/> All Employee Requests
                             </TabsTrigger>
                        )}
-                       {isAdmin && (
+                        {(currentUserRole === 'Admin' || currentUserRole === 'Manager') && (
+                             <TabsTrigger value="pending-my-approval" className="flex items-center gap-1">
+                                <ListChecks className="h-4 w-4"/> Pending My Approval
+                             </TabsTrigger>
+                        )}
+                       {isAdmin && ( // Keep isAdmin for settings-like tabs
                            <TabsTrigger value="manage-types" className="flex items-center gap-1">
                               <Settings className="h-4 w-4"/> Manage Types
                            </TabsTrigger>
@@ -240,8 +258,8 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                            </CardHeader>
                            <CardContent>
                                <LeaveRequestForm
-                                   employeeId={targetUserId}
-                                   leaveTypes={applicableLeaveTypes} // Use filtered types
+                                   employeeId={targetUserId} // This is user_id
+                                   leaveTypes={applicableLeaveTypes}
                                    onSuccess={handleLeaveRequestSubmitted}
                                />
                            </CardContent>
@@ -252,25 +270,39 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
                 <TabsContent value="my-requests">
                     <LeaveRequestList
                         requests={myRequests}
-                        leaveTypes={allLeaveTypes} // List can show all types, form is filtered
-                        isAdminView={isAdmin && employeeIdFromQuery === initialUserId}
+                        leaveTypes={allLeaveTypes}
+                        isAdminView={isAdmin && (employeeIdFromQuery === initialUserId || !employeeIdFromQuery)} // Admin view if viewing own or all
                         currentUserId={initialUserId}
                         tenantDomain={tenantDomain}
                         onUpdate={handleLeaveRequestUpdated}
                     />
                 </TabsContent>
 
-                {isAdmin && !employeeIdFromQuery && (
+                {(currentUserRole === 'Admin' || currentUserRole === 'Manager') && !employeeIdFromQuery && (
                    <TabsContent value="all-requests">
                        <LeaveRequestList
                            requests={allRequests}
                            leaveTypes={allLeaveTypes}
-                           isAdminView={true}
+                           isAdminView={true} // True for admin/manager viewing all requests
                            currentUserId={initialUserId}
                            tenantDomain={tenantDomain}
                            onUpdate={handleLeaveRequestUpdated}
                        />
                    </TabsContent>
+                )}
+
+                {(currentUserRole === 'Admin' || currentUserRole === 'Manager') && (
+                     <TabsContent value="pending-my-approval">
+                         <LeaveRequestList
+                             requests={requestsPendingMyApproval}
+                             leaveTypes={allLeaveTypes}
+                             isAdminView={true} // Managers can approve/reject these
+                             currentUserId={initialUserId} // Manager's own ID for context
+                             tenantDomain={tenantDomain}
+                             onUpdate={handleLeaveRequestUpdated}
+                             isManagerApprovalView={true} // Specific prop to indicate this view
+                         />
+                     </TabsContent>
                 )}
 
                 {isAdmin && (
@@ -296,3 +328,5 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, tenant
     </div>
   );
 }
+
+    

@@ -2,45 +2,76 @@
 'use server';
 
 import type { LeaveRequest, LeaveType, LeaveRequestFormData, LeaveRequestStatus, LeaveBalance, Holiday, HolidayFormData } from '@/modules/leave/types';
-import { leaveRequestSchema, refinedLeaveRequestSchema, holidaySchema } from '@/modules/leave/types'; // Use refined schema for add, add holiday schema
+import { refinedLeaveRequestSchema, holidaySchema } from '@/modules/leave/types';
 import {
   getAllLeaveRequests as dbGetAllLeaveRequests,
   getLeaveRequestById as dbGetLeaveRequestById,
   addLeaveRequest as dbAddLeaveRequest,
-  updateLeaveRequestStatus as dbUpdateLeaveRequestStatus, // Use specific status update function
-  cancelLeaveRequest as dbCancelLeaveRequest, // Use specific cancel function
+  updateLeaveRequestStatus as dbUpdateLeaveRequestStatus,
+  cancelLeaveRequest as dbCancelLeaveRequest,
   getAllLeaveTypes as dbGetAllLeaveTypes,
   getLeaveTypeById as dbGetLeaveTypeById,
   addLeaveType as dbAddLeaveType,
   updateLeaveType as dbUpdateLeaveType,
   deleteLeaveType as dbDeleteLeaveType,
-  getLeaveBalancesForEmployee as dbGetLeaveBalances,
-  runMonthlyAccrual as dbRunMonthlyAccrual, // Import accrual function
-  getAllHolidays as dbGetAllHolidays, // Import holiday functions
+  getLeaveBalancesForEmployee as dbGetLeaveBalances, // This expects employee.id (PK)
+  runMonthlyAccrual as dbRunMonthlyAccrual,
+  getAllHolidays as dbGetAllHolidays,
   addHoliday as dbAddHoliday,
   updateHoliday as dbUpdateHoliday,
   deleteHoliday as dbDeleteHoliday,
-} from '@/modules/leave/lib/db'; // Import from the new DB file
-import { getEmployeeByUserId as dbGetEmployeeByUserId } from '@/modules/employees/lib/db'; // Import this to get employee PK
+} from '@/modules/leave/lib/db';
+import { getEmployeeByUserId as dbGetEmployeeByUserId } from '@/modules/employees/lib/db'; // To get employee PK from user ID
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
-// Import new session helpers from auth actions
-import { getTenantIdFromSession, getUserIdFromSession, isAdminFromSession, _parseSessionCookie } from '@/modules/auth/actions';
-
-// --- Helper Functions ---
-// No longer needed here as actions will call auth helpers directly
+import { getTenantIdFromSession, getUserIdFromSession, isAdminFromSession, getEmployeeProfileForCurrentUser } from '@/modules/auth/actions'; // getEmployeeProfileForCurrentUser can get employee PK
 
 // --- Leave Request Actions ---
 
-export async function getLeaveRequestsAction(filters?: { employeeId?: string, status?: LeaveRequestStatus }): Promise<LeaveRequest[]> {
+export async function getLeaveRequestsAction(filters?: { employeeId?: string, status?: LeaveRequestStatus, forManagerApproval?: boolean }): Promise<LeaveRequest[]> {
   const tenantId = await getTenantIdFromSession();
   if (!tenantId) {
      console.error("[Action getLeaveRequestsAction] Tenant ID could not be determined from session.");
      throw new Error("Tenant context not found.");
   }
-  console.log(`[Action getLeaveRequestsAction] Fetching for tenant ${tenantId}, filters:`, filters);
+  
+  let effectiveFilters = { ...filters };
+
+  if (filters?.forManagerApproval) {
+    console.log(`[Action getLeaveRequestsAction] Filtering for manager approval.`);
+    const managerUserId = await getUserIdFromSession(); // This is the manager's users.id
+    if (!managerUserId) {
+        console.warn("[Action getLeaveRequestsAction] Could not determine manager's user ID for approval filter.");
+        throw new Error("Could not identify manager for approval filtering.");
+    }
+    const managerEmployeeProfile = await dbGetEmployeeByUserId(managerUserId, tenantId);
+    if (!managerEmployeeProfile) {
+        console.warn(`[Action getLeaveRequestsAction] Manager with user ID ${managerUserId} does not have an employee profile in tenant ${tenantId}. Cannot filter by reporting manager.`);
+        return []; // Or throw error, depending on desired behavior
+    }
+    effectiveFilters.filterByReportingManagerEmployeeId = managerEmployeeProfile.id; // Pass manager's employee.id (PK)
+    delete effectiveFilters.forManagerApproval; // Remove the boolean flag
+    effectiveFilters.status = 'Pending'; // Manager approval is only for pending requests
+    console.log(`[Action getLeaveRequestsAction] Manager's employee PK for filtering: ${managerEmployeeProfile.id}`);
+  }
+
+
+  console.log(`[Action getLeaveRequestsAction] Fetching for tenant ${tenantId}, effective filters:`, effectiveFilters);
   try {
-      return dbGetAllLeaveRequests(tenantId, filters);
+      // If employeeId filter is present, it's likely a user_id. Convert to employee PK if necessary.
+      // However, dbGetAllLeaveRequests expects employeeId to be the employee PK.
+      // If the filter is for "my requests", it usually comes from a user context.
+      if (effectiveFilters.employeeId) {
+          const userMakingRequest = await dbGetEmployeeByUserId(effectiveFilters.employeeId, tenantId);
+          if (userMakingRequest) {
+              effectiveFilters.employeeId = userMakingRequest.id; // Use PK for DB query
+              console.log(`[Action getLeaveRequestsAction] Converted filter employeeId (user_id ${filters?.employeeId}) to PK ${userMakingRequest.id}`);
+          } else {
+              console.warn(`[Action getLeaveRequestsAction] No employee profile found for user_id ${filters?.employeeId} to filter requests. Returning empty.`);
+              return [];
+          }
+      }
+      return dbGetAllLeaveRequests(tenantId, effectiveFilters);
   } catch (dbError: any) {
       console.error(`[Action getLeaveRequestsAction] Database error for tenant ${tenantId}:`, dbError);
       if (dbError.code === '22P02' && dbError.message?.includes('uuid')) {
@@ -108,20 +139,41 @@ export async function updateLeaveRequestStatusAction(
   const tenantId = await getTenantIdFromSession();
   if (!tenantId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Tenant context not found.' }] };
 
-  const approverId = await getUserIdFromSession();
-  if (!approverId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Approver ID not found.' }] };
+  const approverUserId = await getUserIdFromSession(); // This is the user_id of the person taking action
+  if (!approverUserId) return { success: false, errors: [{ code: 'custom', path: [], message: 'Approver ID not found.' }] };
+
+  // Authorization: Check if current user is Admin or the reporting manager of the request's employee
+  const requestToUpdate = await dbGetLeaveRequestById(id, tenantId);
+  if (!requestToUpdate) {
+      return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Leave request not found.' }] };
+  }
 
   const isAdmin = await isAdminFromSession();
+  let isReportingManager = false;
   if (!isAdmin) {
-      return { success: false, errors: [{ code: 'custom', path: [], message: 'Unauthorized to approve/reject requests.' }] };
+      const managerProfile = await dbGetEmployeeByUserId(approverUserId, tenantId);
+      if (managerProfile && requestToUpdate.employeeId) { // requestToUpdate.employeeId is PK
+          const submittingEmployee = await dbGetEmployeeByUserId(requestToUpdate.employeeId, tenantId); // This is wrong - need employee from request.employeeId
+          const actualSubmittingEmployee = await dbGetEmployeeById(requestToUpdate.employeeId, tenantId);
+
+          if (actualSubmittingEmployee && actualSubmittingEmployee.reportingManagerId === managerProfile.id) {
+              isReportingManager = true;
+          }
+      }
   }
+
+  if (!isAdmin && !isReportingManager) {
+      return { success: false, errors: [{ code: 'custom', path: [], message: 'Unauthorized to approve/reject this request.' }] };
+  }
+
 
   if (!['Approved', 'Rejected'].includes(status)) {
      return { success: false, errors: [{ code: 'custom', path: ['status'], message: 'Invalid status update value.' }] };
   }
 
   try {
-    const updatedRequest = await dbUpdateLeaveRequestStatus(id, tenantId, status, comments, approverId);
+    // Pass approver's user_id to the DB layer
+    const updatedRequest = await dbUpdateLeaveRequestStatus(id, tenantId, status, comments, approverUserId);
     if (updatedRequest) {
       revalidatePath(`/${tenantId}/leave`);
       revalidatePath(`/api/leave/balances/${updatedRequest.employeeId}`); // employeeId on request is the PK
@@ -139,11 +191,12 @@ export async function cancelLeaveRequestAction(id: string): Promise<{ success: b
   const tenantId = await getTenantIdFromSession();
   if (!tenantId) return { success: false, error: 'Tenant context not found.' };
 
-  const userId = await getUserIdFromSession(); // This is user_id
+  const userId = await getUserIdFromSession(); // This is user_id of the person cancelling
   if (!userId) return { success: false, error: 'Could not identify user.' };
   
   try {
-    const updatedRequest = await dbCancelLeaveRequest(id, tenantId, userId); // userId here is used for ownership check
+    // dbCancelLeaveRequest now expects the user_id of the person initiating the cancel for ownership check.
+    const updatedRequest = await dbCancelLeaveRequest(id, tenantId, userId); 
     if (updatedRequest) {
         revalidatePath(`/${tenantId}/leave`);
         if (updatedRequest.employeeId) { // employeeId here is the PK
@@ -151,7 +204,8 @@ export async function cancelLeaveRequestAction(id: string): Promise<{ success: b
         }
         return { success: true };
     } else {
-        return { success: false, error: 'Failed to cancel request (unexpected).' };
+        // This path might not be reachable if dbCancelLeaveRequest throws an error on failure
+        return { success: false, error: 'Failed to cancel request (unexpected, request might not be cancellable or not found).' };
     }
   } catch (error: any) {
     console.error("[Action cancelLeaveRequestAction] Error cancelling request:", error);
@@ -259,25 +313,27 @@ export async function deleteLeaveTypeAction(id: string): Promise<{ success: bool
 
 
 // --- Leave Balance Actions ---
-// Parameter 'userId' here refers to the user's ID from the users table.
-export async function getEmployeeLeaveBalancesAction(userId: string): Promise<LeaveBalance[]> {
+// Parameter 'employeeId' here is expected to be user_id from the client (e.g., from query param or session)
+export async function getEmployeeLeaveBalancesAction(employeeId: string): Promise<LeaveBalance[]> {
     const tenantId = await getTenantIdFromSession();
     if (!tenantId) {
        console.error("[Action getEmployeeLeaveBalancesAction] Tenant ID could not be determined from session.");
        throw new Error("Tenant context not found.");
     }
+    
+    // Fetch the employee's primary key (employees.id) using the provided employeeId (which is user_id)
+    const employeeProfile = await dbGetEmployeeByUserId(employeeId, tenantId);
+    if (!employeeProfile) {
+        console.warn(`[Action getEmployeeLeaveBalancesAction] No employee profile found for user ID ${employeeId} in tenant ${tenantId}. Returning empty balances.`);
+        return [];
+    }
+    const employeePrimaryKey = employeeProfile.id; // This is the employees.id (PK)
 
-    console.log(`[Action getEmployeeLeaveBalancesAction] Fetching balances for user ${userId}, tenant ${tenantId}`);
+    console.log(`[Action getEmployeeLeaveBalancesAction] Fetching balances for employee PK ${employeePrimaryKey}, tenant ${tenantId}`);
     try {
-        const employeeProfile = await dbGetEmployeeByUserId(userId, tenantId);
-        if (!employeeProfile) {
-            console.warn(`[Action getEmployeeLeaveBalancesAction] No employee profile found for user ${userId} in tenant ${tenantId}. Returning empty balances.`);
-            return [];
-        }
-        // Pass the employee's primary key (employeeProfile.id) to the DB function
-        return dbGetLeaveBalances(tenantId, employeeProfile.id);
+        return dbGetLeaveBalances(tenantId, employeePrimaryKey);
     } catch (dbError: any) {
-         console.error(`[Action getEmployeeLeaveBalancesAction] Database error for user ${userId}, tenant ${tenantId}:`, dbError);
+         console.error(`[Action getEmployeeLeaveBalancesAction] Database error for employee PK ${employeePrimaryKey}, tenant ${tenantId}:`, dbError);
          if (dbError.code === '22P02' && dbError.message?.includes('uuid')) {
              throw new Error("Internal server error: Invalid identifier.");
          }
@@ -296,7 +352,7 @@ export async function runAccrualProcessAction(): Promise<{ success: boolean; err
     console.log(`[Action runAccrualProcessAction] Triggering accrual process for tenant ${tenantId}...`);
     try {
         await dbRunMonthlyAccrual(tenantId);
-        revalidatePath(`/${tenantId}/leave`, 'layout');
+        revalidatePath(`/${tenantId}/leave`, 'layout'); // Revalidate the whole leave layout
         return { success: true };
     } catch (error: any) {
         console.error(`[Action runAccrualProcessAction] Error running accrual for tenant ${tenantId}:`, error);
