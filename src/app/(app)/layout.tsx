@@ -12,7 +12,7 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarTrigger,
-  SidebarInset,
+  SidebarInset, // Ensure SidebarInset is imported
 } from '@/components/ui/sidebar';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Home, Users, FileText, Briefcase, Calendar, BarChart2, LogOut, UploadCloud, Settings, Mail, UserCog } from 'lucide-react';
@@ -36,17 +36,21 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
   const { toast } = useToast();
   const isMobile = useIsMobile();
 
+  // Simulate user data - replace with actual data from session/context
   const user = {
-    name: userId || 'User',
-    email: 'user@example.com', // This should ideally come from session props too
+    name: userId || 'User', // Use userId if available, fallback to 'User'
+    email: 'user@example.com', // Placeholder, ideally from session
     initials: userId ? userId.substring(0, 1).toUpperCase() : 'U',
-    avatarUrl: '', // Placeholder for avatar image
+    avatarUrl: '', // Placeholder
   };
+  console.log(`[AppLayout] Rendering. UserRole: ${userRole}, UserID: ${userId}, TenantDomain: ${tenantDomain}`);
+
 
   const handleLogout = async () => {
     try {
-      await logoutAction();
+      await logoutAction(); // Server action handles redirect
       toast({ title: "Logged Out", description: "You have been successfully logged out." });
+      // No client-side redirect needed here if action handles it.
     } catch (error) {
       console.error("Logout failed:", error);
       toast({ title: "Logout Failed", description: "Could not log out. Please try again.", variant: "destructive" });
@@ -88,9 +92,8 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
       }
   }
 
-
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex min-h-svh bg-background text-foreground">
         <Sidebar
            variant="sidebar"
            collapsible={isMobile ? "offcanvas" : "icon"}
@@ -99,7 +102,6 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
         >
             <SidebarHeader className="items-center justify-between p-4 border-b border-sidebar-border">
                  <Link href={`/${tenantDomain}/dashboard`} className="flex items-center gap-2 font-semibold text-lg text-sidebar-primary">
-                 {/* A generic placeholder logo, replace with your actual logo */}
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6"><path d="M12 3v18M3 12h18"/></svg>
                  <span className="hidden group-data-[state=expanded]:inline">SyntaxHive Hrm</span>
                  </Link>
@@ -164,12 +166,14 @@ export default function AppLayout({ children, tenantId, tenantDomain, userRole, 
             </SidebarFooter>
         </Sidebar>
 
-        <SidebarInset className="flex-1 overflow-y-auto">
+        {/* Modified SidebarInset to be a flex column */}
+        <SidebarInset className="flex-1 overflow-y-auto flex flex-col">
               <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4 md:hidden">
                 <SidebarTrigger />
                  <h1 className="flex-1 text-lg font-semibold">{tenantDomain || 'SyntaxHive Hrm'}</h1>
               </header>
-            <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full"> {/* Added max-width and mx-auto */}
+              {/* Main content area will take remaining space and scroll if needed */}
+            <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full">
                  {children}
             </main>
         </SidebarInset>
