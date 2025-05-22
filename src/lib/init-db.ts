@@ -7,34 +7,33 @@ const extensionSQL = `CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`;
 
 // Individual DO $$ blocks for ENUM creation
 const enumCreationSQLs = [
-`DO $$ BEGIN CREATE TYPE user_role_enum AS ENUM ('Admin', 'Manager', 'Employee'); RAISE NOTICE 'user_role_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'user_role_enum already exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE gender_enum_type AS ENUM ('Male', 'Female', 'Other', 'Prefer not to say'); RAISE NOTICE 'gender_enum_type created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'gender_enum_type already exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE address_type_enum AS ENUM('PERMANENT', 'CURRENT', 'OFFICIAL'); RAISE NOTICE 'address_type_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'address_type_enum exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE verification_status_enum AS ENUM('VERIFIED', 'PENDING', 'REJECTED'); RAISE NOTICE 'verification_status_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'verification_status_enum exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE employment_type_enum AS ENUM('Full-time', 'Part-time', 'Contract', 'Internship', 'Temporary'); RAISE NOTICE 'employment_type_enum created for employees/job_openings.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'employment_type_enum for employees/job_openings already exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE salary_component_type_enum AS ENUM('EARNING', 'DEDUCTION', 'BENEFIT'); RAISE NOTICE 'salary_component_type_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'salary_component_type_enum exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE calculation_type_enum AS ENUM('FIXED', 'PERCENTAGE', 'FORMULA'); RAISE NOTICE 'calculation_type_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'calculation_type_enum exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE attendance_status_enum AS ENUM('PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE', 'HOLIDAY', 'WEEK_OFF'); RAISE NOTICE 'attendance_status_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'attendance_status_enum exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE leave_application_status_enum AS ENUM('Pending', 'Approved', 'Rejected', 'Cancelled'); RAISE NOTICE 'leave_application_status_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'leave_application_status_enum exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE performance_review_status_enum AS ENUM('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'); RAISE NOTICE 'performance_review_status_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'performance_review_status_enum exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE training_program_status_enum AS ENUM('PLANNED', 'ONGOING', 'COMPLETED', 'CANCELLED'); RAISE NOTICE 'training_program_status_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'training_program_status_enum exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE employee_training_status_enum AS ENUM('REGISTERED', 'ATTENDED', 'COMPLETED', 'DROPPED'); RAISE NOTICE 'employee_training_status_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'employee_training_status_enum exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE job_opening_status_enum AS ENUM('Draft', 'Open', 'Closed', 'Archived'); RAISE NOTICE 'job_opening_status_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'job_opening_status_enum already exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE candidate_application_status_enum AS ENUM('Applied', 'Screening', 'Interviewing', 'Offer Extended', 'Hired', 'Rejected', 'Withdrawn'); RAISE NOTICE 'candidate_application_status_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'candidate_application_status_enum already exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE asset_status_enum AS ENUM('AVAILABLE', 'ASSIGNED', 'UNDER_MAINTENANCE', 'RETIRED', 'LOST'); RAISE NOTICE 'asset_status_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'asset_status_enum exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE holiday_type_enum AS ENUM('FIXED', 'VARIABLE'); RAISE NOTICE 'holiday_type_enum created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'holiday_type_enum exists.'; END $$;`,
-`DO $$ BEGIN CREATE TYPE experience_level_enum_type AS ENUM('Entry-Level', 'Mid-Level', 'Senior-Level', 'Lead', 'Principal', 'Manager', 'Director'); RAISE NOTICE 'experience_level_enum_type created.'; EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'experience_level_enum_type already exists.'; END $$;`
+`DO $$ BEGIN CREATE TYPE user_role_enum AS ENUM ('Admin', 'Manager', 'Employee'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'user_role_enum already exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE gender_enum_type AS ENUM ('Male', 'Female', 'Other', 'Prefer not to say'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'gender_enum_type already exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE address_type_enum AS ENUM('PERMANENT', 'CURRENT', 'OFFICIAL'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'address_type_enum exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE verification_status_enum AS ENUM('VERIFIED', 'PENDING', 'REJECTED'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'verification_status_enum exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE employment_type_enum AS ENUM('Full-time', 'Part-time', 'Contract', 'Internship', 'Temporary'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'employment_type_enum already exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE salary_component_type_enum AS ENUM('EARNING', 'DEDUCTION', 'BENEFIT'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'salary_component_type_enum exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE calculation_type_enum AS ENUM('FIXED', 'PERCENTAGE', 'FORMULA'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'calculation_type_enum exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE attendance_status_enum AS ENUM('PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE', 'HOLIDAY', 'WEEK_OFF'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'attendance_status_enum exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE leave_application_status_enum AS ENUM('Pending', 'Approved', 'Rejected', 'Cancelled'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'leave_application_status_enum exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE performance_review_status_enum AS ENUM('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'performance_review_status_enum exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE training_program_status_enum AS ENUM('PLANNED', 'ONGOING', 'COMPLETED', 'CANCELLED'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'training_program_status_enum exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE employee_training_status_enum AS ENUM('REGISTERED', 'ATTENDED', 'COMPLETED', 'DROPPED'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'employee_training_status_enum exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE job_opening_status_enum AS ENUM('Draft', 'Open', 'Closed', 'Archived'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'job_opening_status_enum already exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE candidate_application_status_enum AS ENUM('Applied', 'Screening', 'Interviewing', 'Offer Extended', 'Hired', 'Rejected', 'Withdrawn'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'candidate_application_status_enum already exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE asset_status_enum AS ENUM('AVAILABLE', 'ASSIGNED', 'UNDER_MAINTENANCE', 'RETIRED', 'LOST'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'asset_status_enum exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE holiday_type_enum AS ENUM('FIXED', 'VARIABLE'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'holiday_type_enum exists.'; END $$;`,
+`DO $$ BEGIN CREATE TYPE experience_level_enum_type AS ENUM('Entry-Level', 'Mid-Level', 'Senior-Level', 'Lead', 'Principal', 'Manager', 'Director'); EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'experience_level_enum_type already exists.'; END $$;`
 ];
 
 // The rest of the schema (DROP, CREATE TABLE, CREATE FUNCTION, etc.)
+// Removed RAISE NOTICE statements from this block
 const mainSchemaSQL = `
 -- Drop existing trigger functions and tables safely (functions first, then tables)
 DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
 DROP FUNCTION IF EXISTS apply_update_trigger_if_not_exists(text) CASCADE;
-RAISE NOTICE 'Existing trigger functions dropped (if they existed).';
 
 -- Drop tables in an order that respects dependencies, or use CASCADE
-RAISE NOTICE 'Dropping existing tables...';
 DROP TABLE IF EXISTS employee_assets CASCADE;
 DROP TABLE IF EXISTS asset_inventory CASCADE;
 DROP TABLE IF EXISTS announcements CASCADE;
@@ -44,7 +43,9 @@ DROP TABLE IF EXISTS permissions CASCADE;
 DROP TABLE IF EXISTS user_roles CASCADE;
 DROP TABLE IF EXISTS roles CASCADE;
 DROP TABLE IF EXISTS job_applications CASCADE;
-DROP TABLE IF EXISTS candidates CASCADE;
+-- Candidates table was renamed to job_candidates for clarity, ensure consistency
+DROP TABLE IF EXISTS job_candidates CASCADE;
+DROP TABLE IF EXISTS candidates CASCADE; -- Assuming 'candidates' is the old name to be dropped
 DROP TABLE IF EXISTS job_openings CASCADE;
 DROP TABLE IF EXISTS email_templates CASCADE;
 DROP TABLE IF EXISTS email_configuration CASCADE;
@@ -74,13 +75,10 @@ DROP TABLE IF EXISTS employee_address CASCADE;
 DROP TABLE IF EXISTS employees CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS tenants CASCADE;
-RAISE NOTICE 'Existing tables dropped.';
 
 -- Note: ENUM types are now created individually before this main block
 
 -- Recreate Tables
-RAISE NOTICE 'Creating tables...';
-
 CREATE TABLE tenants (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
@@ -88,7 +86,6 @@ CREATE TABLE tenants (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-RAISE NOTICE 'tenants table created.';
 
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -102,17 +99,16 @@ CREATE TABLE users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, email)
 );
-RAISE NOTICE 'users table created.';
 
 CREATE TABLE employees (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Main UUID primary key
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL UNIQUE, -- Link to users table
-    employee_id VARCHAR(50) UNIQUE, -- Human-readable ID, unique per tenant
-    name VARCHAR(255) NOT NULL, -- Combined name
-    first_name VARCHAR(100), -- Optional if 'name' is primary
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL UNIQUE,
+    employee_id VARCHAR(50) UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    first_name VARCHAR(100),
     middle_name VARCHAR(100),
-    last_name VARCHAR(100), -- Optional if 'name' is primary
+    last_name VARCHAR(100),
     personal_email VARCHAR(255),
     official_email VARCHAR(255) NOT NULL,
     phone VARCHAR(50),
@@ -123,20 +119,19 @@ CREATE TABLE employees (
     emergency_contact_name VARCHAR(100),
     emergency_contact_number VARCHAR(20),
     date_of_birth DATE,
-    position VARCHAR(255), -- For current primary position/title
-    department VARCHAR(255), -- For current primary department (denormalized for quick access)
+    position VARCHAR(255),
+    department VARCHAR(255), -- Consider FK to departments table
     hire_date DATE,
-    status VARCHAR(50) DEFAULT 'Active', -- Example statuses: Active, Inactive, On Leave, Terminated
-    reporting_manager_id UUID REFERENCES employees(id) ON DELETE SET NULL, -- FK to employee's PK (UUID)
+    status VARCHAR(50) DEFAULT 'Active', -- Consider an ENUM type
+    reporting_manager_id UUID REFERENCES employees(id) ON DELETE SET NULL,
     work_location VARCHAR(255),
-    employment_type employment_type_enum, -- Using the new ENUM
+    employment_type employment_type_enum,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, official_email),
-    UNIQUE (tenant_id, employee_id) -- Ensure human-readable ID is unique within a tenant
+    UNIQUE (tenant_id, employee_id)
 );
-RAISE NOTICE 'employees table created.';
 
 CREATE TABLE employee_address (
     address_id SERIAL PRIMARY KEY,
@@ -150,7 +145,6 @@ CREATE TABLE employee_address (
     postal_code VARCHAR(20) NOT NULL,
     is_default BOOLEAN DEFAULT FALSE
 );
-RAISE NOTICE 'employee_address table created.';
 
 CREATE TABLE employee_documents (
     document_id SERIAL PRIMARY KEY,
@@ -163,7 +157,6 @@ CREATE TABLE employee_documents (
     file_path VARCHAR(255),
     verification_status verification_status_enum DEFAULT 'PENDING'
 );
-RAISE NOTICE 'employee_documents table created.';
 
 CREATE TABLE departments (
     department_id SERIAL PRIMARY KEY,
@@ -177,7 +170,6 @@ CREATE TABLE departments (
     is_active BOOLEAN DEFAULT TRUE,
     UNIQUE(tenant_id, department_name)
 );
-RAISE NOTICE 'departments table created.';
 
 CREATE TABLE designations (
     designation_id SERIAL PRIMARY KEY,
@@ -188,7 +180,6 @@ CREATE TABLE designations (
     is_active BOOLEAN DEFAULT TRUE,
     UNIQUE(tenant_id, designation_name)
 );
-RAISE NOTICE 'designations table created.';
 
 CREATE TABLE employment_details (
     employment_id SERIAL PRIMARY KEY,
@@ -207,7 +198,6 @@ CREATE TABLE employment_details (
     notice_period_days INT DEFAULT 30,
     is_active BOOLEAN DEFAULT TRUE
 );
-RAISE NOTICE 'employment_details table created.';
 
 CREATE TABLE salary_structures (
     structure_id SERIAL PRIMARY KEY,
@@ -218,7 +208,6 @@ CREATE TABLE salary_structures (
     description TEXT,
     UNIQUE(tenant_id, structure_name)
 );
-RAISE NOTICE 'salary_structures table created.';
 
 CREATE TABLE salary_components (
     component_id SERIAL PRIMARY KEY,
@@ -231,7 +220,6 @@ CREATE TABLE salary_components (
     description TEXT,
     UNIQUE(tenant_id, component_name)
 );
-RAISE NOTICE 'salary_components table created.';
 
 CREATE TABLE employee_salary (
     salary_id SERIAL PRIMARY KEY,
@@ -244,7 +232,6 @@ CREATE TABLE employee_salary (
     is_current BOOLEAN DEFAULT TRUE,
     UNIQUE(tenant_id, employee_id, effective_from)
 );
-RAISE NOTICE 'employee_salary table created.';
 
 CREATE TABLE salary_structure_details (
     detail_id SERIAL PRIMARY KEY,
@@ -257,7 +244,6 @@ CREATE TABLE salary_structure_details (
     display_order INT,
     UNIQUE(tenant_id, structure_id, component_id)
 );
-RAISE NOTICE 'salary_structure_details table created.';
 
 CREATE TABLE shifts (
     shift_id SERIAL PRIMARY KEY,
@@ -271,7 +257,6 @@ CREATE TABLE shifts (
     description TEXT,
     UNIQUE(tenant_id, shift_name)
 );
-RAISE NOTICE 'shifts table created.';
 
 CREATE TABLE employee_shift (
     employee_shift_id SERIAL PRIMARY KEY,
@@ -283,7 +268,6 @@ CREATE TABLE employee_shift (
     is_current BOOLEAN DEFAULT TRUE,
     UNIQUE(tenant_id, employee_id, effective_from)
 );
-RAISE NOTICE 'employee_shift table created.';
 
 CREATE TABLE attendance_records (
     attendance_id SERIAL PRIMARY KEY,
@@ -301,10 +285,9 @@ CREATE TABLE attendance_records (
     remarks TEXT,
     UNIQUE (tenant_id, employee_id, date)
 );
-RAISE NOTICE 'attendance_records table created.';
 
 CREATE TABLE leave_types (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Using UUID for consistency
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(50) NOT NULL,
     description TEXT,
@@ -323,7 +306,6 @@ CREATE TABLE leave_types (
     UNIQUE (tenant_id, name),
     UNIQUE (tenant_id, short_code)
 );
-RAISE NOTICE 'leave_types table created.';
 
 CREATE TABLE leave_policy (
     policy_id SERIAL PRIMARY KEY,
@@ -334,53 +316,49 @@ CREATE TABLE leave_policy (
     description TEXT,
     UNIQUE(tenant_id, policy_name)
 );
-RAISE NOTICE 'leave_policy table created.';
 
 CREATE TABLE leave_policy_details (
     detail_id SERIAL PRIMARY KEY,
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     policy_id INT NOT NULL REFERENCES leave_policy(policy_id) ON DELETE CASCADE,
-    leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE, -- Changed to UUID
+    leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE,
     entitlement_days INT NOT NULL,
     max_consecutive_days INT,
     min_service_days INT DEFAULT 0,
-    gender_restriction gender_enum_type, -- Using the enum
+    gender_restriction gender_enum_type,
     UNIQUE(tenant_id, policy_id, leave_type_id)
 );
-RAISE NOTICE 'leave_policy_details table created.';
 
 CREATE TABLE leave_balances (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Using UUID
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE, -- FK to employees.id (UUID)
-    leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE, -- Changed to UUID
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE,
     balance NUMERIC(5,2) NOT NULL DEFAULT 0,
     last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     policy_id INT REFERENCES leave_policy(policy_id) ON DELETE SET NULL,
-    year INT, -- Consider if this is still needed or if balances are perpetual
-    UNIQUE (tenant_id, employee_id, leave_type_id, year) -- If year is kept
+    year INT,
+    UNIQUE (tenant_id, employee_id, leave_type_id, year)
 );
-RAISE NOTICE 'leave_balances table created.';
 
 CREATE TABLE leave_requests (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Using UUID
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE, -- FK to employees.id (UUID)
-    leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE RESTRICT, -- Changed to UUID
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE RESTRICT,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
-    days DECIMAL(5,2), -- Number of leave days
+    days DECIMAL(5,2),
     reason TEXT,
     status leave_application_status_enum DEFAULT 'Pending',
     request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    approver_id UUID REFERENCES users(id) ON DELETE SET NULL, -- FK to users.id (UUID)
+    approver_id UUID REFERENCES users(id) ON DELETE SET NULL,
     approval_date TIMESTAMP WITH TIME ZONE,
     comments TEXT,
     attachment_url VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-RAISE NOTICE 'leave_requests table created.';
 
 CREATE TABLE competencies (
     competency_id SERIAL PRIMARY KEY,
@@ -390,7 +368,6 @@ CREATE TABLE competencies (
     is_active BOOLEAN DEFAULT TRUE,
     UNIQUE(tenant_id, competency_name)
 );
-RAISE NOTICE 'competencies table created.';
 
 CREATE TABLE performance_cycles (
     cycle_id SERIAL PRIMARY KEY,
@@ -402,7 +379,6 @@ CREATE TABLE performance_cycles (
     description TEXT,
     UNIQUE(tenant_id, cycle_name)
 );
-RAISE NOTICE 'performance_cycles table created.';
 
 CREATE TABLE performance_reviews (
     review_id SERIAL PRIMARY KEY,
@@ -417,7 +393,6 @@ CREATE TABLE performance_reviews (
     comments TEXT,
     status performance_review_status_enum DEFAULT 'DRAFT'
 );
-RAISE NOTICE 'performance_reviews table created.';
 
 CREATE TABLE performance_ratings (
     rating_id SERIAL PRIMARY KEY,
@@ -427,7 +402,6 @@ CREATE TABLE performance_ratings (
     rating DECIMAL(3,1) NOT NULL,
     comments TEXT
 );
-RAISE NOTICE 'performance_ratings table created.';
 
 CREATE TABLE training_programs (
     program_id SERIAL PRIMARY KEY,
@@ -443,7 +417,6 @@ CREATE TABLE training_programs (
     status training_program_status_enum DEFAULT 'PLANNED',
     UNIQUE(tenant_id, program_name)
 );
-RAISE NOTICE 'training_programs table created.';
 
 CREATE TABLE employee_training (
     employee_training_id SERIAL PRIMARY KEY,
@@ -456,13 +429,12 @@ CREATE TABLE employee_training (
     score DECIMAL(5,2),
     feedback TEXT
 );
-RAISE NOTICE 'employee_training table created.';
 
-CREATE TABLE job_openings ( -- Renamed from job_postings
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Using UUID for consistency
+CREATE TABLE job_openings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     job_title VARCHAR(100) NOT NULL,
-    department VARCHAR(255) REFERENCES departments(department_name) ON DELETE SET NULL, -- Updated reference
+    department VARCHAR(255),
     designation_id INT REFERENCES designations(designation_id) ON DELETE SET NULL,
     employment_type employment_type_enum,
     no_of_vacancies INT NOT NULL DEFAULT 1,
@@ -478,10 +450,9 @@ CREATE TABLE job_openings ( -- Renamed from job_postings
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-RAISE NOTICE 'job_openings table created.';
 
-CREATE TABLE candidates (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Using UUID for consistency
+CREATE TABLE job_candidates ( -- Renamed from 'candidates'
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     first_name VARCHAR(50) NOT NULL,
     last_name VARCHAR(50) NOT NULL,
@@ -499,29 +470,27 @@ CREATE TABLE candidates (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, email)
 );
-RAISE NOTICE 'candidates table created.';
 
 CREATE TABLE job_applications (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Using UUID for consistency
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    candidate_id UUID NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
-    job_opening_id UUID NOT NULL REFERENCES job_openings(id) ON DELETE CASCADE, -- Renamed FK
+    candidate_id UUID NOT NULL REFERENCES job_candidates(id) ON DELETE CASCADE,
+    job_opening_id UUID NOT NULL REFERENCES job_openings(id) ON DELETE CASCADE,
     applied_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     current_stage candidate_application_status_enum DEFAULT 'Applied',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tenant_id, candidate_id, job_opening_id)
 );
-RAISE NOTICE 'job_applications table created.';
 
 CREATE TABLE roles (
     role_id SERIAL PRIMARY KEY,
-    tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE, -- Should this be NOT NULL if roles are tenant-specific?
+    tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
     role_name VARCHAR(50) NOT NULL,
     description TEXT,
     is_system BOOLEAN DEFAULT FALSE,
     UNIQUE(tenant_id, role_name)
 );
-RAISE NOTICE 'roles table created.';
 
 CREATE TABLE user_roles (
     user_role_id SERIAL PRIMARY KEY,
@@ -531,7 +500,6 @@ CREATE TABLE user_roles (
     assigned_by UUID REFERENCES users(id) ON DELETE SET NULL,
     UNIQUE (user_id, role_id)
 );
-RAISE NOTICE 'user_roles table created.';
 
 CREATE TABLE permissions (
     permission_id SERIAL PRIMARY KEY,
@@ -539,7 +507,6 @@ CREATE TABLE permissions (
     permission_key VARCHAR(100) NOT NULL UNIQUE,
     description TEXT
 );
-RAISE NOTICE 'permissions table created.';
 
 CREATE TABLE role_permissions (
     role_permission_id SERIAL PRIMARY KEY,
@@ -549,21 +516,19 @@ CREATE TABLE role_permissions (
     assigned_by UUID REFERENCES users(id) ON DELETE SET NULL,
     UNIQUE (role_id, permission_id)
 );
-RAISE NOTICE 'role_permissions table created.';
 
 CREATE TABLE holidays (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Using UUID for consistency
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
     date DATE NOT NULL,
-    holiday_type holiday_type_enum, -- Using the enum
+    holiday_type holiday_type_enum,
     applicable_location VARCHAR(100) DEFAULT 'ALL',
     description TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, name, date, applicable_location)
 );
-RAISE NOTICE 'holidays table created.';
 
 CREATE TABLE announcements (
     announcement_id SERIAL PRIMARY KEY,
@@ -575,7 +540,6 @@ CREATE TABLE announcements (
     is_active BOOLEAN DEFAULT TRUE,
     created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
 );
-RAISE NOTICE 'announcements table created.';
 
 CREATE TABLE asset_inventory (
     asset_id SERIAL PRIMARY KEY,
@@ -593,7 +557,6 @@ CREATE TABLE asset_inventory (
     notes TEXT,
     UNIQUE(tenant_id, serial_number)
 );
-RAISE NOTICE 'asset_inventory table created.';
 
 CREATE TABLE employee_assets (
     assignment_id SERIAL PRIMARY KEY,
@@ -607,7 +570,6 @@ CREATE TABLE employee_assets (
     condition_at_return TEXT,
     notes TEXT
 );
-RAISE NOTICE 'employee_assets table created.';
 
 CREATE TABLE email_templates (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -621,7 +583,6 @@ CREATE TABLE email_templates (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, name)
 );
-RAISE NOTICE 'email_templates table created.';
 
 CREATE TABLE email_configuration (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -636,9 +597,6 @@ CREATE TABLE email_configuration (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-RAISE NOTICE 'email_configuration table created.';
-
-RAISE NOTICE 'Core tables creation step completed.';
 
 -- Recreate Trigger function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -648,7 +606,6 @@ BEGIN
    RETURN NEW;
 END;
 $$ language 'plpgsql';
-RAISE NOTICE 'update_updated_at_column function created.';
 
 -- Recreate Function to apply trigger if it doesn't exist
 CREATE OR REPLACE FUNCTION apply_update_trigger_if_not_exists(table_name_param TEXT)
@@ -664,21 +621,18 @@ BEGIN
             BEFORE UPDATE ON %I
             FOR EACH ROW
             EXECUTE FUNCTION update_updated_at_column();', trigger_name, table_name_param);
-        RAISE NOTICE 'Trigger %% created for table %%.', trigger_name, table_name_param;
     ELSE
-        RAISE NOTICE 'Trigger %% already exists for table %%.', trigger_name, table_name_param;
+        -- Optionally log that trigger already exists
     END IF;
 END;
 $$ LANGUAGE plpgsql;
-RAISE NOTICE 'apply_update_trigger_if_not_exists function created.';
 
 -- Apply trigger to all relevant tables
-RAISE NOTICE 'Applying updated_at triggers...';
 SELECT apply_update_trigger_if_not_exists('tenants');
 SELECT apply_update_trigger_if_not_exists('users');
 SELECT apply_update_trigger_if_not_exists('employees');
 SELECT apply_update_trigger_if_not_exists('job_openings');
-SELECT apply_update_trigger_if_not_exists('candidates');
+SELECT apply_update_trigger_if_not_exists('job_candidates');
 SELECT apply_update_trigger_if_not_exists('job_applications');
 SELECT apply_update_trigger_if_not_exists('leave_types');
 SELECT apply_update_trigger_if_not_exists('leave_balances');
@@ -686,9 +640,16 @@ SELECT apply_update_trigger_if_not_exists('leave_requests');
 SELECT apply_update_trigger_if_not_exists('holidays');
 SELECT apply_update_trigger_if_not_exists('email_templates');
 SELECT apply_update_trigger_if_not_exists('email_configuration');
-RAISE NOTICE 'All triggers checked/applied.';
 
-RAISE NOTICE 'Database schema initialization script finished.';
+-- Add indexes
+CREATE INDEX IF NOT EXISTS idx_employees_tenant_id ON employees(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_job_openings_tenant_id ON job_openings(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_job_candidates_tenant_id ON job_candidates(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_job_applications_tenant_id_job_opening_id ON job_applications(tenant_id, job_opening_id);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_tenant_id_employee_id ON leave_requests(tenant_id, employee_id);
+CREATE INDEX IF NOT EXISTS idx_leave_balances_tenant_id_employee_id ON leave_balances(tenant_id, employee_id);
+CREATE INDEX IF NOT EXISTS idx_email_templates_tenant_id ON email_templates(tenant_id);
 `;
 
 
@@ -702,11 +663,10 @@ export async function initializeDatabase() {
     // Execute CREATE EXTENSION command first
     console.log(`Executing statement: ${extensionSQL}`);
     await client.query(extensionSQL);
-    console.log(`Successfully executed: CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`);
+    console.log(`Successfully executed: ${extensionSQL}`);
 
     // Execute each ENUM creation DO block
     for (const enumSQL of enumCreationSQLs) {
-      // A simple way to get a short name for logging, e.g., "user_role_enum"
       const enumNameMatch = enumSQL.match(/CREATE TYPE (\S+)/);
       const enumShortName = enumNameMatch ? enumNameMatch[1] : 'ENUM Block';
 
@@ -715,13 +675,10 @@ export async function initializeDatabase() {
         await client.query(enumSQL);
         console.log(`Successfully executed ENUM creation for: ${enumShortName}.`);
       } catch (doBlockError: any) {
-        // 42710 is 'duplicate_object' for ENUMs/Types in PostgreSQL
-        if (doBlockError.code !== '42710') {
+        if (doBlockError.code !== '42710') { // 42710 is 'duplicate_object'
           console.error(`Error executing ENUM DO block for ${enumShortName}:`, doBlockError.message);
-          console.error('Full ENUM Error Object:', doBlockError);
-          throw doBlockError; // Re-throw if not a duplicate object error
+          throw doBlockError;
         } else {
-          // Log a warning, but it's not a fatal error if the type already exists
           console.warn(`Warning during ENUM creation for ${enumShortName} (likely already exists): ${doBlockError.message}`);
         }
       }
@@ -743,7 +700,7 @@ export async function initializeDatabase() {
     if (err.where) console.error('Where:', err.where);
     console.error('Full Error Object:', err);
     console.error('-----------------------------------------');
-    throw err; // Re-throw to indicate failure
+    throw err;
   } finally {
     if (client) {
       await client.release();
