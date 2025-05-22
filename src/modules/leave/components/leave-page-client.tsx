@@ -5,7 +5,7 @@
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar as CalendarIconMain, PlusCircle, ListChecks, Settings, LandPlot, ArrowLeft, Users, Briefcase, Star, Shield, Umbrella, Plane, FirstAidKit, CalendarDays } from "lucide-react"; // Added more icons
+import { Calendar as CalendarIconMain, PlusCircle, ListChecks, Settings, LandPlot, ArrowLeft, Users, Briefcase, Star, Shield, Umbrella, Plane, HeartPulse, CalendarDays } from "lucide-react"; // Changed FirstAidKit to HeartPulse
 import { Button } from "@/components/ui/button";
 import { LeaveRequestForm } from "@/modules/leave/components/leave-request-form";
 import { LeaveRequestList } from "@/modules/leave/components/leave-request-list";
@@ -29,16 +29,16 @@ interface LeavePageClientProps {
   employeeGender?: Gender | null;
 }
 
-// Helper to pick an icon based on leave type name (very basic example)
+// Helper to pick an icon based on leave type name
 const getLeaveTypeIcon = (leaveTypeName?: string): React.ReactNode => {
   const name = leaveTypeName?.toLowerCase() || "";
   if (name.includes("annual") || name.includes("vacation")) return <Plane className="h-5 w-5" />;
-  if (name.includes("sick")) return <FirstAidKit className="h-5 w-5" />;
-  if (name.includes("maternity")) return <Shield className="h-5 w-5" />; // Example
-  if (name.includes("paternity")) return <Briefcase className="h-5 w-5" />; // Example
-  if (name.includes("unpaid")) return <Umbrella className="h-5 w-5" />; // Example
+  if (name.includes("sick")) return <HeartPulse className="h-5 w-5" />; // Changed to HeartPulse
+  if (name.includes("maternity")) return <Shield className="h-5 w-5" />;
+  if (name.includes("paternity")) return <Briefcase className="h-5 w-5" />;
+  if (name.includes("unpaid")) return <Umbrella className="h-5 w-5" />;
   if (name.includes("special") || name.includes("bereavement")) return <Star className="h-5 w-5" />;
-  return <CalendarDays className="h-5 w-5" />; // Default
+  return <CalendarDays className="h-5 w-5" />;
 };
 
 
@@ -48,50 +48,41 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
   const router = useRouter();
 
   const employeeIdFromQuery = searchParams.get('employeeId');
+  // Use the employeeId from query if present (admin viewing other's leave), otherwise use the logged-in user's ID
   const targetUserId = employeeIdFromQuery || initialUserId;
 
   const [allLeaveTypes, setAllLeaveTypes] = React.useState<LeaveType[]>([]);
   const [applicableLeaveTypes, setApplicableLeaveTypes] = React.useState<LeaveType[]>([]);
-  const [allRequests, setAllRequests] = React.useState<LeaveRequest[]>([]);
-  const [myRequests, setMyRequests] = React.useState<LeaveRequest[]>([]);
+  const [allRequests, setAllRequests] = React.useState<LeaveRequest[]>([]); // For admins
+  const [myRequests, setMyRequests] = React.useState<LeaveRequest[]>([]); // For the targetUserId
   const [requestsPendingMyApproval, setRequestsPendingMyApproval] = React.useState<LeaveRequest[]>([]);
-  const [myBalances, setMyBalances] = React.useState<LeaveBalance[]>([]);
+  const [myBalances, setMyBalances] = React.useState<LeaveBalance[]>([]); // For the targetUserId
   const [holidays, setHolidays] = React.useState<Holiday[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [fetchError, setFetchError] = React.useState<string | null>(null);
+  // Set initial active tab based on whether an employeeId is in the query params
   const [activeTab, setActiveTab] = React.useState(employeeIdFromQuery ? 'my-requests' : 'request');
   const [currentEmployeeName, setCurrentEmployeeName] = React.useState<string | null>(null);
 
-  // Helper function to get current user's profile (example, might need adjustment based on your auth setup)
-  // This is a client-side function, ideally it would fetch from an API or use a context
+
   const getEmployeeProfileInfo = React.useCallback(async (): Promise<{ name: string; gender: Gender | null } | null> => {
-      // In a real app, this would fetch from an API endpoint like '/api/auth/me' or '/api/employees/me'
-      // For demonstration, returning a mock or trying to fetch if your API supports it
+      if (!initialUserId) return null; // If no logged-in user, can't fetch profile
       try {
-          const response = await fetch('/api/auth/session'); // Assuming this returns { userId, userRole, tenantId, tenantDomain, name?, gender? }
+          // This conceptual API call should fetch the current logged-in user's employee details
+          const response = await fetch('/api/auth/session'); // This returns userId, userRole, etc.
           if (response.ok) {
               const session = await response.json();
-              // Check if employee specific details like name and gender are directly on session,
-              // or if another call is needed to get the full employee profile using session.userId
-              // For this example, let's assume a separate call would be needed if not on session directly.
-              // This example is simplified and might not fully work without a proper API for current employee details.
-              if (session.userId) {
-                  // Mock fetching additional details - replace with actual API call to get employee profile by userId
-                  // const profileResponse = await fetch(`/api/employees/${session.userId}`); // This conceptual endpoint needs to exist
-                  // if(profileResponse.ok) {
-                  //     const profile = await profileResponse.json();
-                  //     return { name: profile.name, gender: profile.gender };
-                  // }
-                  // For now, return what might be on session or mock.
-                  return { name: session.name || "Current User", gender: session.gender || null };
-              }
+              // Assuming the session might have name, or we need another call for detailed profile
+              // For this example, we'll prioritize the name if available, or use a generic term.
+              // In a real app, you'd ensure this fetches name and gender for the 'initialUserId'.
+              return { name: session.name || "Current User", gender: session.gender || employeeGender || null };
           }
-          return null;
+          return { name: "Current User", gender: employeeGender || null }; // Fallback
       } catch (error) {
           console.error("Error fetching current user's profile for leave page:", error);
-          return null;
+          return { name: "Current User", gender: employeeGender || null }; // Fallback
       }
-  }, []);
+  }, [initialUserId, employeeGender]);
 
 
   const refetchData = React.useCallback(async () => {
@@ -107,48 +98,51 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
       try {
           const promises = [
               getLeaveTypesAction(),
-              getLeaveRequestsAction({ employeeId: targetUserId }),
-              getEmployeeLeaveBalancesAction(targetUserId),
+              getLeaveRequestsAction({ employeeId: targetUserId }), // Fetches requests for the target user
+              getEmployeeLeaveBalancesAction(targetUserId), // Fetches balances for the target user
               getHolidaysAction(),
           ];
 
+          // Fetch all requests only if admin is viewing the main leave page (no specific employeeId in query)
           if (isAdmin && !employeeIdFromQuery) {
-              promises.push(getLeaveRequestsAction());
+              promises.push(getLeaveRequestsAction()); // Fetches all requests for the tenant
           } else {
-              promises.push(Promise.resolve([]));
+              promises.push(Promise.resolve([])); // Placeholder if not admin or viewing specific employee
           }
 
+          // Fetch requests pending manager approval
           if (currentUserRole === 'Manager' || currentUserRole === 'Admin') {
               promises.push(getLeaveRequestsAction({ forManagerApproval: true }));
           } else {
               promises.push(Promise.resolve([]));
           }
 
-          const [typesData, myReqData, balancesData, holidaysData, allReqDataFromFetch, managerApprovalData] = await Promise.all(promises);
+          const [typesData, targetUserReqData, balancesData, holidaysData, allReqDataFromFetch, managerApprovalData] = await Promise.all(promises);
           
           setAllLeaveTypes(typesData);
-          setAllRequests(allReqDataFromFetch);
-          setMyRequests(myReqData);
+          setAllRequests(allReqDataFromFetch); // Contains all requests if admin & no query; empty otherwise
+          setMyRequests(targetUserReqData); // Requests for the employee being viewed (targetUserId)
           setRequestsPendingMyApproval(managerApprovalData);
-          setMyBalances(balancesData);
+          setMyBalances(balancesData); // Balances for the employee being viewed (targetUserId)
           setHolidays(holidaysData);
 
-          if (employeeIdFromQuery && myReqData.length > 0 && myReqData[0].employeeName) {
-             setCurrentEmployeeName(myReqData[0].employeeName);
-          } else if (employeeIdFromQuery) {
-             const employeeProfile = await getEmployeeProfileInfo();
-             if (employeeIdFromQuery === initialUserId && employeeProfile) {
-                 setCurrentEmployeeName(employeeProfile.name);
-             } else {
-                 setCurrentEmployeeName(`Employee (ID: ${employeeIdFromQuery.substring(0,8)}...)`);
-             }
-          } else if (initialUserId) {
-             const employeeProfile = await getEmployeeProfileInfo();
-             if (employeeProfile) setCurrentEmployeeName(employeeProfile.name);
-             else setCurrentEmployeeName("My");
+         // Set the name for the page title
+          if (employeeIdFromQuery && targetUserReqData.length > 0 && targetUserReqData[0].employeeName) {
+             setCurrentEmployeeName(targetUserReqData[0].employeeName);
+          } else if (employeeIdFromQuery && targetUserId === initialUserId) { // Admin viewing their own leave via query param
+             const profile = await getEmployeeProfileInfo();
+             setCurrentEmployeeName(profile?.name || "My");
+          } else if (employeeIdFromQuery) { // Admin viewing someone else
+             // Try to get name from `allRequests` if it happens to contain this employee, otherwise use ID
+             const foundEmployee = allRequests.find(req => req.employeeId === targetUserId);
+             setCurrentEmployeeName(foundEmployee?.employeeName || `Employee (ID: ${targetUserId.substring(0,8)}...)`);
+          } else if (initialUserId) { // User viewing their own leave page (no query param)
+             const profile = await getEmployeeProfileInfo();
+             setCurrentEmployeeName(profile?.name || "My");
           } else {
-             setCurrentEmployeeName(null);
+             setCurrentEmployeeName(null); // Should not happen if targetUserId is set
           }
+
 
       } catch (err: any) {
           console.error("[Leave Page Client] Error during refetchData using actions:", err);
@@ -179,21 +173,31 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
   React.useEffect(() => {
     if (allLeaveTypes.length > 0) {
       let filteredTypes;
+      // Use employeeGender of the person whose leave is being viewed (targetUserId)
+      // This requires fetching the target employee's gender if employeeIdFromQuery is present and not the current user.
+      // For simplicity now, it uses `employeeGender` prop which is for the LOGGED-IN user.
+      // This needs refinement if admin views another employee of different gender.
+      // For now, if admin views someone else, all types are shown.
       const genderToFilterBy = employeeIdFromQuery && employeeIdFromQuery !== initialUserId ? undefined : employeeGender;
+
 
       if (genderToFilterBy) {
         filteredTypes = allLeaveTypes.filter(lt =>
           !lt.applicableGender || lt.applicableGender === genderToFilterBy
         );
       } else {
+        // If no specific gender to filter by (e.g., admin viewing all, or gender unknown), show all non-gender-specific
+        // or all types. For now, show all types if gender is unknown for the viewed profile.
+        // A better approach might be to show only types where applicableGender is null if target gender is unknown.
         filteredTypes = allLeaveTypes;
       }
-      console.log(`[Leave Page Client] Employee Gender: ${genderToFilterBy}, All Types: ${allLeaveTypes.length}, Filtered Types: ${filteredTypes.length}`);
+      console.log(`[Leave Page Client] Logged-in User Gender: ${employeeGender}, Target Employee Gender (used for filtering): ${genderToFilterBy}, All Types: ${allLeaveTypes.length}, Applicable Types for Form: ${filteredTypes.length}`);
       setApplicableLeaveTypes(filteredTypes);
     } else {
       setApplicableLeaveTypes([]);
     }
   }, [allLeaveTypes, employeeGender, employeeIdFromQuery, initialUserId]);
+
 
    const handleLeaveRequestSubmitted = () => {
      refetchData();
@@ -204,8 +208,10 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
    const handleLeaveTypeUpdated = () => refetchData();
    const handleHolidayUpdated = () => refetchData();
 
-  const pageTitleNamePart = currentEmployeeName || (isAdmin && !employeeIdFromQuery ? "Employee" : "My");
-  const pageTitle = `${pageTitleNamePart} Leave Management ${tenantDomain && !currentEmployeeName ? `for ${tenantDomain}` : ''}`;
+  // Dynamic page title based on context
+  const pageTitleNamePart = currentEmployeeName || (isAdmin && !employeeIdFromQuery ? "All Employees'" : "My");
+  const pageTitle = `${pageTitleNamePart} Leave Management ${tenantDomain && !currentEmployeeName && !(isAdmin && !employeeIdFromQuery) ? `for ${tenantDomain}` : ''}`;
+
 
   return (
     <div className="flex flex-col gap-6 md:gap-8">
@@ -213,18 +219,19 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
         <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
             <CalendarIconMain className="h-6 w-6" /> {pageTitle}
         </h1>
-        {employeeIdFromQuery && (
-            <Button variant="outline" onClick={() => router.back()}>
-                <ArrowLeft className="mr-2 h-4 w-4" /> Back
+        {/* Show back button if admin is viewing a specific employee's leave details */}
+        {employeeIdFromQuery && initialUserId !== employeeIdFromQuery && isAdmin && (
+            <Button variant="outline" onClick={() => router.push(`/${tenantDomain}/leave`)}>
+                <ArrowLeft className="mr-2 h-4 w-4" /> Back to All Requests
             </Button>
         )}
       </div>
 
        {isLoading && !fetchError && (
            <div className="space-y-6 md:space-y-8">
-              <Skeleton className="h-40 w-full rounded-lg" /> {/* Enhanced skeleton for balances */}
-              <Skeleton className="h-10 w-full max-w-lg rounded-md" /> {/* Tabs list skeleton */}
-              <Skeleton className="h-64 w-full rounded-lg" /> {/* Tab content skeleton */}
+              <Skeleton className="h-40 w-full rounded-lg" />
+              <Skeleton className="h-10 w-full max-w-lg rounded-md" />
+              <Skeleton className="h-64 w-full rounded-lg" />
            </div>
        )}
        {fetchError && !isLoading && (
@@ -233,6 +240,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
 
        {!isLoading && !fetchError && targetUserId && (
            <>
+              {/* Leave Balances Section - Always shows balances for targetUserId */}
               <Card className="shadow-lg border-border/60">
                  <CardHeader>
                    <CardTitle className="text-xl">
@@ -248,7 +256,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
                            <div key={balance.leaveTypeId} 
                                 className={cn(
                                     "flex flex-col items-start justify-between gap-2 p-4 border rounded-lg bg-card hover:shadow-xl transition-all duration-300 ease-in-out transform hover:-translate-y-1",
-                                    "dark:bg-slate-800 dark:border-slate-700 dark:hover:bg-slate-700"
+                                    "dark:bg-slate-800 dark:border-slate-700 dark:hover:bg-slate-700" // Dark mode styles
                                 )}>
                                <div className="flex items-center gap-3 text-muted-foreground w-full">
                                    <span className="p-2 bg-primary/10 text-primary rounded-full">
@@ -272,20 +280,24 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="leave-tabs">
                  <div className="overflow-x-auto pb-1 mb-4 border-b border-border/60">
                      <TabsList className="inline-flex h-auto w-max sm:w-full justify-start px-0 bg-transparent">
+                       {/* Request Leave tab - only if not viewing someone else's details */}
                        {(!employeeIdFromQuery || employeeIdFromQuery === initialUserId) && (
                            <TabsTrigger value="request" className="flex items-center gap-1.5 px-4 py-3 text-sm font-medium text-muted-foreground hover:text-primary data-[state=active]:text-primary data-[state=active]:border-primary border-b-2 border-transparent rounded-none data-[state=active]:shadow-none data-[state=active]:bg-transparent transition-all">
                                 <PlusCircle className="h-4 w-4"/> Request Leave
                             </TabsTrigger>
                        )}
+                       {/* My Requests tab - title adjusts based on context */}
                        <TabsTrigger value="my-requests" className="flex items-center gap-1.5 px-4 py-3 text-sm font-medium text-muted-foreground hover:text-primary data-[state=active]:text-primary data-[state=active]:border-primary border-b-2 border-transparent rounded-none data-[state=active]:shadow-none data-[state=active]:bg-transparent transition-all">
                            <ListChecks className="h-4 w-4"/>
                            {currentEmployeeName ? `${currentEmployeeName}'s Requests` : 'My Requests'}
                         </TabsTrigger>
-                       {(currentUserRole === 'Admin' || currentUserRole === 'Manager') && !employeeIdFromQuery && (
+                       {/* All Requests tab - for admin not viewing a specific employee */}
+                       {isAdmin && !employeeIdFromQuery && (
                             <TabsTrigger value="all-requests" className="flex items-center gap-1.5 px-4 py-3 text-sm font-medium text-muted-foreground hover:text-primary data-[state=active]:text-primary data-[state=active]:border-primary border-b-2 border-transparent rounded-none data-[state=active]:shadow-none data-[state=active]:bg-transparent transition-all">
                                <Users className="h-4 w-4"/> All Requests
                             </TabsTrigger>
                        )}
+                        {/* Pending My Approval tab - for managers/admins */}
                         {(currentUserRole === 'Admin' || currentUserRole === 'Manager') && (
                              <TabsTrigger value="pending-my-approval" className="flex items-center gap-1.5 px-4 py-3 text-sm font-medium text-muted-foreground hover:text-primary data-[state=active]:text-primary data-[state=active]:border-primary border-b-2 border-transparent rounded-none data-[state=active]:shadow-none data-[state=active]:bg-transparent transition-all">
                                 <ListChecks className="h-4 w-4"/> Pending My Approval
@@ -307,6 +319,7 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
                      </TabsList>
                  </div>
 
+                {/* Request Leave Tab Content - only if applicable */}
                 {(!employeeIdFromQuery || employeeIdFromQuery === initialUserId) && (
                     <TabsContent value="request" className="mt-6">
                        <Card className="shadow-lg border-border/60">
@@ -316,9 +329,9 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
                            </CardHeader>
                            <CardContent>
                                <LeaveRequestForm
-                                   employeeId={targetUserId}
+                                   employeeId={targetUserId} // Should be initialUserId for self-request
                                    leaveTypes={applicableLeaveTypes}
-                                   balances={myBalances} // Pass balances
+                                   balances={myBalances}
                                    onSuccess={handleLeaveRequestSubmitted}
                                />
                            </CardContent>
@@ -326,37 +339,40 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
                     </TabsContent>
                 )}
 
+                {/* My Requests Tab Content - always shows requests for targetUserId */}
                 <TabsContent value="my-requests" className="mt-6">
                     <LeaveRequestList
                         requests={myRequests}
                         leaveTypes={allLeaveTypes}
-                        isAdminView={isAdmin && (employeeIdFromQuery === initialUserId || !employeeIdFromQuery)}
-                        currentUserId={initialUserId}
+                        isAdminView={isAdmin && (targetUserId === initialUserId || !employeeIdFromQuery)}
+                        currentUserId={initialUserId} // Pass the logged-in user's ID
                         tenantDomain={tenantDomain}
                         onUpdate={handleLeaveRequestUpdated}
                     />
                 </TabsContent>
 
-                {(currentUserRole === 'Admin' || currentUserRole === 'Manager') && !employeeIdFromQuery && (
+                {/* All Requests Tab Content - for admin not viewing specific employee */}
+                {isAdmin && !employeeIdFromQuery && (
                    <TabsContent value="all-requests" className="mt-6">
                        <LeaveRequestList
                            requests={allRequests}
                            leaveTypes={allLeaveTypes}
                            isAdminView={true}
-                           currentUserId={initialUserId}
+                           currentUserId={initialUserId} // Pass the logged-in user's ID
                            tenantDomain={tenantDomain}
                            onUpdate={handleLeaveRequestUpdated}
                        />
                    </TabsContent>
                 )}
 
+                {/* Pending My Approval Tab Content */}
                 {(currentUserRole === 'Admin' || currentUserRole === 'Manager') && (
                      <TabsContent value="pending-my-approval" className="mt-6">
                          <LeaveRequestList
                              requests={requestsPendingMyApproval}
                              leaveTypes={allLeaveTypes}
-                             isAdminView={true}
-                             currentUserId={initialUserId}
+                             isAdminView={true} // Allows approve/reject actions
+                             currentUserId={initialUserId} // Pass the logged-in user's ID (manager's ID)
                              tenantDomain={tenantDomain}
                              onUpdate={handleLeaveRequestUpdated}
                              isManagerApprovalView={true}
@@ -387,4 +403,3 @@ export default function LeavePageClient({ userId: initialUserId, isAdmin, curren
     </div>
   );
 }
-
