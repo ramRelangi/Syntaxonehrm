@@ -5,150 +5,90 @@ import dotenv from 'dotenv';
 
 dotenv.config(); // Ensure .env variables are loaded
 
+// SQL to create the pgcrypto extension if it doesn't exist
 const pgcryptoExtensionSQL = `CREATE EXTENSION IF NOT EXISTS pgcrypto;`;
 
-// ENUM type definitions as separate constants for clarity and individual execution
-// These DO $$ ... END $$; blocks should be executed one by one.
-const enumCreationSQLBlocks = [
-`DO $$ BEGIN
-    CREATE TYPE user_role_enum AS ENUM ('Admin', 'Manager', 'Employee');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE gender_enum_type AS ENUM ('M', 'F', 'O');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE address_type_enum AS ENUM ('PERMANENT', 'CURRENT', 'OFFICIAL');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE verification_status_enum AS ENUM ('VERIFIED', 'PENDING', 'REJECTED');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE employment_type_enum AS ENUM ('FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE salary_component_type_enum AS ENUM ('EARNING', 'DEDUCTION', 'BENEFIT');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE calculation_type_enum AS ENUM ('FIXED', 'PERCENTAGE', 'FORMULA');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE attendance_status_enum AS ENUM ('PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE', 'HOLIDAY', 'WEEK_OFF');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE leave_application_status_enum AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE performance_review_status_enum AS ENUM ('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE training_program_status_enum AS ENUM ('PLANNED', 'ONGOING', 'COMPLETED', 'CANCELLED');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE employee_training_status_enum AS ENUM ('REGISTERED', 'ATTENDED', 'COMPLETED', 'DROPPED');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE job_opening_status_enum AS ENUM ('Draft', 'Open', 'Closed', 'Archived');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE candidate_application_status_enum AS ENUM ('APPLIED', 'SCREENING', 'INTERVIEW', 'OFFER', 'HIRED', 'REJECTED');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE candidate_application_active_status_enum AS ENUM ('ACTIVE', 'WITHDRAWN', 'REJECTED');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE asset_status_enum AS ENUM ('AVAILABLE', 'ASSIGNED', 'UNDER_MAINTENANCE', 'RETIRED', 'LOST');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE holiday_type_enum AS ENUM ('FIXED', 'VARIABLE');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`,
-`DO $$ BEGIN
-    CREATE TYPE experience_level_enum_type AS ENUM ('Entry-Level', 'Mid-Level', 'Senior-Level', 'Lead', 'Principal', 'Manager', 'Director');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;`
+// SQL for ENUM type creation (PostgreSQL specific)
+// Each ENUM creation is a separate DO block to avoid issues with some SQL parsers/drivers
+// if they were all in one giant string with other DDL.
+const enumCreationSQLs = [
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role_enum') THEN CREATE TYPE user_role_enum AS ENUM ('Admin', 'Manager', 'Employee'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'gender_enum_type') THEN CREATE TYPE gender_enum_type AS ENUM ('Male', 'Female', 'Other', 'Prefer not to say'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'address_type_enum') THEN CREATE TYPE address_type_enum AS ENUM ('PERMANENT', 'CURRENT', 'OFFICIAL'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'verification_status_enum') THEN CREATE TYPE verification_status_enum AS ENUM ('VERIFIED', 'PENDING', 'REJECTED'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'employment_type_enum') THEN CREATE TYPE employment_type_enum AS ENUM ('Full-time', 'Part-time', 'Contract', 'Internship', 'Temporary'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'salary_component_type_enum') THEN CREATE TYPE salary_component_type_enum AS ENUM ('EARNING', 'DEDUCTION', 'BENEFIT'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'calculation_type_enum') THEN CREATE TYPE calculation_type_enum AS ENUM ('FIXED', 'PERCENTAGE', 'FORMULA'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'attendance_status_enum') THEN CREATE TYPE attendance_status_enum AS ENUM ('PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE', 'HOLIDAY', 'WEEK_OFF'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'leave_application_status_enum') THEN CREATE TYPE leave_application_status_enum AS ENUM ('Pending', 'Approved', 'Rejected', 'Cancelled'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'performance_review_status_enum') THEN CREATE TYPE performance_review_status_enum AS ENUM ('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'training_program_status_enum') THEN CREATE TYPE training_program_status_enum AS ENUM ('PLANNED', 'ONGOING', 'COMPLETED', 'CANCELLED'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'employee_training_status_enum') THEN CREATE TYPE employee_training_status_enum AS ENUM ('REGISTERED', 'ATTENDED', 'COMPLETED', 'DROPPED'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'job_opening_status_enum') THEN CREATE TYPE job_opening_status_enum AS ENUM ('Draft', 'Open', 'Closed', 'Archived'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'candidate_application_status_enum') THEN CREATE TYPE candidate_application_status_enum AS ENUM ('Applied', 'Screening', 'Interviewing', 'Offer Extended', 'Hired', 'Rejected', 'Withdrawn'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'asset_status_enum') THEN CREATE TYPE asset_status_enum AS ENUM ('AVAILABLE', 'ASSIGNED', 'UNDER_MAINTENANCE', 'RETIRED', 'LOST'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'holiday_type_enum') THEN CREATE TYPE holiday_type_enum AS ENUM ('FIXED', 'VARIABLE'); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'experience_level_enum_type') THEN CREATE TYPE experience_level_enum_type AS ENUM ('Entry-Level', 'Mid-Level', 'Senior-Level', 'Lead', 'Principal', 'Manager', 'Director'); END IF; END $$;`
 ];
 
 
 const mainSchemaSQL = `
--- Drop existing tables safely (order matters for foreign keys if not using CASCADE broadly)
--- Make sure to drop tables that depend on others first, or use CASCADE judiciously.
+-- Drop existing tables in reverse order of creation/dependency, with CASCADE
 DROP TABLE IF EXISTS role_permissions CASCADE;
 DROP TABLE IF EXISTS permissions CASCADE;
 DROP TABLE IF EXISTS user_roles CASCADE;
-DROP TABLE IF EXISTS roles CASCADE;
+
 DROP TABLE IF EXISTS employee_assets CASCADE;
 DROP TABLE IF EXISTS asset_inventory CASCADE;
 DROP TABLE IF EXISTS announcements CASCADE;
 DROP TABLE IF EXISTS holidays CASCADE;
+
 DROP TABLE IF EXISTS job_applications CASCADE;
 DROP TABLE IF EXISTS candidates CASCADE;
 DROP TABLE IF EXISTS job_openings CASCADE;
+
 DROP TABLE IF EXISTS employee_training CASCADE;
 DROP TABLE IF EXISTS training_programs CASCADE;
+
 DROP TABLE IF EXISTS performance_ratings CASCADE;
 DROP TABLE IF EXISTS performance_reviews CASCADE;
 DROP TABLE IF EXISTS competencies CASCADE;
 DROP TABLE IF EXISTS performance_cycles CASCADE;
-DROP TABLE IF EXISTS leave_applications CASCADE;
+
 DROP TABLE IF EXISTS employee_leave_balance CASCADE;
+DROP TABLE IF EXISTS leave_balances CASCADE; -- Drop old plural name if it exists
 DROP TABLE IF EXISTS leave_policy_details CASCADE;
 DROP TABLE IF EXISTS leave_policy CASCADE;
 DROP TABLE IF EXISTS leave_types CASCADE;
+
 DROP TABLE IF EXISTS attendance_records CASCADE;
 DROP TABLE IF EXISTS employee_shift CASCADE;
 DROP TABLE IF EXISTS shifts CASCADE;
+
 DROP TABLE IF EXISTS salary_structure_details CASCADE;
 DROP TABLE IF EXISTS employee_salary CASCADE;
 DROP TABLE IF EXISTS salary_components CASCADE;
 DROP TABLE IF EXISTS salary_structures CASCADE;
+
 DROP TABLE IF EXISTS employment_details CASCADE;
 DROP TABLE IF EXISTS designations CASCADE;
 DROP TABLE IF EXISTS departments CASCADE;
+
 DROP TABLE IF EXISTS employee_documents CASCADE;
 DROP TABLE IF EXISTS employee_address CASCADE;
+
 DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS employees CASCADE;
+
+DROP TABLE IF EXISTS email_templates CASCADE;
+DROP TABLE IF EXISTS email_configuration CASCADE;
+
 DROP TABLE IF EXISTS subscription_invoices CASCADE;
 DROP TABLE IF EXISTS tenant_subscriptions CASCADE;
 DROP TABLE IF EXISTS subscription_plans CASCADE;
+
 DROP TABLE IF EXISTS tenant_configurations CASCADE;
 DROP TABLE IF EXISTS tenants CASCADE;
-DROP TABLE IF EXISTS email_templates CASCADE;
-DROP TABLE IF EXISTS email_configuration CASCADE;
 
 -- Tenant Management
 CREATE TABLE tenants (
@@ -215,18 +155,40 @@ CREATE TABLE subscription_invoices (
     CONSTRAINT unique_invoice_number UNIQUE (invoice_number)
 );
 
+-- System & User Management (Tenant-aware)
+CREATE TABLE users (
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID,
+    employee_id UUID UNIQUE, -- employee_id from employees table (FK will be added after employees table)
+    username VARCHAR(50) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    name VARCHAR(100),
+    role user_role_enum NOT NULL DEFAULT 'Employee',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    last_login TIMESTAMP WITH TIME ZONE,
+    failed_attempts INT NOT NULL DEFAULT 0,
+    account_locked BOOLEAN NOT NULL DEFAULT FALSE,
+    password_changed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+    CONSTRAINT unique_tenant_username UNIQUE (tenant_id, username),
+    CONSTRAINT unique_tenant_email UNIQUE (tenant_id, email)
+);
+
 -- Core Employee Tables (Tenant-specific)
 CREATE TABLE employees (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Changed from employee_id to id (UUID)
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     user_id UUID UNIQUE, -- Link to users table
-    employee_id VARCHAR(20), -- Human-readable, tenant-unique employee code (e.g., EMP-001)
+    employee_id VARCHAR(20), -- Human-readable ID, to be generated, tenant-unique
     first_name VARCHAR(50) NOT NULL,
     middle_name VARCHAR(50),
     last_name VARCHAR(50) NOT NULL,
-    name VARCHAR(155) GENERATED ALWAYS AS (first_name || COALESCE(' ' || middle_name, '') || ' ' || last_name) STORED, -- Generated full name
-    date_of_birth DATE, -- Changed from NOT NULL
-    gender gender_enum_type, -- Use pre-defined ENUM
+    name VARCHAR(155) GENERATED ALWAYS AS (first_name || COALESCE(' ' || middle_name, '') || ' ' || last_name) STORED,
+    date_of_birth DATE,
+    gender gender_enum_type,
     marital_status VARCHAR(20),
     nationality VARCHAR(50),
     blood_group VARCHAR(10),
@@ -235,22 +197,25 @@ CREATE TABLE employees (
     phone VARCHAR(20), -- Changed from phone_number
     emergency_contact_name VARCHAR(100),
     emergency_contact_number VARCHAR(20),
-    hire_date DATE NOT NULL,
-    position VARCHAR(100) NOT NULL,
-    department VARCHAR(100) NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive', 'On Leave')),
-    reporting_manager_id UUID, -- Self-referential to employees.id
-    work_location VARCHAR(100),
-    employment_type employment_type_enum DEFAULT 'FULL_TIME',
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE, -- Potentially redundant with 'status', consider merging
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    position VARCHAR(100),
+    department VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive', 'On Leave')),
+    reporting_manager_id UUID,
+    work_location VARCHAR(100),
+    employment_type employment_type_enum DEFAULT 'Full-time',
+    hire_date DATE,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL,
     FOREIGN KEY (reporting_manager_id) REFERENCES employees(id) ON DELETE SET NULL,
     CONSTRAINT unique_tenant_employee_code UNIQUE (tenant_id, employee_id),
-    CONSTRAINT unique_tenant_employee_email UNIQUE (tenant_id, email)
+    CONSTRAINT unique_employees_tenant_id_email UNIQUE (tenant_id, email)
 );
+
+-- Add FK from users to employees now that employees table exists
+ALTER TABLE users ADD CONSTRAINT fk_users_employee_id FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL;
 
 
 CREATE TABLE employee_address (
@@ -281,7 +246,7 @@ CREATE TABLE employee_documents (
     expiry_date DATE,
     issuing_authority VARCHAR(100),
     file_path VARCHAR(255),
-    verification_status verification_status_enum DEFAULT 'PENDING',
+    verification_status verification_status_enum NOT NULL DEFAULT 'PENDING',
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
@@ -290,26 +255,26 @@ CREATE TABLE employee_documents (
 
 -- Organizational Structure (Tenant-specific)
 CREATE TABLE departments (
-    department_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     department_name VARCHAR(100) NOT NULL,
     department_code VARCHAR(20) NOT NULL,
     parent_department_id UUID,
-    manager_id UUID,
+    manager_id UUID, -- This should reference employees.id
     cost_center VARCHAR(50),
     description TEXT,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    FOREIGN KEY (parent_department_id) REFERENCES departments(department_id) ON DELETE SET NULL,
+    FOREIGN KEY (parent_department_id) REFERENCES departments(id) ON DELETE SET NULL,
     FOREIGN KEY (manager_id) REFERENCES employees(id) ON DELETE SET NULL,
     CONSTRAINT unique_tenant_department_name UNIQUE (tenant_id, department_name),
     CONSTRAINT unique_tenant_department_code UNIQUE (tenant_id, department_code)
 );
 
 CREATE TABLE designations (
-    designation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     designation_name VARCHAR(100) NOT NULL,
     level INT NOT NULL,
@@ -327,7 +292,7 @@ CREATE TABLE employment_details (
     employee_id UUID NOT NULL,
     department_id UUID NOT NULL,
     designation_id UUID NOT NULL,
-    reporting_manager_id UUID,
+    reporting_manager_id UUID, -- This should reference employees.id
     employment_type employment_type_enum NOT NULL,
     joining_date DATE NOT NULL,
     confirmation_date DATE,
@@ -341,14 +306,14 @@ CREATE TABLE employment_details (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-    FOREIGN KEY (department_id) REFERENCES departments(department_id) ON DELETE CASCADE,
-    FOREIGN KEY (designation_id) REFERENCES designations(designation_id) ON DELETE CASCADE,
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
+    FOREIGN KEY (designation_id) REFERENCES designations(id) ON DELETE CASCADE,
     FOREIGN KEY (reporting_manager_id) REFERENCES employees(id) ON DELETE SET NULL
 );
 
 -- Compensation & Benefits (Tenant-specific)
 CREATE TABLE salary_structures (
-    structure_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     structure_name VARCHAR(100) NOT NULL,
     effective_from DATE NOT NULL,
@@ -361,7 +326,7 @@ CREATE TABLE salary_structures (
 );
 
 CREATE TABLE salary_components (
-    component_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     component_name VARCHAR(100) NOT NULL,
     component_type salary_component_type_enum NOT NULL,
@@ -388,7 +353,7 @@ CREATE TABLE employee_salary (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-    FOREIGN KEY (structure_id) REFERENCES salary_structures(structure_id) ON DELETE CASCADE
+    FOREIGN KEY (structure_id) REFERENCES salary_structures(id) ON DELETE CASCADE
 );
 
 CREATE TABLE salary_structure_details (
@@ -403,13 +368,13 @@ CREATE TABLE salary_structure_details (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    FOREIGN KEY (structure_id) REFERENCES salary_structures(structure_id) ON DELETE CASCADE,
-    FOREIGN KEY (component_id) REFERENCES salary_components(component_id) ON DELETE CASCADE
+    FOREIGN KEY (structure_id) REFERENCES salary_structures(id) ON DELETE CASCADE,
+    FOREIGN KEY (component_id) REFERENCES salary_components(id) ON DELETE CASCADE
 );
 
 -- Time & Attendance (Tenant-specific)
 CREATE TABLE shifts (
-    shift_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     shift_name VARCHAR(50) NOT NULL,
     start_time TIME NOT NULL,
@@ -436,7 +401,7 @@ CREATE TABLE employee_shift (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-    FOREIGN KEY (shift_id) REFERENCES shifts(shift_id) ON DELETE CASCADE
+    FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE
 );
 
 CREATE TABLE attendance_records (
@@ -457,26 +422,26 @@ CREATE TABLE attendance_records (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-    FOREIGN KEY (shift_id) REFERENCES shifts(shift_id) ON DELETE SET NULL,
+    FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE SET NULL,
     CONSTRAINT unique_tenant_employee_date UNIQUE (tenant_id, employee_id, date)
 );
 
 -- Leave Management (Tenant-specific)
 CREATE TABLE leave_types (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Changed from leave_type_id
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
-    name VARCHAR(50) NOT NULL, -- Changed from leave_type_name
-    short_code VARCHAR(10), -- Made optional
+    name VARCHAR(50) NOT NULL,
+    short_code VARCHAR(10),
     is_paid BOOLEAN NOT NULL DEFAULT TRUE,
     is_encashable BOOLEAN NOT NULL DEFAULT FALSE,
     is_carry_forward BOOLEAN NOT NULL DEFAULT FALSE,
     max_carry_forward_days INT,
     requires_approval BOOLEAN NOT NULL DEFAULT TRUE,
     description TEXT,
+    default_balance NUMERIC(5,2) DEFAULT 0,
+    accrual_rate NUMERIC(5,2) DEFAULT 0,
+    applicable_gender gender_enum_type,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    applicable_gender gender_enum_type, -- Added based on previous schema
-    default_balance NUMERIC(5,2) DEFAULT 0, -- Added based on previous schema
-    accrual_rate NUMERIC(5,2) DEFAULT 0, -- Added based on previous schema
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
@@ -485,9 +450,9 @@ CREATE TABLE leave_types (
 );
 
 CREATE TABLE leave_policy (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Changed from policy_id
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
-    name VARCHAR(100) NOT NULL, -- Changed from policy_name
+    name VARCHAR(100) NOT NULL,
     effective_from DATE NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     description TEXT,
@@ -498,7 +463,7 @@ CREATE TABLE leave_policy (
 );
 
 CREATE TABLE leave_policy_details (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Changed from detail_id
+    detail_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     policy_id UUID NOT NULL,
     leave_type_id UUID NOT NULL,
@@ -524,7 +489,8 @@ CREATE TABLE employee_leave_balance (
     earned_balance NUMERIC(5,2) NOT NULL DEFAULT 0,
     consumed_balance NUMERIC(5,2) NOT NULL DEFAULT 0,
     adjusted_balance NUMERIC(5,2) NOT NULL DEFAULT 0,
-    last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Added last_updated
+    closing_balance NUMERIC(5,2) GENERATED ALWAYS AS (opening_balance + earned_balance - consumed_balance + adjusted_balance) STORED,
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
@@ -533,37 +499,34 @@ CREATE TABLE employee_leave_balance (
     FOREIGN KEY (policy_id) REFERENCES leave_policy(id) ON DELETE SET NULL,
     CONSTRAINT unique_tenant_employee_leave_balance_type_year UNIQUE (tenant_id, employee_id, leave_type_id, year)
 );
--- Add generated column for closing_balance separately
-ALTER TABLE employee_leave_balance
-ADD COLUMN closing_balance NUMERIC(5,2) GENERATED ALWAYS AS (opening_balance + earned_balance - consumed_balance + adjusted_balance) STORED;
 
 
-CREATE TABLE leave_applications (
-    application_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+CREATE TABLE leave_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     employee_id UUID NOT NULL,
     leave_type_id UUID NOT NULL,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
-    days NUMERIC(5,2) NOT NULL,
+    days NUMERIC(5,2),
     reason TEXT,
-    status leave_application_status_enum DEFAULT 'PENDING',
-    applied_on TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    approved_by UUID,
-    approval_date TIMESTAMP WITH TIME ZONE, -- Renamed from approved_on
-    comments TEXT, -- Renamed from rejection_reason, more generic
-    attachment_url VARCHAR(255), -- Added attachment_url
+    status leave_application_status_enum NOT NULL DEFAULT 'Pending',
+    request_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    approver_id UUID,
+    approval_date TIMESTAMP WITH TIME ZONE,
+    comments TEXT,
+    attachment_url VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
     FOREIGN KEY (leave_type_id) REFERENCES leave_types(id) ON DELETE CASCADE,
-    FOREIGN KEY (approved_by) REFERENCES users(user_id) ON DELETE SET NULL -- Approver is a user
+    FOREIGN KEY (approver_id) REFERENCES users(user_id) ON DELETE SET NULL
 );
 
 -- Performance Management (Tenant-specific)
 CREATE TABLE competencies (
-    competency_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     competency_name VARCHAR(100) NOT NULL,
     description TEXT,
@@ -575,7 +538,7 @@ CREATE TABLE competencies (
 );
 
 CREATE TABLE performance_cycles (
-    cycle_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     cycle_name VARCHAR(100) NOT NULL,
     start_date DATE NOT NULL,
@@ -589,27 +552,27 @@ CREATE TABLE performance_cycles (
 );
 
 CREATE TABLE performance_reviews (
-    review_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     employee_id UUID NOT NULL,
     cycle_id UUID NOT NULL,
-    reviewer_id UUID NOT NULL, -- This is employees.id of the reviewer
+    reviewer_id UUID NOT NULL, -- employees.id
     review_date DATE NOT NULL,
     overall_rating NUMERIC(3,1),
     strengths TEXT,
     areas_for_improvement TEXT,
     comments TEXT,
-    status performance_review_status_enum DEFAULT 'DRAFT',
+    status performance_review_status_enum NOT NULL DEFAULT 'DRAFT',
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-    FOREIGN KEY (cycle_id) REFERENCES performance_cycles(cycle_id) ON DELETE CASCADE,
+    FOREIGN KEY (cycle_id) REFERENCES performance_cycles(id) ON DELETE CASCADE,
     FOREIGN KEY (reviewer_id) REFERENCES employees(id) ON DELETE CASCADE
 );
 
 CREATE TABLE performance_ratings (
-    rating_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     review_id UUID NOT NULL,
     competency_id UUID NOT NULL,
@@ -618,13 +581,13 @@ CREATE TABLE performance_ratings (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    FOREIGN KEY (review_id) REFERENCES performance_reviews(review_id) ON DELETE CASCADE,
-    FOREIGN KEY (competency_id) REFERENCES competencies(competency_id) ON DELETE CASCADE
+    FOREIGN KEY (review_id) REFERENCES performance_reviews(id) ON DELETE CASCADE,
+    FOREIGN KEY (competency_id) REFERENCES competencies(id) ON DELETE CASCADE
 );
 
 -- Training & Development (Tenant-specific)
 CREATE TABLE training_programs (
-    program_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     program_name VARCHAR(100) NOT NULL,
     description TEXT,
@@ -634,7 +597,7 @@ CREATE TABLE training_programs (
     training_type VARCHAR(50),
     is_mandatory BOOLEAN NOT NULL DEFAULT FALSE,
     max_participants INT,
-    status training_program_status_enum DEFAULT 'PLANNED',
+    status training_program_status_enum NOT NULL DEFAULT 'PLANNED',
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
@@ -647,7 +610,7 @@ CREATE TABLE employee_training (
     employee_id UUID NOT NULL,
     program_id UUID NOT NULL,
     registration_date DATE NOT NULL,
-    status employee_training_status_enum DEFAULT 'REGISTERED',
+    status employee_training_status_enum NOT NULL DEFAULT 'REGISTERED',
     completion_date DATE,
     score NUMERIC(5,2),
     feedback TEXT,
@@ -655,64 +618,61 @@ CREATE TABLE employee_training (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-    FOREIGN KEY (program_id) REFERENCES training_programs(program_id) ON DELETE CASCADE
+    FOREIGN KEY (program_id) REFERENCES training_programs(id) ON DELETE CASCADE
 );
 
 -- Recruitment (Tenant-specific)
 CREATE TABLE job_openings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Changed from job_id
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     job_title VARCHAR(100) NOT NULL,
     department_id UUID,
     designation_id UUID,
-    employment_type employment_type_enum, -- Use enum
-    no_of_vacancies INT NOT NULL,
-    experience_level experience_level_enum_type, -- Use ENUM
+    employment_type employment_type_enum,
+    no_of_vacancies INT NOT NULL DEFAULT 1,
+    experience_level experience_level_enum_type,
     location VARCHAR(100),
-    date_posted DATE NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Renamed from opening_date
+    date_posted DATE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     closing_date DATE,
-    status job_opening_status_enum DEFAULT 'Draft',
+    status job_opening_status_enum NOT NULL DEFAULT 'Draft',
     description TEXT,
     requirements TEXT,
+    salary_range VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    FOREIGN KEY (department_id) REFERENCES departments(department_id) ON DELETE SET NULL,
-    FOREIGN KEY (designation_id) REFERENCES designations(designation_id) ON DELETE SET NULL
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
+    FOREIGN KEY (designation_id) REFERENCES designations(id) ON DELETE SET NULL
 );
 
 CREATE TABLE candidates (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Changed from candidate_id
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     first_name VARCHAR(50) NOT NULL,
     last_name VARCHAR(50) NOT NULL,
-    name VARCHAR(101) GENERATED ALWAYS AS (first_name || ' ' || last_name) STORED,
     email VARCHAR(100) NOT NULL,
-    phone VARCHAR(20), -- Changed from NOT NULL
-    resume_url VARCHAR(255), -- Renamed from resume_path
+    phone VARCHAR(20),
+    resume_url VARCHAR(255),
     source VARCHAR(50),
     current_company VARCHAR(100),
     current_designation VARCHAR(100),
     total_experience NUMERIC(4,2),
     notice_period INT,
-    current_salary NUMERIC(12,2), -- Changed to NUMERIC
-    expected_salary NUMERIC(12,2), -- Changed to NUMERIC
+    current_salary VARCHAR(100),
+    expected_salary VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    CONSTRAINT unique_tenant_candidate_email UNIQUE (tenant_id, email)
-    -- Status removed from here, will be on job_applications
+    CONSTRAINT unique_candidate_tenant_email UNIQUE (tenant_id, email)
 );
 
 CREATE TABLE job_applications (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Changed from application_id
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     candidate_id UUID NOT NULL,
-    job_id UUID NOT NULL, -- This is job_openings.id
-    application_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Renamed from applied_date
-    status candidate_application_status_enum DEFAULT 'APPLIED', -- Renamed from current_stage
-    -- status (active/withdrawn) column removed as it's covered by application_status_enum
-    notes TEXT, -- Added from prior schema
+    job_id UUID NOT NULL,
+    application_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status candidate_application_status_enum NOT NULL DEFAULT 'Applied',
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
@@ -720,33 +680,11 @@ CREATE TABLE job_applications (
     FOREIGN KEY (job_id) REFERENCES job_openings(id) ON DELETE CASCADE
 );
 
--- System & User Management (Tenant-aware)
-CREATE TABLE users (
-    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID,
-    employee_id UUID, -- This is employees.id
-    username VARCHAR(50) NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    email VARCHAR(100) NOT NULL,
-    name VARCHAR(100), -- Added name field as per prior schema logic
-    role user_role_enum, -- Using the ENUM type, and it's nullable to allow for role table linkage
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    last_login TIMESTAMP WITH TIME ZONE,
-    failed_attempts INT NOT NULL DEFAULT 0,
-    account_locked BOOLEAN NOT NULL DEFAULT FALSE,
-    password_changed_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL, -- Changed from employees.employee_id
-    CONSTRAINT unique_tenant_username UNIQUE (tenant_id, username),
-    CONSTRAINT unique_tenant_email UNIQUE (tenant_id, email)
-);
-
+-- Roles and Permissions (Advanced - optional if simple role on users table is sufficient initially)
 CREATE TABLE roles (
-    role_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID,
-    role_name user_role_enum NOT NULL, -- Use the ENUM type
+    role_name VARCHAR(50) NOT NULL,
     description TEXT,
     is_system BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -760,17 +698,17 @@ CREATE TABLE user_roles (
     user_id UUID NOT NULL,
     role_id UUID NOT NULL,
     assigned_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    assigned_by UUID,
+    assigned_by UUID, -- Should be users.user_id
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-    FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE,
+    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
     FOREIGN KEY (assigned_by) REFERENCES users(user_id) ON DELETE SET NULL,
     CONSTRAINT unique_user_role UNIQUE (user_id, role_id)
 );
 
 CREATE TABLE permissions (
-    permission_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     permission_name VARCHAR(100) NOT NULL,
     permission_key VARCHAR(100) NOT NULL,
     description TEXT,
@@ -785,39 +723,39 @@ CREATE TABLE role_permissions (
     role_id UUID NOT NULL,
     permission_id UUID NOT NULL,
     assigned_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    assigned_by UUID,
+    assigned_by UUID, -- Should be users.user_id
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE,
-    FOREIGN KEY (permission_id) REFERENCES permissions(permission_id) ON DELETE CASCADE,
+    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+    FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE,
     FOREIGN KEY (assigned_by) REFERENCES users(user_id) ON DELETE SET NULL,
     CONSTRAINT unique_role_permission UNIQUE (role_id, permission_id)
 );
 
 -- Additional Tables (Tenant-specific)
 CREATE TABLE holidays (
-    holiday_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
-    holiday_name VARCHAR(100) NOT NULL,
-    holiday_date DATE NOT NULL,
-    holiday_type holiday_type_enum NOT NULL,
-    applicable_location VARCHAR(100) NOT NULL DEFAULT 'ALL',
+    name VARCHAR(100) NOT NULL,
+    date DATE NOT NULL,
     description TEXT,
+    holiday_type holiday_type_enum,
+    applicable_location VARCHAR(100) DEFAULT 'ALL',
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    CONSTRAINT unique_tenant_holiday_date_location UNIQUE (tenant_id, holiday_date, applicable_location)
+    CONSTRAINT unique_tenant_holiday_date_location UNIQUE (tenant_id, date, applicable_location)
 );
 
 CREATE TABLE announcements (
-    announcement_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     title VARCHAR(200) NOT NULL,
     content TEXT NOT NULL,
     publish_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expiry_date TIMESTAMP WITH TIME ZONE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_by UUID NOT NULL,
+    created_by UUID NOT NULL, -- users.user_id
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
@@ -825,7 +763,7 @@ CREATE TABLE announcements (
 );
 
 CREATE TABLE asset_inventory (
-    asset_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     asset_name VARCHAR(100) NOT NULL,
     asset_type VARCHAR(50) NOT NULL,
@@ -835,30 +773,30 @@ CREATE TABLE asset_inventory (
     warranty_expiry DATE,
     purchase_cost NUMERIC(12,2),
     current_value NUMERIC(12,2),
-    status asset_status_enum DEFAULT 'AVAILABLE',
+    status asset_status_enum NOT NULL DEFAULT 'AVAILABLE',
     location VARCHAR(100),
     notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    CONSTRAINT unique_tenant_asset_serial_number UNIQUE (tenant_id, serial_number)
+    CONSTRAINT unique_tenant_serial_number UNIQUE (tenant_id, serial_number)
 );
 
 CREATE TABLE employee_assets (
     assignment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     asset_id UUID NOT NULL,
-    employee_id UUID NOT NULL,
+    employee_id UUID NOT NULL, -- employees.id
     assigned_date DATE NOT NULL,
     return_date DATE,
-    assigned_by UUID NOT NULL,
+    assigned_by UUID NOT NULL, -- users.user_id
     condition_at_assignment TEXT,
     condition_at_return TEXT,
     notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    FOREIGN KEY (asset_id) REFERENCES asset_inventory(asset_id) ON DELETE CASCADE,
+    FOREIGN KEY (asset_id) REFERENCES asset_inventory(id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
     FOREIGN KEY (assigned_by) REFERENCES users(user_id) ON DELETE SET NULL
 );
@@ -894,7 +832,6 @@ CREATE TABLE email_templates (
     CONSTRAINT unique_tenant_email_template_name UNIQUE (tenant_id, name)
 );
 
-
 -- Trigger function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -922,7 +859,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Apply trigger to all relevant tables
+-- Apply trigger to all relevant tables (ensure table names match those created)
 SELECT apply_update_trigger_if_not_exists('tenants');
 SELECT apply_update_trigger_if_not_exists('tenant_configurations');
 SELECT apply_update_trigger_if_not_exists('subscription_plans');
@@ -945,7 +882,7 @@ SELECT apply_update_trigger_if_not_exists('leave_types');
 SELECT apply_update_trigger_if_not_exists('leave_policy');
 SELECT apply_update_trigger_if_not_exists('leave_policy_details');
 SELECT apply_update_trigger_if_not_exists('employee_leave_balance');
-SELECT apply_update_trigger_if_not_exists('leave_applications');
+SELECT apply_update_trigger_if_not_exists('leave_requests');
 SELECT apply_update_trigger_if_not_exists('competencies');
 SELECT apply_update_trigger_if_not_exists('performance_cycles');
 SELECT apply_update_trigger_if_not_exists('performance_reviews');
@@ -967,14 +904,92 @@ SELECT apply_update_trigger_if_not_exists('employee_assets');
 SELECT apply_update_trigger_if_not_exists('email_configuration');
 SELECT apply_update_trigger_if_not_exists('email_templates');
 
-
 -- Create indexes for better performance
-CREATE INDEX IF NOT EXISTS idx_employees_tenant_id ON employees(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_employees_is_active ON employees(tenant_id, is_active);
-CREATE INDEX IF NOT EXISTS idx_employment_details_employee_id ON employment_details(tenant_id, employee_id);
+CREATE INDEX IF NOT EXISTS idx_employees_tenant ON employees(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_employees_active ON employees(tenant_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_employment_details_employee ON employment_details(tenant_id, employee_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_records_date ON attendance_records(tenant_id, date);
-CREATE INDEX IF NOT EXISTS idx_leave_applications_status ON leave_applications(tenant_id, status);
-CREATE INDEX IF NOT EXISTS idx_job_applications_current_stage ON job_applications(tenant_id, current_stage);
-CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_leave_applications_status ON leave_requests(tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_job_applications_stage ON job_applications(tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(tenant_id, email); -- Assuming email is unique per tenant
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(tenant_id, email);
+`;
+
+// Async function to execute the schema (can be called from initializeDatabase)
+async function executeSchema(client: any, schemaSQL: string) {
+  await client.query(schemaSQL);
+}
+
+// Main async function to initialize the database schema
+export async function initializeDatabase() {
+  console.log('Attempting to connect to database for schema initialization...');
+  const client = await pool.connect();
+  console.log('Connected to database. Executing schema creation script...');
+  try {
+    // Execute pgcrypto extension creation
+    console.log('Executing pgcrypto extension creation...');
+    await client.query(pgcryptoExtensionSQL);
+    console.log('Successfully executed pgcrypto extension creation.');
+
+    // Execute ENUM creation DO blocks
+    for (const enumSQL of enumCreationSQLs) {
+      const enumName = enumSQL.match(/CREATE TYPE (\w+)/)?.[1] || 'Unknown ENUM';
+      console.log(`Executing ENUM creation for: ${enumName}...`);
+      try {
+        await client.query(enumSQL);
+        console.log(`Successfully executed ENUM creation for: ${enumName}.`);
+      } catch (enumErr: any) {
+        // Ignore "already exists" errors for ENUM types, as they are harmless if run multiple times
+        if (enumErr.code === '42710') { // 42710 is for "duplicate_object"
+          console.warn(`Warning: ENUM type ${enumName} already exists. Skipping creation.`);
+        } else {
+          console.error(`Error creating ENUM ${enumName}:`, enumErr.message);
+          throw enumErr; // Re-throw other errors
+        }
+      }
+    }
+    console.log('Finished executing ENUM creation DO $$...END$$ blocks.');
+
+
+    // Execute main DDL script (tables, functions, triggers)
+    console.log('Executing main DDL script (tables, functions, triggers)...');
+    await client.query('BEGIN'); // Start transaction for main schema
+    await executeSchema(client, mainSchemaSQL); // Call helper to execute main schema
+    await client.query('COMMIT'); // Commit transaction for main schema
+    console.log('Main DDL script executed successfully and transaction committed.');
+
+  } catch (err: any) {
+    console.error('-----------------------------------------');
+    console.error('Error during main DDL script (tables, functions, triggers):', (err as Error).message);
+    console.error('Stack:', (err as Error).stack);
+    console.error('Full Error Object:', err);
+    console.error('-----------------------------------------');
+    await client.query('ROLLBACK'); // Rollback transaction on error
+    console.error('Error during database schema initialization, transaction rolled back.');
+    throw err; // Re-throw the error to be caught by the caller
+  } finally {
+    client.release();
+    console.log('Database client released after schema initialization.');
+  }
+}
+
+// Function to allow manual execution if needed (e.g., from a script)
+async function manualDbInit() {
+  console.log('Starting manual database initialization...');
+  try {
+    await initializeDatabase();
+    console.log('Manual DB initialization completed successfully.');
+  } catch (error) {
+    console.error('Manual DB initialization failed:', error);
+  } finally {
+    await pool.end(); // Close the pool after script execution
+    console.log('Database pool closed after manual initialization.');
+  }
+}
+
+// Execute only if run directly from Node.js (e.g., `tsx src/lib/init-db.ts`)
+if (require.main === module) {
+  manualDbInit();
+}
+
+update code with above changes
