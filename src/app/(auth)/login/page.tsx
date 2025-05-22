@@ -22,7 +22,7 @@ export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const [tenantSubdomain, setTenantSubdomain] = useState<string | null>(null); // Changed from tenantDomain
+  const [tenantSubdomain, setTenantSubdomain] = useState<string | null>(null);
   const [rootDomain, setRootDomain] = useState<string>('localhost');
   const [port, setPort] = useState<string>('');
   const [displayUrl, setDisplayUrl] = useState<string | null>(null);
@@ -42,11 +42,11 @@ export default function LoginPage() {
 
         const isRoot =
            hostname === currentRootDomain ||
-           hostname === 'localhost' || // Keep localhost for dev
-           hostname === '127.0.0.1' || // Local IP
-           hostname.match(/^192\.168\.\d+\.\d+$/) || // Local IPs
-           hostname.match(/^10\.\d+\.\d+\.\d+$/) || // Local IPs
-           hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/); // Local IPs
+           hostname === 'localhost' ||
+           hostname === '127.0.0.1' ||
+           hostname.match(/^192\.168\.\d+\.\d+$/) ||
+           hostname.match(/^10\.\d+\.\d+\.\d+$/) ||
+           hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/);
 
 
         if (isRoot) {
@@ -55,21 +55,19 @@ export default function LoginPage() {
             setDisplayUrl(`${currentRootDomain}${displayPortString}`);
             console.log(`[LoginPage Effect] On root domain. Display URL: ${currentRootDomain}${displayPortString}`);
         } else {
-            // Match subdomain.rootDomain
             const match = hostname.match(new RegExp(`^(.*)\\.${currentRootDomain.replace(/\./g, '\\.')}$`));
             const subdomain = match ? match[1] : null;
             console.log(`[LoginPage Effect] Extracted subdomain: ${subdomain}`);
 
-            if (subdomain && !['www', 'api'].includes(subdomain)) { // Add more ignored subdomains if needed
+            if (subdomain && !['www', 'api'].includes(subdomain)) {
                 setIsRootLogin(false);
                 setTenantSubdomain(subdomain);
                 setDisplayUrl(`${subdomain}.${currentRootDomain}${displayPortString}`);
                 console.log(`[LoginPage Effect] Tenant subdomain set to: ${subdomain}. Display URL: ${subdomain}.${currentRootDomain}${displayPortString}`);
             } else {
-                // If it's not a valid subdomain structure or an ignored subdomain, treat as root/invalid
-                setIsRootLogin(true); // Or handle as error, redirect to register
+                setIsRootLogin(true);
                 setTenantSubdomain(null);
-                setDisplayUrl(`${hostname}${displayPortString}`);
+                setDisplayUrl(`${hostname}${displayPortString}`); // Show current invalid hostname
                 console.warn(`[LoginPage Effect] Invalid/ignored subdomain or non-tenant hostname: ${hostname}. Treating as root/default. Display URL: ${hostname}${displayPortString}`);
             }
         }
@@ -80,7 +78,7 @@ export default function LoginPage() {
   const form = useForm<TenantLoginFormInputs>({
     resolver: zodResolver(tenantLoginSchema),
     defaultValues: {
-      loginIdentifier: "", // For username or email
+      loginIdentifier: "",
       password: "",
     },
   });
@@ -90,15 +88,16 @@ export default function LoginPage() {
     console.log(`Login attempt with identifier: ${data.loginIdentifier}`);
 
     try {
-      const result = await loginAction(data); // loginAction will derive tenant from hostname
+      // loginAction will derive tenant from hostname via headers()
+      const result = await loginAction(data);
 
       if (!result.success) {
         toast({ title: "Login Failed", description: result.error || "Invalid credentials or inactive account.", variant: "destructive" });
         setIsLoading(false);
       } else {
         toast({ title: "Login Successful", description: "Welcome back!" });
-        // router.push will work within the current subdomain context
-        router.push('/dashboard');
+        // Redirect to the dashboard of the current subdomain
+        router.push('/dashboard'); // Next.js router handles relative paths within current origin
       }
     } catch (error: any) {
         console.error("Login action error:", error);
@@ -108,8 +107,8 @@ export default function LoginPage() {
   };
 
   const forgotPasswordHref = tenantSubdomain
-    ? `/forgot-password/${tenantSubdomain}`
-    : '/forgot-password';
+    ? `/forgot-password/${tenantSubdomain}` // Path for subdomain forgot password
+    : '/forgot-password'; // Path for root forgot password (which then asks for domain)
 
   const displayLocation = tenantSubdomain
       ? `company: ${tenantSubdomain}`
@@ -132,7 +131,7 @@ export default function LoginPage() {
         <CardContent>
             {isRootLogin && displayUrl !== null && (
                 <Alert variant="default" className="mb-4 bg-blue-50 border-blue-300 text-blue-800 [&>svg]:text-blue-600 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-300 dark:[&>svg]:text-blue-500">
-                    <AlertTitle>Root Login</AlertTitle>
+                    <AlertTitle>Root Access</AlertTitle>
                     <AlertDescription>
                          Please use your company's unique login URL (e.g., <strong>your-company.{rootDomain}</strong>) to access your account.
                          If you are registering a new company, please go to the <Link href="/register" className='font-medium underline'>registration page</Link>.
@@ -191,7 +190,8 @@ export default function LoginPage() {
               </Button>
             </form>
           </Form>
-          {!tenantSubdomain && (
+          {/* Show register link only if on root login page */}
+          {isRootLogin && (
             <div className="mt-4 text-center text-sm">
                 Need to register a company?{' '}
                 <Link href="/register" className="font-medium text-primary hover:underline">

@@ -23,10 +23,11 @@ export default function RegisterPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [loginUrl, setLoginUrl] = useState('');
-  const [rootDomain, setRootDomain] = React.useState('localhost');
+  const [rootDomain, setRootDomain] = React.useState('localhost'); // Default for safety
 
   React.useEffect(() => {
-    setRootDomain(process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost');
+    // This ensures NEXT_PUBLIC_ROOT_DOMAIN is read client-side if available
+    setRootDomain(process.env.NEXT_PUBLIC_ROOT_DOMAIN || window.location.hostname.split('.').slice(-2).join('.') || 'localhost');
   }, []);
 
   console.log("Rendering RegisterPage component");
@@ -37,7 +38,7 @@ export default function RegisterPage() {
       companyName: "",
       companySubdomain: "", // Changed from companyDomain
       adminName: "",
-      adminUsername: "", // Added
+      adminUsername: "",
       adminEmail: "",
       adminPassword: "",
     },
@@ -73,7 +74,7 @@ export default function RegisterPage() {
                 variant: "destructive",
             });
             setIsLoading(false);
-            if (result.errors?.some(e => e.path?.includes('companySubdomain'))) { // Changed from companyDomain
+            if (result.errors?.some(e => e.path?.includes('companySubdomain'))) {
                 form.setError("companySubdomain", { type: 'server', message: errorMessage });
             } else if (result.errors?.some(e => e.path?.includes('adminEmail'))) {
                 form.setError("adminEmail", { type: 'server', message: errorMessage });
@@ -149,7 +150,7 @@ export default function RegisterPage() {
                 />
                  <FormField
                   control={form.control}
-                  name="companySubdomain" // Changed from companyDomain
+                  name="companySubdomain"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Choose Your Subdomain</FormLabel>
@@ -180,7 +181,7 @@ export default function RegisterPage() {
                 />
                  <FormField
                   control={form.control}
-                  name="adminUsername" // Added
+                  name="adminUsername"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Admin Username</FormLabel>
@@ -232,7 +233,7 @@ export default function RegisterPage() {
            <div className="mt-4 text-center text-sm">
              Already have an account?{' '}
              <Link href="/login" className="font-medium text-primary hover:underline">
-                Login
+                Login Here
              </Link>
            </div>
         </CardContent>
