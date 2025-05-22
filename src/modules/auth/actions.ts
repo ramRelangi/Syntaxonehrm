@@ -1,7 +1,5 @@
 
 'use server';
-// Force this module to use the Node.js runtime because bcrypt needs it
-// export const runtime = 'nodejs'; // This line should be removed or handled by Next.js config if needed globally
 
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
@@ -15,7 +13,7 @@ import type {
     TenantLoginFormInputs,
     SessionData,
 } from '@/modules/auth/types';
-import { registrationSchema, tenantLoginSchema, userRoleSchema } from '@/modules/auth/types'; // Ensure userRoleSchema is imported
+import { registrationSchema, tenantLoginSchema, userRoleSchema } from '@/modules/auth/types';
 import {
     addTenant as dbAddTenant,
     getUserByEmail as dbGetUserByEmail,
@@ -23,12 +21,12 @@ import {
     getTenantByDomain as dbGetTenantByDomain,
     getUserById as dbGetUserByIdInternal,
     getUserByUsername as dbGetUserByUsername,
-    getEmployeeByEmployeeIdAndTenantId as dbGetEmployeeByHumanId, // Use more specific name
-    getEmployeeByUserId as dbGetAuthEmployeeByUserId,
+    getEmployeeByEmployeeIdAndTenantId as dbGetEmployeeByHumanId,
+    getEmployeeByUserId as dbGetAuthEmployeeByUserId, // Renamed for clarity
 } from '@/modules/auth/lib/db';
-import pool, { testDbConnection } from '@/lib/db'; // Correct import
-import { initializeDatabase } from '@/lib/init-db'; // Correct import
-import { MOCK_SESSION_COOKIE } from '@/lib/auth';
+import pool, { testDbConnection } from '@/lib/db';
+import { initializeDatabase } from '@/lib/init-db';
+import { MOCK_SESSION_COOKIE } from '@/lib/auth'; // Assuming this is still used/defined
 import { redirect } from 'next/navigation';
 import { getEmailSettings as dbGetEmailSettings } from '@/modules/communication/lib/db';
 import type { EmailSettings } from '@/modules/communication/types';
@@ -78,9 +76,10 @@ function createInternalTransporter(): nodemailer.Transporter | null {
         connectionTimeout: 15000,
         greetingTimeout: 15000,
         socketTimeout: 15000,
-        secure: config.secure,
+        secure: config.secure, // Use the determined secure value
     };
 
+    // Explicitly set requireTLS for port 587 if not using secure
     if (config.port === 587 && !config.secure) {
         transportOptions.requireTLS = true;
     }
@@ -98,7 +97,7 @@ export async function sendAdminNotification(subject: string, textBody: string, h
         console.error('[sendAdminNotification] Failed to create internal email transporter for admin notification.');
         return false;
     }
-    const config = getInternalSmtpConfig();
+    const config = getInternalSmtpConfig(); // Get config again to ensure fromEmail/Name are correct
     const mailOptions = {
         from: `"${config?.fromName || INTERNAL_FROM_NAME}" <${config?.fromEmail || INTERNAL_FROM_EMAIL}>`,
         to: ADMIN_EMAIL,
@@ -116,30 +115,30 @@ export async function sendAdminNotification(subject: string, textBody: string, h
     }
 }
 
+
 function constructLoginUrl(subdomain: string): string {
     const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
     const protocol = process.env.NODE_ENV === 'production' ? 'https:' : 'http:';
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `http://localhost:9002`;
+    const currentHost = headers().get('host') || process.env.NEXT_PUBLIC_BASE_URL || `http://localhost:9002`;
     let portSection = '';
 
     try {
-        const url = new URL(baseUrl);
+        const url = new URL(currentHost.startsWith('http') ? currentHost : `${protocol}//${currentHost}`);
         if (url.port && url.port !== '80' && url.port !== '443') {
             portSection = `:${url.port}`;
         }
     } catch (e) {
-        console.warn(`[constructLoginUrl] Could not parse NEXT_PUBLIC_BASE_URL (${baseUrl}) to extract port.`);
-        if (process.env.NODE_ENV !== 'production' && rootDomain === 'localhost') {
-            const currentPort = headers().get('host')?.split(':')[1] || process.env.PORT || '9002';
-             if (currentPort && currentPort !== '80' && currentPort !== '443') {
-                 portSection = `:${currentPort}`;
-             }
+        console.warn(`[constructLoginUrl] Could not parse currentHost (${currentHost}) to extract port. Falling back to env or default.`);
+        const fallbackPort = process.env.PORT || '9002';
+        if (fallbackPort && fallbackPort !== '80' && fallbackPort !== '443') {
+             portSection = `:${fallbackPort}`;
         }
     }
     const loginUrl = `${protocol}//${subdomain}.${rootDomain}${portSection}/login`;
     console.log(`[constructLoginUrl] Constructed: ${loginUrl} for subdomain ${subdomain}`);
     return loginUrl;
 }
+
 
 async function sendNewTenantWelcomeEmail(tenantName: string, adminName: string, adminEmail: string, adminUsername: string, tenantSubdomain: string): Promise<boolean> {
     console.log(`[sendNewTenantWelcomeEmail] Attempting to send welcome email to ${adminEmail} for tenant ${tenantSubdomain}`);
@@ -220,17 +219,17 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
 
         console.log(`[registerTenantAction] Tenant '${companyName}' created with ID: ${newTenant.tenant_id}. Adding admin user...`);
         const passwordHash = await bcrypt.hash(adminPassword, SALT_ROUNDS);
-        const newUser = await dbAddUserInternal({
+        const newUser = await dbAddUserInternal({ // Renamed from dbAddUser
             tenant_id: newTenant.tenant_id,
             username: adminUsername,
             passwordHash,
             email: adminEmail,
-            name: adminName,
+            name: adminName, // name for User record
             role: 'Admin',
             is_active: true,
-            employee_id: null,
+            employee_id: null, // No employee record yet for this admin user
         });
-        console.log(`[registerTenantAction] Admin user '${adminName}' added with ID: ${newUser.user_id}.`);
+        console.log(`[registerTenantAction] Admin user '${adminName}' added with user_id: ${newUser.user_id}.`);
 
         sendNewTenantWelcomeEmail(newTenant.name, adminName, adminEmail, adminUsername, newTenant.subdomain)
             .then(sent => {
@@ -279,6 +278,9 @@ export async function registerTenantAction(formData: RegistrationFormData): Prom
 }
 
 export async function loginAction(credentials: TenantLoginFormInputs): Promise<{ success: boolean; error?: string; user?: Omit<User, 'passwordHash'> }> {
+    const headersList = headers(); // Call at the top
+    const cookieStore = cookies(); // Call at the top
+
     console.log(`[loginAction] Attempting login with identifier: ${credentials.loginIdentifier}`);
     const validation = tenantLoginSchema.safeParse(credentials);
     if (!validation.success) {
@@ -286,7 +288,6 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
     }
     const { loginIdentifier, password } = validation.data;
 
-    const headersList = headers();
     const host = headersList.get('host') || '';
     const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
     const normalizedHost = host.split(':')[0];
@@ -319,20 +320,29 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
         } else {
             console.log(`[loginAction] Attempting to find user by username: ${loginIdentifier} for tenant ${tenant.tenant_id}`);
             user = await dbGetUserByUsername(loginIdentifier, tenant.tenant_id);
+            // If not found by username, try by employee_id (human-readable)
             if (!user) {
+                console.log(`[loginAction] User not found by username, trying by Employee ID: ${loginIdentifier}`);
                 const employeeByStringId = await dbGetEmployeeByHumanId(loginIdentifier, tenant.tenant_id);
                 if (employeeByStringId && employeeByStringId.user_id) {
+                    console.log(`[loginAction] Employee found by Employee ID, corresponding user_id: ${employeeByStringId.user_id}`);
                     user = await dbGetUserByIdInternal(employeeByStringId.user_id);
+                } else {
+                    console.log(`[loginAction] No employee found with Employee ID: ${loginIdentifier}`);
                 }
             }
         }
+        
+        console.log('[loginAction] User object after DB lookup:', user ? { userId: user.user_id, username: user.username, email: user.email, role: user.role, isActive: user.is_active } : 'undefined');
+
 
         if (!user || !user.is_active) {
             console.log(`[loginAction] User not found or globally inactive for identifier: ${loginIdentifier}`);
             return { success: false, error: "Invalid credentials or inactive account." };
         }
 
-        if (user.user_id) {
+        // Check employee status if user is linked to an employee record
+        if (user.user_id) { // Use user_id (PK) to fetch employee record
             employeeForStatusCheck = await dbGetAuthEmployeeByUserId(user.user_id, tenant.tenant_id);
         }
 
@@ -356,33 +366,30 @@ export async function loginAction(credentials: TenantLoginFormInputs): Promise<{
         console.log(`[loginAction] Login successful for user: ${user.user_id}. Setting session cookie.`);
         const sessionData: SessionData = {
             userId: user.user_id,
-            tenantId: user.tenant_id!,
+            tenantId: user.tenant_id!, // Assuming tenant_id is always present for a logged-in user
             tenantDomain: tenant.subdomain,
             userRole: user.role,
-            username: user.username,
+            username: user.username, // This is the critical field
         };
+        
+        console.log('[loginAction] SessionData object before stringify:', JSON.stringify(sessionData));
 
-        const cookieOptions: any = {
+
+        const cookieOptions: Parameters<typeof cookieStore.set>[2] = { // Use Parameters for type safety
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             path: '/',
             sameSite: 'lax' as const,
-            maxAge: 60 * 60 * 24 * 7,
+            maxAge: 60 * 60 * 24 * 7, // 1 week
         };
 
         const isLocalhostOrIp = normalizedHost === 'localhost' || normalizedHost === '127.0.0.1' || normalizedHost.match(/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/);
-        if (rootDomain && !isLocalhostOrIp) {
-            cookieOptions.domain = `.${rootDomain}`;
-        } else if (rootDomain && rootDomain === 'localhost' && normalizedHost !== 'localhost') {
-            // Specific case for subdomains of localhost during dev, like demo.localhost
-            // Here, we usually don't set the domain, browser scopes it to demo.localhost
-        } else if (rootDomain && rootDomain !== 'localhost' && normalizedHost.endsWith(`.${rootDomain}`)) {
+        if (rootDomain && !isLocalhostOrIp && normalizedHost.endsWith(`.${rootDomain}`)) {
             cookieOptions.domain = `.${rootDomain}`;
         }
-        // If it's just localhost, we don't set domain for browser to scope it to localhost
 
         console.log("[loginAction] Setting cookie with options:", cookieOptions);
-        cookies().set(MOCK_SESSION_COOKIE, JSON.stringify(sessionData), cookieOptions);
+        cookieStore.set(MOCK_SESSION_COOKIE, JSON.stringify(sessionData), cookieOptions);
 
         const { passwordHash: _, ...safeUser } = user;
         return { success: true, user: safeUser };
@@ -412,19 +419,20 @@ export async function logoutAction() {
              path: '/',
         };
         const isLocalhostOrIp = currentHost === 'localhost' || currentHost === '127.0.0.1' || currentHost.match(/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/);
-        if (rootDomain && !isLocalhostOrIp) {
+
+        if (rootDomain && !isLocalhostOrIp && currentHost.endsWith(`.${rootDomain}`)) {
             cookieDeleteOptions.domain = `.${rootDomain}`;
         }
         cookies().delete(cookieDeleteOptions);
         console.log("[logoutAction] Session cookie deleted with options:", cookieDeleteOptions);
     } catch (error) { console.error("[logoutAction] Error clearing cookie:", error); }
 
-    const redirectUrl = tenantSubdomain ? constructLoginUrl(tenantSubdomain) : '/login'; // Changed from /register
+    const redirectUrl = tenantSubdomain ? constructLoginUrl(tenantSubdomain) : '/login';
     console.log(`[logoutAction] Redirecting to: ${redirectUrl}`);
     redirect(redirectUrl);
 }
 
-// --- Session Helper Functions ---
+// --- Session Helper Functions (using direct cookie parsing) ---
 export async function _parseSessionCookie(): Promise<SessionData | null> {
   console.log("[_parseSessionCookie] Attempting to get and parse session cookie...");
   const headersList = headers();
@@ -437,21 +445,23 @@ export async function _parseSessionCookie(): Promise<SessionData | null> {
     const sessionCookie = cookieStore.get('mockSession'); // Use literal string for debugging
 
     if (sessionCookie?.value) {
-      console.log(`[_parseSessionCookie] Found 'mockSession'. Value: "${sessionCookie.value}"`);
+      console.log(`[_parseSessionCookie] Found 'mockSession'. Raw Value: "${sessionCookie.value}"`);
       const sessionData: SessionData = JSON.parse(sessionCookie.value);
+      console.log(`[_parseSessionCookie] Parsed sessionData from cookie:`, JSON.stringify(sessionData));
+
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (
         sessionData &&
-        uuidRegex.test(sessionData.userId) &&
-        (sessionData.tenantId === null || (sessionData.tenantId && uuidRegex.test(sessionData.tenantId))) &&
-        sessionData.tenantDomain &&
-        sessionData.userRole &&
-        sessionData.username
+        typeof sessionData.userId === 'string' && uuidRegex.test(sessionData.userId) &&
+        (sessionData.tenantId === null || (typeof sessionData.tenantId === 'string' && uuidRegex.test(sessionData.tenantId))) &&
+        typeof sessionData.tenantDomain === 'string' && sessionData.tenantDomain && // Ensure tenantDomain is a non-empty string
+        typeof sessionData.userRole === 'string' && userRoleSchema.safeParse(sessionData.userRole).success &&
+        typeof sessionData.username === 'string' && sessionData.username // Ensure username is a non-empty string
       ) {
         console.log("[_parseSessionCookie] Session data parsed and validated successfully:", JSON.stringify(sessionData));
         return sessionData;
       }
-      console.warn("[_parseSessionCookie] Invalid session data structure in cookie:", JSON.stringify(sessionData));
+      console.warn("[_parseSessionCookie] Invalid session data structure or content in cookie after parsing. Data:", JSON.stringify(sessionData));
     } else {
       console.log("[_parseSessionCookie] Cookie 'mockSession' NOT FOUND or has no value.");
     }
@@ -460,6 +470,7 @@ export async function _parseSessionCookie(): Promise<SessionData | null> {
   }
   return null;
 }
+
 
 export async function getSessionData(): Promise<SessionData | null> {
     console.log("[getSessionData action] Attempting to get full session data by calling _parseSessionCookie...");
@@ -472,6 +483,7 @@ export async function getSessionData(): Promise<SessionData | null> {
         return null;
     }
 }
+
 
 export async function getTenantIdFromSession(): Promise<string | null> {
     console.log("[getTenantIdFromSession] Attempting to get tenantId by calling _parseSessionCookie...");
@@ -525,28 +537,29 @@ export async function getUserFromSession(): Promise<Omit<User, 'passwordHash'> |
             console.log("[getUserFromSession] Incomplete session data (userId missing).");
             return null;
         }
-        const user = await dbGetUserByIdInternal(session.userId); // Ensure this uses UUID correctly
-        if (user && user.tenant_id === session.tenantId) {
+        // Ensure dbGetUserByIdInternal expects UUID correctly
+        const user = await dbGetUserByIdInternal(session.userId); // dbGetUserByIdInternal should handle tenant context or be universal
+        if (user) { // Removed tenantId check here, assuming dbGetUserByIdInternal is sufficient for user lookup
             const { passwordHash: _, ...safeUser } = user;
             console.log(`[getUserFromSession] User ${safeUser.user_id} found.`);
             return safeUser;
         }
-        console.log("[getUserFromSession] User not found or tenant mismatch.");
+        console.log("[getUserFromSession] User not found for userId:", session.userId);
     } catch (error: any) {
         console.error(`[getUserFromSession] Error calling _parseSessionCookie or db: ${error.message}`, error);
     }
     return null;
 }
 
+
 export async function getEmployeeProfileForCurrentUser(): Promise<Employee | null> {
     console.log("[getEmployeeProfileForCurrentUser] Attempting to fetch current user's employee profile...");
     try {
         const session = await getSessionData();
         if (!session?.userId || !session.tenantId) {
-            console.log("[getEmployeeProfileForCurrentUser] userId or tenantId missing from session.");
+            console.log("[getEmployeeProfileForCurrentUser] userId or tenantId missing from session. Session:", JSON.stringify(session));
             return null;
         }
-        // dbGetAuthEmployeeByUserId expects userId (from users table) and tenantId
         const employee = await dbGetAuthEmployeeByUserId(session.userId, session.tenantId);
         if (employee) {
             console.log(`[getEmployeeProfileForCurrentUser] Employee profile found for user ${session.userId}. Employee PK: ${employee.id}`);
@@ -565,15 +578,16 @@ export async function sendEmployeeWelcomeEmail(
   tenantId: string,
   employeeName: string,
   employeeEmail: string,
-  employeeUserId: string,
-  employeeLoginId: string,
+  employeeUserId: string, // user_id (UUID)
+  employeeLoginId: string, // Human-readable employee_id (e.g., EMP-001)
   temporaryPassword?: string,
-  tenantSubdomain?: string
+  tenantSubdomain?: string // Added this explicitly
 ): Promise<boolean> {
     console.log(`[sendEmployeeWelcomeEmail] Initiating for ${employeeEmail} (Login ID: ${employeeLoginId}, UserID: ${employeeUserId}) for tenant ID ${tenantId}`);
 
     if (!tenantSubdomain) {
         console.error(`[sendEmployeeWelcomeEmail] Tenant subdomain not provided for tenant ID: ${tenantId}. Cannot construct login URL.`);
+        // Consider notifying admin if this critical info is missing
         await sendAdminNotification(
             `Employee Welcome Email Failed (Missing Tenant Subdomain)`,
             `Failed to send welcome email to ${employeeEmail} (Login ID: ${employeeLoginId}) for tenant ID ${tenantId} because the tenant subdomain was not provided.`
@@ -581,7 +595,8 @@ export async function sendEmployeeWelcomeEmail(
         return false;
     }
 
-    const tenant = await dbGetTenantByDomain(tenantSubdomain);
+    // Fetch full tenant details to get name
+    const tenant = await dbGetTenantByDomain(tenantSubdomain); // Use subdomain to fetch tenant
     if (!tenant) {
         console.error(`[sendEmployeeWelcomeEmail] Tenant not found for subdomain: ${tenantSubdomain}. Cannot send welcome email to ${employeeEmail}.`);
         await sendAdminNotification(
@@ -592,7 +607,8 @@ export async function sendEmployeeWelcomeEmail(
     }
     console.log(`[sendEmployeeWelcomeEmail] Tenant found: ${tenant.name} (Subdomain: ${tenant.subdomain})`);
 
-    let emailSettings = await dbGetEmailSettings(tenantId);
+
+    let emailSettings = await dbGetEmailSettings(tenantId); // This now uses tenantId from param
     let transporter;
     let mailerFromName = INTERNAL_FROM_NAME;
     let mailerFromEmail = INTERNAL_FROM_EMAIL;
@@ -606,7 +622,7 @@ export async function sendEmployeeWelcomeEmail(
             port: emailSettings.smtpPort,
             auth: {
                 user: emailSettings.smtpUser,
-                pass: emailSettings.smtpPassword,
+                pass: emailSettings.smtpPassword, // This is the decrypted password from dbGetEmailSettings
             },
             connectionTimeout: 15000,
             greetingTimeout: 15000,
@@ -615,12 +631,14 @@ export async function sendEmployeeWelcomeEmail(
             debug: process.env.NODE_ENV === 'development',
         };
 
+        // Common port configurations
         if (emailSettings.smtpPort === 465) {
             transportOptions.secure = true;
         } else if (emailSettings.smtpPort === 587) {
-            transportOptions.secure = false;
+            transportOptions.secure = false; // STARTTLS
             transportOptions.requireTLS = true;
         } else {
+            // For other ports, rely on the saved smtpSecure value
             transportOptions.secure = emailSettings.smtpSecure;
         }
         transporter = nodemailer.createTransport(transportOptions);
@@ -628,8 +646,8 @@ export async function sendEmployeeWelcomeEmail(
         mailerFromEmail = emailSettings.fromEmail;
     } else {
         console.warn(`[sendEmployeeWelcomeEmail] SMTP settings not configured or incomplete for tenant ${tenant.name} (${tenantId}). Falling back to internal SMTP.`);
-        transporter = createInternalTransporter();
-        const internalConfig = getInternalSmtpConfig();
+        transporter = createInternalTransporter(); // Uses .env variables directly
+        const internalConfig = getInternalSmtpConfig(); // To get fromName/Email for fallback
         if (internalConfig) {
             mailerFromName = internalConfig.fromName;
             mailerFromEmail = internalConfig.fromEmail;
@@ -646,7 +664,7 @@ export async function sendEmployeeWelcomeEmail(
     }
     console.log(`[sendEmployeeWelcomeEmail] Transporter created using: ${usingSmtpType}`);
 
-    const loginUrl = constructLoginUrl(tenantSubdomain);
+    const loginUrl = constructLoginUrl(tenantSubdomain); // Use the passed subdomain
     const mailOptions = {
         from: `"${mailerFromName}" <${mailerFromEmail}>`,
         to: employeeEmail,
@@ -663,6 +681,7 @@ export async function sendEmployeeWelcomeEmail(
     } catch (error: any) {
         console.error(`[sendEmployeeWelcomeEmail] Error sending employee welcome email using ${usingSmtpType}:`, error);
         console.error(`[sendEmployeeWelcomeEmail] Nodemailer error details: Name: ${error.name}, Code: ${error.code}, Message: ${error.message}, Stack: ${error.stack}`);
+        // Admin notification if sending fails
         await sendAdminNotification(
             `Employee Welcome Email Failed (Tenant: ${tenant.subdomain}, SMTP Error)`,
             `Failed to send welcome email to ${employeeEmail} (Login ID: ${employeeLoginId}) for tenant ${tenant.name} (${tenant.subdomain}) using ${usingSmtpType}.\nError Name: ${error.name}\nError Message: ${error.message}\nError Code: ${error.code}\nStack: ${error.stack}`

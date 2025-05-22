@@ -1,15 +1,15 @@
 
 import pool from '@/lib/db';
 import type { Tenant, User } from '@/modules/auth/types';
-import type { Employee } from '@/modules/employees/types';
+import type { Employee } from '@/modules/employees/types'; // For Employee type hint
 
 // --- Tenant Operations ---
 
 function mapRowToTenant(row: any): Tenant {
     return {
-        tenant_id: row.tenant_id, // Matches new schema
+        tenant_id: row.tenant_id,
         name: row.name,
-        subdomain: row.subdomain, // Matches new schema
+        subdomain: row.subdomain,
         status: row.status,
         created_at: new Date(row.created_at).toISOString(),
         updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : undefined,
@@ -33,14 +33,14 @@ export async function addTenant(tenantData: Pick<Tenant, 'name' | 'subdomain'>):
     } catch (err: any) {
         console.error('[DB addTenant] Error adding tenant:', err);
         if (err.code === '23505') {
-            if (err.constraint === 'tenants_subdomain_key') {
+            if (err.constraint === 'tenants_subdomain_key') { // Check your actual constraint name
                 throw new Error('Tenant subdomain already exists.');
             }
-            if (err.constraint === 'unique_tenant_name') { // Your new schema uses this
+            if (err.constraint === 'unique_tenant_name') {
                  throw new Error('Tenant name already exists.');
             }
         }
-        if (err.code === '42P01') {
+        if (err.code === '42P01') { // undefined_table
             throw new Error('Database schema not initialized. Relation "tenants" does not exist.');
         }
         throw err;
@@ -94,15 +94,16 @@ export async function getTenantByDomain(subdomain: string): Promise<Tenant | und
 // --- User Operations ---
 
 function mapRowToUser(row: any): User {
-    return {
-        user_id: row.user_id, // Matches new schema
-        tenant_id: row.tenant_id, // Matches new schema
-        employee_id: row.employee_id ?? undefined, // Matches new schema (FK to employees.id)
-        username: row.username, // Matches new schema
-        passwordHash: row.password_hash, // Column name from new schema
+    console.log('[mapRowToUser] Mapping row:', row);
+    const user = {
+        user_id: row.user_id,
+        tenant_id: row.tenant_id,
+        employee_id: row.employee_id ?? undefined,
+        username: row.username, // Ensure this is mapped
+        passwordHash: row.password_hash,
         email: row.email,
         name: row.name,
-        role: row.role, // Kept simple for now
+        role: row.role,
         is_active: row.is_active,
         last_login: row.last_login ? new Date(row.last_login).toISOString() : undefined,
         failed_attempts: row.failed_attempts,
@@ -111,22 +112,23 @@ function mapRowToUser(row: any): User {
         created_at: new Date(row.created_at).toISOString(),
         updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : undefined,
     };
+    console.log('[mapRowToUser] Mapped user object:', user);
+    return user;
 }
 
 export async function addUser(userData: Omit<User, 'user_id' | 'created_at' | 'updated_at' | 'last_login' | 'failed_attempts' | 'account_locked' | 'password_changed_at'>): Promise<User> {
     const client = await pool.connect();
     console.log(`[DB addUser] Attempting to add user: ${userData.username} (Email: ${userData.email}) for tenant ${userData.tenant_id || 'SYSTEM'}`);
-    // employee_id is now UUID, username, password_hash, email, name, role, is_active
     const query = `
         INSERT INTO users (tenant_id, employee_id, username, password_hash, email, name, role, is_active, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
         RETURNING *;
     `;
     const values = [
-        userData.tenant_id,
-        userData.employee_id || null, // This is employees.id (UUID)
+        userData.tenant_id, // This can be null for system users if your schema allows, but for tenants it must be set.
+        userData.employee_id || null,
         userData.username.toLowerCase(),
-        userData.passwordHash, // Renamed in type, but DB has password_hash
+        userData.passwordHash,
         userData.email.toLowerCase(),
         userData.name,
         userData.role,
@@ -135,22 +137,22 @@ export async function addUser(userData: Omit<User, 'user_id' | 'created_at' | 'u
     try {
         const res = await client.query(query, values);
         const user = mapRowToUser(res.rows[0]);
-        console.log(`[DB addUser] User added successfully: ID ${user.user_id}`);
+        console.log(`[DB addUser] User added successfully: user_id ${user.user_id}, username ${user.username}`);
         return user;
     } catch (err: any) {
         console.error('[DB addUser] Error adding user:', err);
-         if (err.code === '23505') {
-            if (err.constraint === 'unique_tenant_username') { // Constraint from new schema
+         if (err.code === '23505') { // unique_violation
+            if (err.constraint === 'unique_tenant_username') {
                  throw new Error('Username already exists for this tenant.');
             }
-            if (err.constraint === 'unique_tenant_email') { // Constraint from new schema
+            if (err.constraint === 'unique_tenant_email') {
                  throw new Error('Email address already exists for this tenant.');
             }
-            if (err.constraint === 'users_employee_id_key') {
+            if (err.constraint === 'users_employee_id_key') { // Or whatever your unique constraint for employee_id is
                 throw new Error('This employee is already linked to a user account.');
             }
         }
-        if (err.code === '42P01') {
+        if (err.code === '42P01') { // undefined_table
             throw new Error('Database schema not initialized. Relation "users" does not exist.');
         }
         throw err;
@@ -166,7 +168,7 @@ export async function getUserById(user_id: string, client?: any): Promise<User |
     try {
         const res = await conn.query('SELECT * FROM users WHERE user_id = $1', [user_id]);
         const user = res.rows.length > 0 ? mapRowToUser(res.rows[0]) : undefined;
-        console.log(`[DB getUserById] User found for user_id ${user_id}: ${!!user}`);
+        console.log(`[DB getUserById] User found for user_id ${user_id}:`, user ? { userId: user.user_id, username: user.username } : 'undefined');
         return user;
     } catch (err: any) {
         console.error(`[DB getUserById] Error fetching user ${user_id}:`, err);
@@ -190,14 +192,15 @@ export async function getUserByEmail(email: string, tenantId: string | null): Pr
         query = 'SELECT * FROM users WHERE tenant_id = $1 AND email = $2';
         values = [tenantId, lowerCaseEmail];
     } else {
-        query = 'SELECT * FROM users WHERE tenant_id IS NULL AND email = $1'; // For system users
+        // This case might not be relevant if all users are tenant-specific
+        query = 'SELECT * FROM users WHERE tenant_id IS NULL AND email = $1';
         values = [lowerCaseEmail];
     }
 
     try {
         const res = await client.query(query, values);
         const user = res.rows.length > 0 ? mapRowToUser(res.rows[0]) : undefined;
-        console.log(`[DB getUserByEmail] User found for email ${lowerCaseEmail}, tenant ${tenantId || 'SYSTEM'}: ${!!user}`);
+        console.log(`[DB getUserByEmail] User found for email ${lowerCaseEmail}, tenant ${tenantId || 'SYSTEM'}:`, user ? { userId: user.user_id, username: user.username } : 'undefined');
         return user;
     } catch (err: any) {
         console.error(`[DB getUserByEmail] Error fetching user by email ${lowerCaseEmail} for tenant ${tenantId || 'SYSTEM'}:`, err);
@@ -221,14 +224,14 @@ export async function getUserByUsername(username: string, tenantId: string | nul
         query = 'SELECT * FROM users WHERE tenant_id = $1 AND username = $2';
         values = [tenantId, lowerCaseUsername];
     } else {
-        query = 'SELECT * FROM users WHERE tenant_id IS NULL AND username = $1'; // For system users
+        query = 'SELECT * FROM users WHERE tenant_id IS NULL AND username = $1';
         values = [lowerCaseUsername];
     }
 
     try {
         const res = await client.query(query, values);
         const user = res.rows.length > 0 ? mapRowToUser(res.rows[0]) : undefined;
-        console.log(`[DB getUserByUsername] User found for username ${lowerCaseUsername}, tenant ${tenantId || 'SYSTEM'}: ${!!user}`);
+        console.log(`[DB getUserByUsername] User found for username ${lowerCaseUsername}, tenant ${tenantId || 'SYSTEM'}:`, user ? { userId: user.user_id, username: user.username } : 'undefined');
         return user;
     } catch (err: any) {
         console.error(`[DB getUserByUsername] Error fetching user by username ${lowerCaseUsername} for tenant ${tenantId || 'SYSTEM'}:`, err);
@@ -243,18 +246,19 @@ export async function getUserByUsername(username: string, tenantId: string | nul
 }
 
 // This function expects the human-readable employee_id (e.g., "EMP-001")
+// It returns the Employee record, which includes the user_id (FK)
 export async function getEmployeeByEmployeeIdAndTenantId(employee_id_string: string, tenantId: string): Promise<Employee | undefined> {
     const client = await pool.connect();
     console.log(`[DB getEmployeeByEmployeeIdAndTenantId (auth/db)] Fetching employee with Employee ID String: ${employee_id_string} for tenant ${tenantId}`);
-    const query = 'SELECT * FROM employees WHERE employee_id = $1 AND tenant_id = $2'; // employee_id is VARCHAR human-readable
+    // Query the employees table using the human-readable employee_id
+    const query = 'SELECT * FROM employees WHERE employee_id = $1 AND tenant_id = $2';
     const values = [employee_id_string, tenantId];
     try {
         const res = await client.query(query, values);
         if (res.rows.length > 0) {
             const row = res.rows[0];
-            // This mapping needs to be consistent with Employee type from employees module
-            // Assuming employees.id is the UUID PK, and employees.employee_id is the VARCHAR ID.
-            // The Employee type might need to distinguish these. For now, mapping main fields.
+            // Map to your Employee type (ensure this mapping is consistent with your employees module)
+            // This is a simplified mapping for auth purposes
             return {
                 id: row.id, // This is the UUID PK from employees table
                 tenantId: row.tenant_id,
@@ -263,11 +267,11 @@ export async function getEmployeeByEmployeeIdAndTenantId(employee_id_string: str
                 name: `${row.first_name} ${row.last_name || ''}`.trim(),
                 first_name: row.first_name,
                 last_name: row.last_name,
-                email: row.email, // official_email in your new schema
+                email: row.email,
                 status: row.status,
-                // Add other fields from your Employee type definition here as needed by login logic
-            } as unknown as Employee;
+            } as Employee; // Adjust cast as needed
         }
+        console.log(`[DB getEmployeeByEmployeeIdAndTenantId (auth/db)] No employee found for Employee ID String ${employee_id_string}`);
         return undefined;
     } catch (err: any) {
         console.error(`[DB getEmployeeByEmployeeIdAndTenantId (auth/db)] Error fetching employee by human-readable ID ${employee_id_string} for tenant ${tenantId}:`, err);
@@ -284,31 +288,32 @@ export async function getEmployeeByEmployeeIdAndTenantId(employee_id_string: str
 export async function getEmployeeByUserId(user_id_uuid: string, tenantId: string, client?: any): Promise<Employee | undefined> {
     const conn = client || await pool.connect();
     console.log(`[DB getEmployeeByUserId (auth/db)] Fetching employee with User ID (UUID FK): ${user_id_uuid} for tenant ${tenantId}`);
-    const query = 'SELECT * FROM employees WHERE user_id = $1 AND tenant_id = $2'; // user_id is UUID FK on employees
-    const values = [user_id_uuid, tenantId];
+    const query = 'SELECT * FROM employees WHERE user_id = $1 AND tenant_id = $2';
+    const values = [user_id_uuid.toLowerCase(), tenantId.toLowerCase()];
     try {
         const res = await conn.query(query, values);
         if (res.rows.length > 0) {
             const row = res.rows[0];
              return {
-                id: row.id, // UUID PK from employees table
-                userId: row.user_id, // UUID FK to users table
+                id: row.id,
+                userId: row.user_id,
                 tenantId: row.tenant_id,
-                employeeId: row.employee_id, // VARCHAR Human-readable ID
+                employeeId: row.employee_id,
                 name: `${row.first_name} ${row.last_name || ''}`.trim(),
                 first_name: row.first_name,
                 last_name: row.last_name,
-                email: row.email, // official_email in your new schema
+                email: row.email,
                 status: row.status,
-            } as unknown as Employee;
+            } as Employee; // Adjust cast as needed
         }
+        console.log(`[DB getEmployeeByUserId (auth/db)] No employee found for User ID (UUID FK) ${user_id_uuid}`);
         return undefined;
     } catch (err: any) {
         console.error(`[DB getEmployeeByUserId (auth/db)] Error fetching employee by User ID (UUID FK) ${user_id_uuid} for tenant ${tenantId}:`, err);
         if (err.code === '42P01') {
             throw new Error('Database schema not initialized. Relation "employees" does not exist.');
         }
-        if(!client) throw err; // Re-throw if we created the connection
+        if(!client) throw err;
     } finally {
         if (!client && conn) conn.release();
     }
@@ -318,9 +323,16 @@ export async function deleteUserById(user_id: string, tenant_id: string | null, 
     const conn = client || await pool.connect();
     console.log(`[DB deleteUserById] Attempting to delete user: ${user_id} for tenant ${tenant_id || 'SYSTEM'}`);
     try {
+        // Ensure the FK in employees table (employees.user_id) is set to NULL before deleting user
+        // or that it allows SET NULL ON DELETE. Assuming it does.
+        const updateUserQuery = 'UPDATE employees SET user_id = NULL WHERE user_id = $1 AND tenant_id = $2';
+        if (tenant_id) {
+            await conn.query(updateUserQuery, [user_id, tenant_id]);
+        }
+        
         const query = tenant_id
             ? 'DELETE FROM users WHERE user_id = $1 AND tenant_id = $2'
-            : 'DELETE FROM users WHERE user_id = $1 AND tenant_id IS NULL'; // For system users
+            : 'DELETE FROM users WHERE user_id = $1 AND tenant_id IS NULL';
         const values = tenant_id ? [user_id, tenant_id] : [user_id];
         const res = await conn.query(query, values);
 
@@ -332,9 +344,11 @@ export async function deleteUserById(user_id: string, tenant_id: string | null, 
         return false;
     } catch (err: any) {
         console.error(`[DB deleteUserById] Error deleting user ${user_id} for tenant ${tenant_id || 'SYSTEM'}:`, err);
-        if(!client) throw err; // Re-throw if we created the connection
-        return false; // Or re-throw depending on transactional needs
+        if(!client) throw err;
+        return false;
     } finally {
         if (!client && conn) conn.release();
     }
 }
+
+    
