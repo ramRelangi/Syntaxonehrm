@@ -156,14 +156,16 @@ CREATE TABLE subscription_invoices (
 );
 
 -- System & User Management (Tenant-aware)
+-- Note: The employees table definition below needs to be created first before the FK from users to employees can be fully resolved.
+-- The ALTER TABLE statement later adds this FK.
 CREATE TABLE users (
     user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID,
-    employee_id UUID UNIQUE, -- employee_id from employees table (FK will be added after employees table)
+    tenant_id UUID, -- Nullable for system users, FK to tenants
+    employee_id UUID UNIQUE, -- This will reference employees.id (the PK of employees table)
     username VARCHAR(50) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     email VARCHAR(100) NOT NULL,
-    name VARCHAR(100),
+    name VARCHAR(100), -- Full name of the user
     role user_role_enum NOT NULL DEFAULT 'Employee',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     last_login TIMESTAMP WITH TIME ZONE,
@@ -179,31 +181,31 @@ CREATE TABLE users (
 
 -- Core Employee Tables (Tenant-specific)
 CREATE TABLE employees (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Renamed from employee_id for consistency as PK
     tenant_id UUID NOT NULL,
-    user_id UUID UNIQUE, -- Link to users table
+    user_id UUID UNIQUE, -- Link to users.user_id
     employee_id VARCHAR(20), -- Human-readable ID, to be generated, tenant-unique
     first_name VARCHAR(50) NOT NULL,
     middle_name VARCHAR(50),
     last_name VARCHAR(50) NOT NULL,
-    name VARCHAR(155) GENERATED ALWAYS AS (first_name || COALESCE(' ' || middle_name, '') || ' ' || last_name) STORED,
+    name VARCHAR(155) GENERATED ALWAYS AS (TRIM(first_name || COALESCE(' ' || middle_name, '') || ' ' || last_name)) STORED,
     date_of_birth DATE,
     gender gender_enum_type,
     marital_status VARCHAR(20),
     nationality VARCHAR(50),
     blood_group VARCHAR(10),
     personal_email VARCHAR(100),
-    email VARCHAR(100), -- Changed from official_email
-    phone VARCHAR(20), -- Changed from phone_number
+    email VARCHAR(100), -- Official email, used for login/communication
+    phone VARCHAR(20),
     emergency_contact_name VARCHAR(100),
     emergency_contact_number VARCHAR(20),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     position VARCHAR(100),
-    department VARCHAR(100),
-    status VARCHAR(20) NOT NULL DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive', 'On Leave')),
-    reporting_manager_id UUID,
+    department VARCHAR(100), -- Denormalized, actual department link is in employment_details
+    status VARCHAR(20) NOT NULL DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive', 'On Leave')), -- Consider ENUM type
+    reporting_manager_id UUID, -- References employees.id (PK)
     work_location VARCHAR(100),
     employment_type employment_type_enum DEFAULT 'Full-time',
     hire_date DATE,
@@ -991,5 +993,3 @@ async function manualDbInit() {
 if (require.main === module) {
   manualDbInit();
 }
-
-update code with above changes
