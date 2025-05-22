@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { employeeSchema, type EmployeeFormData, employmentTypeSchema, genderSchema } from '@/modules/employees/types';
 import type { Employee, Gender } from '@/modules/employees/types';
 import type { UserRole } from '@/modules/auth/types';
-import { addEmployee, updateEmployee } from '@/modules/employees/actions';
+// import { addEmployee, updateEmployee } from '@/modules/employees/actions'; // Actions are called via API
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -25,10 +25,10 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogClose, // Keep DialogClose if it's used
+  DialogClose,
 } from "@/components/ui/dialog";
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { z } from 'zod'; // Added missing Zod import
+import { z } from 'zod';
 
 interface EmployeeFormProps {
   employee?: Employee;
@@ -39,9 +39,9 @@ interface EmployeeFormProps {
   currentUserRole: UserRole | null;
 }
 
-type EmployeeFormShape = EmployeeFormData;
+type EmployeeFormShape = Omit<EmployeeFormData, 'tenantId' | 'userId' | 'employeeId'>;
 
-const NO_MANAGER_VALUE = "__NO_MANAGER__"; // Special value for "None" option in manager select
+const NO_MANAGER_VALUE = "__NO_MANAGER__";
 
 export function EmployeeForm({
   employee,
@@ -59,10 +59,9 @@ export function EmployeeForm({
 
   const [potentialManagers, setPotentialManagers] = React.useState<Employee[]>([]);
   const [isLoadingManagers, setIsLoadingManagers] = React.useState(false);
-  const [managerLookupSearchTerm, setManagerLookupSearchTerm] = React.useState("");
+  const [managerSearchTerm, setManagerSearchTerm] = React.useState("");
   const [isManagerLookupOpen, setIsManagerLookupOpen] = React.useState(false);
   const [selectedManagerName, setSelectedManagerName] = React.useState<string>("");
-
 
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
@@ -74,11 +73,11 @@ export function EmployeeForm({
       const parsedDate = parseISO(dateString);
       return isValid(parsedDate) ? format(parsedDate, 'yyyy-MM-dd') : "";
     } catch (e) {
-      console.error("Error parsing date:", e);
+      console.error("[EmployeeForm] Error parsing date:", e);
       return "";
     }
   };
-
+  
   const formSchemaForValidation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true })
     .extend({
         reportingManagerId: z.string().uuid("Invalid manager ID format.").nullable().optional(),
@@ -97,127 +96,165 @@ export function EmployeeForm({
       hireDate: getFormattedDate(employee?.hireDate),
       status: employee?.status ?? "Active",
       dateOfBirth: getFormattedDate(employee?.dateOfBirth),
-      reportingManagerId: employee?.reportingManagerId || null,
+      reportingManagerId: employee?.reportingManagerId || null, // Ensure it's null if not set
       workLocation: employee?.workLocation ?? "",
       employmentType: employee?.employmentType ?? "Full-time",
     },
   });
 
+  // Effect to fetch potential managers
   React.useEffect(() => {
+    // Only run if the user is Admin or Manager
     if (currentUserRole === 'Admin' || currentUserRole === 'Manager') {
-        const fetchManagers = async () => {
-          setIsLoadingManagers(true);
-          console.log("[EmployeeForm - fetchManagers] Fetching potential managers...");
-          try {
-            const response = await fetch('/api/employees');
-            if (!response.ok) {
-              const errorData = await response.json().catch(() => ({}));
-              console.error("[EmployeeForm - fetchManagers] API error:", errorData);
-              throw new Error(errorData.message || 'Failed to fetch potential managers');
-            }
-            const data: Employee[] = await response.json();
-            console.log(`[EmployeeForm - fetchManagers] Employees fetched from API: ${data.length}`);
-            const filteredData = data.filter(e => e.status === 'Active' && (isEditMode ? e.id !== employee?.id : true));
-            setPotentialManagers(filteredData);
-            console.log(`[EmployeeForm - fetchManagers] Potential managers after filtering: ${filteredData.length}`);
-
-            // Set initial selected manager name
-            if (isEditMode && employee?.reportingManagerId) {
-                const currentManager = filteredData.find(m => m.id === employee.reportingManagerId) || data.find(m => m.id === employee.reportingManagerId); // Check original list too
-                if (currentManager) {
-                    setSelectedManagerName(currentManager.name);
-                     console.log(`[EmployeeForm - useEffect] Set selectedManagerName for edit mode: ${currentManager.name}`);
-                } else {
-                    setSelectedManagerName("");
-                    console.log(`[EmployeeForm - useEffect] Current manager ID ${employee.reportingManagerId} not found in list for edit mode.`);
-                }
-            } else if (!isEditMode) {
-                 setSelectedManagerName(""); // Clear for new employee form
-                 console.log(`[EmployeeForm - useEffect] Cleared selectedManagerName for new employee form.`);
-            }
-
-          } catch (error) {
-            console.error("[EmployeeForm - fetchManagers] Failed to load managers:", error);
-            toast({
-              title: "Error Loading Managers",
-              description: (error as Error).message || "Could not fetch list of potential managers.",
-              variant: "destructive",
-            });
-          } finally {
-            setIsLoadingManagers(false);
+      const fetchManagers = async () => {
+        setIsLoadingManagers(true);
+        console.log(`[EmployeeForm - fetchManagers effect] Role: ${currentUserRole}. Fetching managers. isEditMode: ${isEditMode}`);
+        try {
+          const response = await fetch('/api/employees'); // API call fetches for the current tenant
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: 'Failed to fetch employees for manager list.' }));
+            console.error("[EmployeeForm - fetchManagers] API error:", errorData);
+            throw new Error(errorData.message || 'Failed to fetch potential managers');
           }
-        };
-        fetchManagers();
+          const data: Employee[] = await response.json();
+          console.log(`[EmployeeForm - fetchManagers] Raw data from API: ${data.length} employees`);
+          
+          const filteredData = data.filter(e => 
+            e.status === 'Active' && 
+            (isEditMode ? e.id !== employee?.id : true) // Exclude self if editing
+          );
+          setPotentialManagers(filteredData);
+          console.log(`[EmployeeForm - fetchManagers] Filtered potential managers: ${filteredData.length}`);
+
+          // Set initial selected manager name for EDIT mode
+          if (isEditMode && employee?.reportingManagerId) {
+            // Search in the original data list to get the name, even if the manager is now inactive
+            const currentManager = data.find(m => m.id === employee.reportingManagerId); 
+            if (currentManager) {
+              setSelectedManagerName(currentManager.name + (currentManager.status !== 'Active' ? ' (Inactive)' : ''));
+              // form.setValue('reportingManagerId', currentManager.id); // Ensure form value is set
+              console.log(`[EmployeeForm - fetchManagers] Edit mode: Set selectedManagerName to '${currentManager.name + (currentManager.status !== 'Active' ? ' (Inactive)' : '')}' for manager ID ${employee.reportingManagerId}`);
+            } else {
+              setSelectedManagerName(""); // Manager ID exists in employee record but manager not found in list
+              form.setValue('reportingManagerId', null); // Clear form value if manager not found
+              console.warn(`[EmployeeForm - fetchManagers] Edit mode: Manager with ID ${employee.reportingManagerId} not found in fetched list. Cleared selection.`);
+            }
+          } else if (!isEditMode) {
+            // For ADD mode, ensure no manager is pre-selected
+            setSelectedManagerName("");
+            // Set the form value to null as well, if it's not already
+            if (form.getValues('reportingManagerId') !== null) {
+                form.setValue('reportingManagerId', null, { shouldValidate: true, shouldDirty: true });
+            }
+            console.log("[EmployeeForm - fetchManagers] Add mode: Cleared selectedManagerName and ensured form value is null.");
+          }
+
+        } catch (error) {
+          console.error("[EmployeeForm - fetchManagers] Error loading managers:", error);
+          toast({
+            title: "Error Loading Managers",
+            description: (error as Error).message || "Could not fetch list of potential managers.",
+            variant: "destructive",
+          });
+        } finally {
+          setIsLoadingManagers(false);
+        }
+      };
+      fetchManagers();
+    } else {
+      // If user is not Admin/Manager, or role not yet determined, clear potential managers
+      setPotentialManagers([]);
+      setIsLoadingManagers(false); // Ensure loading state is reset
+      console.log(`[EmployeeForm - fetchManagers effect] Role is ${currentUserRole}. Not fetching managers or cleared list.`);
     }
-  }, [isEditMode, employee?.id, employee?.reportingManagerId, toast, currentUserRole]);
+  }, [currentUserRole, isEditMode, employee?.id, employee?.reportingManagerId, toast, form]);
 
 
   const potentialManagersFiltered = React.useMemo(() => {
-    if (!managerLookupSearchTerm) return potentialManagers;
+    if (!managerSearchTerm) return potentialManagers;
     return potentialManagers.filter(
       (manager) =>
-        manager.name.toLowerCase().includes(managerLookupSearchTerm.toLowerCase()) ||
-        (manager.employeeId && manager.employeeId.toLowerCase().includes(managerLookupSearchTerm.toLowerCase())) ||
-        (manager.email && manager.email.toLowerCase().includes(managerLookupSearchTerm.toLowerCase()))
+        manager.name.toLowerCase().includes(managerSearchTerm.toLowerCase()) ||
+        (manager.employeeId && manager.employeeId.toLowerCase().includes(managerSearchTerm.toLowerCase())) ||
+        (manager.email && manager.email.toLowerCase().includes(managerSearchTerm.toLowerCase()))
     );
-  }, [potentialManagers, managerLookupSearchTerm]);
+  }, [potentialManagers, managerSearchTerm]);
 
   const onSubmit = async (data: EmployeeFormShape) => {
     setIsLoading(true);
     console.log("[Employee Form] Submitting data (raw from form):", data);
 
-    // Ensure reportingManagerId is null if it's the placeholder value or empty
     const payload = {
       ...data,
       phone: data.phone || undefined,
       gender: data.gender || undefined,
       dateOfBirth: data.dateOfBirth || null,
-      reportingManagerId: data.reportingManagerId === NO_MANAGER_VALUE || data.reportingManagerId === "" ? null : data.reportingManagerId,
+      reportingManagerId: data.reportingManagerId, // Should be null or a UUID string from form state
       workLocation: data.workLocation || undefined,
     };
-    console.log("[Employee Form] Payload to be sent to action:", payload);
+    console.log("[Employee Form] Payload to be sent to API:", payload);
 
+    // Call API route instead of action directly
+    const apiUrl = isEditMode && employee?.id ? `/api/employees/${employee.id}` : '/api/employees';
+    const method = isEditMode ? 'PUT' : 'POST';
 
     try {
-        let result;
-        if (isEditMode && employee?.id) {
-            result = await updateEmployee(employee.id, payload);
-        } else {
-            result = await addEmployee(payload);
+        const response = await fetch(apiUrl, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        let result: any;
+        let responseText: string | null = null;
+        try {
+            responseText = await response.text();
+            if (responseText) result = JSON.parse(responseText);
+            else if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`); 
+        } catch (e) {
+            if (!response.ok) { 
+                console.error("[Employee Form] Error parsing API response, raw text:", responseText);
+                throw new Error(responseText || `HTTP error! Status: ${response.status}`);
+            }
+            console.warn("[Employee Form] OK response but failed to parse JSON, raw text:", responseText);
+            result = {}; 
         }
 
-        if (!result.success) {
-             console.error("[Employee Form] Action Error:", result.errors);
-             let errorMessage = result.errors?.[0]?.message || `Failed to ${isEditMode ? 'update' : 'add'} employee.`;
+        if (!response.ok) {
+             console.error("[Employee Form] API Error:", result);
+             const errorMessage = result?.error || result?.message || result?.details?.[0]?.message || `Failed to ${isEditMode ? 'update' : 'add'} employee.`;
+             
              let errorSetOnField = false;
-             result.errors?.forEach(err => {
-                const path = err.path?.[0] as keyof EmployeeFormShape | 'root.serverError' | undefined;
-                if (path && path !== 'root.serverError' && form.getFieldState(path as keyof EmployeeFormShape)) {
-                    form.setError(path as keyof EmployeeFormShape, { type: "manual", message: err.message });
-                    errorSetOnField = true;
-                }
-             });
-             if (!errorSetOnField && !result.errors?.some(e => e.path.length > 0)) {
+             if (result?.details && Array.isArray(result.details)) {
+                result.details.forEach((err: any) => {
+                    const path = err.path?.[0] as keyof EmployeeFormShape | 'root.serverError' | undefined;
+                    if (path && path !== 'root.serverError' && form.getFieldState(path as keyof EmployeeFormShape)) {
+                        form.setError(path as keyof EmployeeFormShape, { type: "manual", message: err.message });
+                        errorSetOnField = true;
+                    }
+                });
+             }
+             if (!errorSetOnField) {
                 form.setError("root.serverError", { message: errorMessage });
              }
              throw new Error(errorMessage);
         }
 
-        console.log("[Employee Form] Action Success:", result);
+        console.log("[Employee Form] API Success:", result);
 
         toast({
             title: `Employee ${isEditMode ? 'Updated' : 'Added'}`,
-            description: `${result.employee?.name || data.name} has been successfully ${isEditMode ? 'updated' : 'added'}. ${!isEditMode && result.employee?.employeeId ? `Employee ID: ${result.employee.employeeId}` : ''}`,
+            description: `${result?.name || data.name} has been successfully ${isEditMode ? 'updated' : 'added'}. ${!isEditMode && result?.employeeId ? `Employee ID: ${result.employeeId}` : ''}`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
         const targetPath = `/${tenantDomain}/employees`;
         router.push(isEditMode && employee?.id ? `/${tenantDomain}/employees/${employee.id}` : targetPath);
-        router.refresh();
+        router.refresh(); 
 
     } catch (error: any) {
-        console.error("[Employee Form] Submission error:", error);
-        if (!form.formState.errors.root?.serverError && !Object.keys(form.formState.errors).some(key => key !== 'root' && form.getFieldState(key as keyof EmployeeFormShape)?.error)) {
+        console.error("[Employee Form] Submission error (catch block):", error);
+        if (!form.formState.errors.root?.serverError && !Object.values(form.formState.errors).some(fieldError => fieldError && fieldError.message)) {
             toast({
                 title: `Error ${isEditMode ? 'Updating' : 'Adding'} Employee`,
                 description: error.message || "An unexpected error occurred.",
@@ -229,6 +266,8 @@ export function EmployeeForm({
         setIsLoading(false);
     }
   };
+  
+  console.log(`[EmployeeForm - Render] isEditMode: ${isEditMode}, currentUserRole: ${currentUserRole}, potentialManagers.length: ${potentialManagers.length}, potentialManagersFiltered.length: ${potentialManagersFiltered.length}, managerSearchTerm: "${managerSearchTerm}"`);
 
   return (
     <Form {...form}>
@@ -281,7 +320,7 @@ export function EmployeeForm({
                 <FormItem>
                   <FormLabel>Phone Number</FormLabel>
                   <FormControl>
-                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} disabled={isEmployeeRole && isEditMode && !['phone', 'dateOfBirth', 'gender'].includes(field.name)} />
+                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} disabled={isEmployeeRole && isEditMode && currentUserRole !== 'Admin' && currentUserRole !== 'Manager'} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -299,7 +338,7 @@ export function EmployeeForm({
                   <Select
                     onValueChange={field.onChange}
                     value={field.value ?? undefined}
-                    disabled={isEmployeeRole && isEditMode && !['phone', 'dateOfBirth', 'gender'].includes(field.name)}
+                    disabled={isEmployeeRole && isEditMode && currentUserRole !== 'Admin' && currentUserRole !== 'Manager'}
                   >
                     <FormControl>
                       <SelectTrigger>
@@ -328,7 +367,7 @@ export function EmployeeForm({
                         <Button
                           variant={"outline"}
                           className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
-                          disabled={isEmployeeRole && isEditMode && !['phone', 'dateOfBirth', 'gender'].includes(field.name)}
+                          disabled={isEmployeeRole && isEditMode && currentUserRole !== 'Admin' && currentUserRole !== 'Manager'}
                         >
                           {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
                           <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
@@ -345,7 +384,7 @@ export function EmployeeForm({
                         }}
                         captionLayout="dropdown-buttons" fromYear={1950} toYear={new Date().getFullYear() - 18}
                         initialFocus
-                        disabled={isEmployeeRole && isEditMode && !['phone', 'dateOfBirth', 'gender'].includes(field.name)}
+                        disabled={isEmployeeRole && isEditMode && currentUserRole !== 'Admin' && currentUserRole !== 'Manager'}
                       />
                     </PopoverContent>
                   </Popover>
@@ -409,7 +448,8 @@ export function EmployeeForm({
                             readOnly
                             value={selectedManagerName || (isLoadingManagers && !field.value ? "Loading..." : (field.value ? selectedManagerName : "None selected"))}
                             placeholder="Select a manager"
-                            className="flex-grow bg-muted cursor-default"
+                            className="flex-grow bg-background border border-input cursor-default"
+                            onClick={() => { if (!isEmployeeRole) setIsManagerLookupOpen(true);}} // Open dialog on click if not employee
                         />
                         <Button
                             type="button"
@@ -427,7 +467,7 @@ export function EmployeeForm({
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => {
-                                    field.onChange(null); // Set to null
+                                    field.onChange(null); 
                                     setSelectedManagerName("");
                                 }}
                                 disabled={isEmployeeRole}
@@ -455,18 +495,20 @@ export function EmployeeForm({
                         <Input
                             type="text"
                             placeholder="Search managers by name, ID, email..."
-                            value={managerLookupSearchTerm}
-                            onChange={(e) => setManagerLookupSearchTerm(e.target.value)}
+                            value={managerSearchTerm}
+                            onChange={(e) => setManagerSearchTerm(e.target.value)}
                             className="pl-8"
                         />
                     </div>
                     <ScrollArea className="h-[300px] border rounded-md">
-                        {potentialManagersFiltered.length > 0 ? (
+                        {isLoadingManagers ? (
+                             <div className="p-4 text-center text-sm text-muted-foreground">Loading managers... <Loader2 className="inline h-4 w-4 animate-spin" /></div>
+                        ) : potentialManagersFiltered.length > 0 ? (
                             potentialManagersFiltered.map((manager) => (
                                 <Button
                                     key={manager.id}
                                     variant="ghost"
-                                    className="w-full justify-start h-auto py-2 px-3 text-left"
+                                    className="w-full justify-start h-auto py-2 px-3 text-left hover:bg-accent"
                                     onClick={() => {
                                         form.setValue('reportingManagerId', manager.id, { shouldValidate: true, shouldDirty: true });
                                         setSelectedManagerName(manager.name);
@@ -481,7 +523,7 @@ export function EmployeeForm({
                             ))
                         ) : (
                             <p className="p-4 text-center text-sm text-muted-foreground">
-                                {isLoadingManagers ? "Loading managers..." : "No active managers found" + (managerLookupSearchTerm ? " matching your search." : ".")}
+                                {"No active managers found" + (managerSearchTerm ? " matching your search." : ".")}
                             </p>
                         )}
                     </ScrollArea>
@@ -593,11 +635,11 @@ export function EmployeeForm({
            </div>
         </div>
 
-        <div className="flex justify-end gap-2 pt-4 border-t">
+        <div className="flex justify-end gap-2 pt-4 border-t mt-6">
           <Button type="button" variant="outline" onClick={() => router.back()} disabled={isLoading}>
             Cancel
           </Button>
-          <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode && !isEmployeeRole) || (isEmployeeRole && !form.formState.isDirty && !['phone', 'dateOfBirth', 'gender'].some(key => form.getFieldState(key as keyof EmployeeFormShape).isDirty))}>
+          <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode && !isEmployeeRole) || (isEmployeeRole && !form.formState.isDirty )}>
             {isLoading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />)
@@ -610,3 +652,4 @@ export function EmployeeForm({
   );
 }
 
+    
