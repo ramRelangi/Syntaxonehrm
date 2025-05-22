@@ -14,7 +14,7 @@ import { MOCK_SESSION_COOKIE } from '@/lib/auth'; // Keep constant import
 // Import Server Actions directly - Actions derive context implicitly
 import { getEmployees } from '@/modules/employees/actions';
 import { getLeaveRequestsAction as getLeaveRequests } from '@/modules/leave/actions';
-import { getJobPostings } from '@/modules/recruitment/actions';
+import { getJobOpenings } from '@/modules/recruitment/actions'; // Corrected import
 
 
 interface DashboardPageProps {
@@ -140,7 +140,7 @@ async function getUpcomingLeavesCount() {
 
 async function getOpenPositionsCount() {
      // Action implicitly filters by tenant
-     const openPositions = await getJobPostings({ status: 'Open' });
+     const openPositions = await getJobOpenings({ status: 'Open' }); // Corrected function name
      return openPositions.length;
  }
 
