@@ -1,8 +1,9 @@
 
+// src/app/api/employees/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getAllEmployees as dbGetAllEmployees,
-  addEmployee as dbAddEmployeeInternal, // Renamed to avoid conflict
+  addEmployeeInternal as dbAddEmployeeInternal, // Corrected import alias
   getEmployeeByUserId as dbGetEmployeeByUserId,
 } from '@/modules/employees/lib/db';
 import { employeeSchema, type EmployeeFormData } from '@/modules/employees/types';
@@ -14,14 +15,18 @@ import type { SessionData, User } from '@/modules/auth/types';
 
 const SALT_ROUNDS = 10;
 
+// Helper function to get session data
 async function getSession(request: NextRequest): Promise<SessionData | null> {
+  // Since _parseSessionCookie is async and uses cookies(), it should be awaited.
+  // It's safe to call from an API route handler.
   return _parseSessionCookie();
 }
+
 
 export async function GET(request: NextRequest) {
   console.log(`[API GET /employees] Fetching employees...`);
   try {
-    const session = await getSession(request);
+    const session = await getSession(request); // Correctly await here
     if (!session?.tenantId || !session.userRole || !session.userId) {
       console.error(`[API GET /employees] Unauthorized: Missing session data.`);
       return NextResponse.json({ error: "Unauthorized or missing session context." }, { status: 401 });
@@ -50,6 +55,9 @@ export async function GET(request: NextRequest) {
     } else if (error.message?.toLowerCase().includes('invalid identifier format')) {
       status = 400;
       message = error.message;
+    } else if (error.message?.includes('Tenant ID is required')) { // Specific check from recent changes
+        status = 400;
+        message = error.message;
     }
     return NextResponse.json({ error: message, details: error.message }, { status });
   }
@@ -58,7 +66,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   console.log(`[API POST /employees] Adding employee...`);
   try {
-    const session = await getSession(request);
+    const session = await getSession(request); // Correctly await here
     if (!session?.tenantId || !session.userRole || !session.tenantDomain) {
       console.error(`[API POST /employees] Unauthorized: Missing session data for add.`);
       return NextResponse.json({ error: "Unauthorized or missing session context for add operation." }, { status: 401 });
@@ -78,7 +86,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid input', details: validation.error.flatten().fieldErrors }, { status: 400 });
     }
 
-    const { name, email, ...employeeDetails } = validation.data;
+    const { name, email, role: employeeRoleToSet, ...employeeDetails } = validation.data;
+
+    // Ensure role is correctly determined
+    let actualRoleToSet: User['role'] = 'Employee'; // Default
+    if (userRole === 'Admin' && employeeRoleToSet) { // Admins can set roles
+        actualRoleToSet = employeeRoleToSet;
+    }
+    // Managers can only create 'Employee' role users (already defaulted if not Admin)
 
     // Create user account
     const temporaryPassword = generateTemporaryPassword(12);
@@ -90,10 +105,10 @@ export async function POST(request: NextRequest) {
         email: email.toLowerCase(), // Ensure email is stored consistently
         passwordHash,
         name,
-        role: 'Employee',
+        role: actualRoleToSet, // Use the determined role
         isActive: true,
       });
-      console.log(`[API POST /employees] User account created with ID: ${newUser.id}`);
+      console.log(`[API POST /employees] User account created with ID: ${newUser.id} and Role: ${actualRoleToSet}`);
     } catch (userError: any) {
       console.error("[API POST /employees] Error creating user:", userError);
       if (userError.message?.includes('User email already exists')) {
@@ -103,8 +118,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Add employee record
+    // Prepare data for dbAddEmployeeInternal, ensuring reportingManagerId is null if it was NO_MANAGER_VALUE or empty
+    const dataForDb = {
+        ...employeeDetails,
+        reportingManagerId: employeeDetails.reportingManagerId && employeeDetails.reportingManagerId !== "__NO_MANAGER__" ? employeeDetails.reportingManagerId : null,
+    };
+
     const newEmployee = await dbAddEmployeeInternal({
-      ...employeeDetails,
+      ...dataForDb, // Use the prepared data
       tenantId: tenantId,
       userId: newUser.id,
       name,
@@ -117,8 +138,8 @@ export async function POST(request: NextRequest) {
       tenantId,
       newEmployee.name,
       newEmployee.email,
-      newEmployee.id, // employee.id (PK)
-      newEmployee.employeeId!, // Official employee_id (EMP-XXX)
+      newUser.id, // Pass user's UUID
+      newEmployee.employeeId!, // Pass official employee_id (EMP-XXX)
       temporaryPassword,
       tenantDomain
     ).catch(emailError => console.error(`[API POST /employees] Non-blocking error sending welcome email:`, emailError));
@@ -144,6 +165,10 @@ export async function POST(request: NextRequest) {
         message = error.message;
         details = [{ path: ['email'], message }];
     } else if (error.message?.toLowerCase().includes('invalid identifier format')) {
+        status = 400;
+        message = error.message;
+        details = [{ path: ['root'], message }];
+    } else if (error.message?.includes('Tenant ID is required')) { // From recent changes
         status = 400;
         message = error.message;
         details = [{ path: ['root'], message }];
