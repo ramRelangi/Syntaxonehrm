@@ -1,35 +1,47 @@
 
 import pool from '@/lib/db';
-import type { JobPosting, Candidate, JobPostingStatus, CandidateStatus, JobPostingFormData, CandidateFormData } from '@/modules/recruitment/types';
-import { formatISO, isValid, parseISO } from 'date-fns'; // Import date-fns functions
+import type {
+    JobOpening,
+    Candidate,
+    JobApplication,
+    JobOpeningStatus,
+    CandidateApplicationStatus,
+    JobOpeningFormData,
+    CandidateFormData,
+    EmploymentType,
+    ExperienceLevel
+} from '@/modules/recruitment/types';
+import { formatISO, isValid, parseISO } from 'date-fns';
 
+// --- Job Opening Operations ---
 
-// --- Job Posting Operations ---
-
-function mapRowToJobPosting(row: any): JobPosting {
+function mapRowToJobOpening(row: any): JobOpening {
     return {
         id: row.id,
         tenantId: row.tenant_id,
-        title: row.title,
+        job_title: row.job_title,
         description: row.description,
         department: row.department,
         location: row.location,
-        salaryRange: row.salary_range ?? undefined,
-        status: row.status as JobPostingStatus,
-        datePosted: row.date_posted ? new Date(row.date_posted).toISOString() : undefined,
-        closingDate: row.closing_date ? formatISO(new Date(row.closing_date), { representation: 'date' }) : undefined,
-        employmentType: row.employment_type ?? undefined,
-        experienceLevel: row.experience_level ?? undefined,
+        salary_range: row.salary_range ?? undefined,
+        status: row.status as JobOpeningStatus,
+        date_posted: row.date_posted ? new Date(row.date_posted).toISOString() : undefined,
+        closing_date: row.closing_date ? formatISO(new Date(row.closing_date), { representation: 'date' }) : undefined,
+        employment_type: row.employment_type as EmploymentType ?? undefined,
+        experience_level: row.experience_level as ExperienceLevel ?? undefined,
+        no_of_vacancies: row.no_of_vacancies,
+        requirements: row.requirements ?? undefined,
+        created_at: row.created_at ? new Date(row.created_at).toISOString() : undefined,
+        updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : undefined,
     };
 }
 
-// Get job postings for a specific tenant
-export async function getAllJobPostings(tenantId: string, filters?: { status?: JobPostingStatus }): Promise<JobPosting[]> {
+export async function getAllJobOpenings(tenantId: string, filters?: { status?: JobOpeningStatus }): Promise<JobOpening[]> {
     const client = await pool.connect();
-    let query = 'SELECT * FROM job_postings';
-    const conditions: string[] = ['tenant_id = $1']; // Always filter by tenant
+    let query = 'SELECT * FROM job_openings';
+    const conditions: string[] = ['tenant_id = $1'];
     const values: any[] = [tenantId];
-    let valueIndex = 2; // Start indexing from 2
+    let valueIndex = 2;
 
     if (filters?.status) {
         conditions.push(`status = $${valueIndex++}`);
@@ -37,70 +49,70 @@ export async function getAllJobPostings(tenantId: string, filters?: { status?: J
     }
 
     query += ` WHERE ${conditions.join(' AND ')}`;
-    query += ' ORDER BY date_posted DESC, created_at DESC'; // Order by post date, then creation
+    query += ' ORDER BY date_posted DESC, created_at DESC';
 
     try {
         const res = await client.query(query, values);
-        return res.rows.map(mapRowToJobPosting);
+        return res.rows.map(mapRowToJobOpening);
     } catch (err) {
-        console.error(`Error fetching all job postings for tenant ${tenantId}:`, err);
+        console.error(`Error fetching all job openings for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
-// Get job posting by ID (ensure it belongs to the tenant)
-export async function getJobPostingById(id: string, tenantId: string): Promise<JobPosting | undefined> {
+export async function getJobOpeningById(id: string, tenantId: string): Promise<JobOpening | undefined> {
     const client = await pool.connect();
     try {
-        const res = await client.query('SELECT * FROM job_postings WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
-        return res.rows.length > 0 ? mapRowToJobPosting(res.rows[0]) : undefined;
+        const res = await client.query('SELECT * FROM job_openings WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+        return res.rows.length > 0 ? mapRowToJobOpening(res.rows[0]) : undefined;
     } catch (err) {
-        console.error(`Error fetching job posting ${id} for tenant ${tenantId}:`, err);
+        console.error(`Error fetching job opening ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
-// Add job posting for a specific tenant
-export async function addJobPosting(jobData: JobPostingFormData): Promise<JobPosting> {
-    if (!jobData.tenantId) {
-        throw new Error("Tenant ID is required to add a job posting.");
-    }
+export async function addJobOpening(jobData: JobOpeningFormData & { tenantId: string }): Promise<JobOpening> {
     const isDraft = (jobData.status || 'Draft') === 'Draft';
     const datePosted = isDraft ? null : new Date();
 
     let closingDateValue: string | null = null;
-    if (jobData.closingDate) {
+    if (jobData.closing_date) {
         try {
-            const parsed = parseISO(jobData.closingDate);
+            const parsed = parseISO(jobData.closing_date);
             if (isValid(parsed)) {
                 closingDateValue = formatISO(parsed, { representation: 'date' });
             }
         } catch (e) {
-            console.warn(`Invalid closing date format received: ${jobData.closingDate}. Storing as NULL.`);
+            console.warn(`Invalid closing date format received: ${jobData.closing_date}. Storing as NULL.`);
         }
     }
 
     const query = `
-        INSERT INTO job_postings (tenant_id, title, description, department, location, salary_range, status, date_posted, closing_date, employment_type, experience_level, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+        INSERT INTO job_openings (
+            tenant_id, job_title, description, department, location, salary_range, status, date_posted, 
+            closing_date, employment_type, experience_level, no_of_vacancies, requirements, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
         RETURNING *;
     `;
     const values = [
         jobData.tenantId,
-        jobData.title,
-        jobData.description,
-        jobData.department,
-        jobData.location,
-        jobData.salaryRange || null,
+        jobData.job_title,
+        jobData.description || null,
+        jobData.department || null,
+        jobData.location || null,
+        jobData.salary_range || null,
         jobData.status || 'Draft',
         datePosted,
         closingDateValue,
-        jobData.employmentType || 'Full-time',
-        jobData.experienceLevel || 'Mid-Level',
+        jobData.employment_type || 'Full-time',
+        jobData.experience_level || 'Mid-Level',
+        jobData.no_of_vacancies || 1,
+        jobData.requirements || null,
     ];
 
     let client;
@@ -108,53 +120,53 @@ export async function addJobPosting(jobData: JobPostingFormData): Promise<JobPos
         client = await pool.connect();
         const res = await client.query(query, values);
         if (res.rows.length === 0) {
-            throw new Error("Database did not return the created job posting.");
+            throw new Error("Database did not return the created job opening.");
         }
-        return mapRowToJobPosting(res.rows[0]);
+        return mapRowToJobOpening(res.rows[0]);
     } catch (err) {
-        console.error('[DB addJobPosting] Error adding job posting:', err);
+        console.error('[DB addJobOpening] Error adding job opening:', err);
         throw err;
     } finally {
         if (client) client.release();
     }
 }
 
-
-// Update job posting (ensure it belongs to the tenant)
-export async function updateJobPosting(id: string, tenantId: string, updates: Partial<JobPostingFormData>): Promise<JobPosting | undefined> {
+export async function updateJobOpening(id: string, tenantId: string, updates: Partial<JobOpeningFormData>): Promise<JobOpening | undefined> {
     const client = await pool.connect();
-    const currentPosting = await getJobPostingById(id, tenantId);
-    if (!currentPosting) return undefined;
+    const currentOpening = await getJobOpeningById(id, tenantId); // Use the renamed function
+    if (!currentOpening) return undefined;
 
     const setClauses: string[] = [];
     const values: any[] = [];
     let valueIndex = 1;
 
-    const columnMap: { [K in keyof JobPostingFormData]?: string } = {
-        title: 'title',
+    const columnMap: { [K in keyof JobOpeningFormData]?: string } = {
+        job_title: 'job_title',
         description: 'description',
         department: 'department',
         location: 'location',
-        salaryRange: 'salary_range',
+        salary_range: 'salary_range',
         status: 'status',
-        closingDate: 'closing_date',
-        employmentType: 'employment_type',
-        experienceLevel: 'experience_level',
+        closing_date: 'closing_date',
+        employment_type: 'employment_type',
+        experience_level: 'experience_level',
+        no_of_vacancies: 'no_of_vacancies',
+        requirements: 'requirements',
     };
 
-    if (updates.status && updates.status !== 'Draft' && currentPosting.status === 'Draft') {
+    if (updates.status && updates.status !== 'Draft' && currentOpening.status === 'Draft') {
         setClauses.push(`date_posted = $${valueIndex++}`);
         values.push(new Date());
     }
 
     for (const key in updates) {
-        if (key === 'tenantId') continue;
+        if (key === 'tenantId') continue; // Should not be updated
         if (Object.prototype.hasOwnProperty.call(updates, key)) {
-            const dbKey = columnMap[key as keyof JobPostingFormData];
+            const dbKey = columnMap[key as keyof JobOpeningFormData];
             if (dbKey) {
                 setClauses.push(`${dbKey} = $${valueIndex}`);
-                let value = updates[key as keyof JobPostingFormData];
-                if (key === 'closingDate') {
+                let value = updates[key as keyof JobOpeningFormData];
+                if (key === 'closing_date') {
                     let closingDateStr: string | null = null;
                     if (value) {
                         try {
@@ -165,7 +177,7 @@ export async function updateJobPosting(id: string, tenantId: string, updates: Pa
                         } catch {}
                     }
                     value = closingDateStr;
-                } else if (key === 'salaryRange') {
+                } else if (key === 'salary_range' || key === 'department' || key === 'location' || key === 'description' || key === 'requirements') {
                     value = value || null;
                 }
                 values.push(value);
@@ -174,13 +186,13 @@ export async function updateJobPosting(id: string, tenantId: string, updates: Pa
         }
     }
 
-    if (setClauses.length === 0) return currentPosting;
+    if (setClauses.length === 0) return currentOpening;
     setClauses.push(`updated_at = NOW()`);
     values.push(id);
     values.push(tenantId);
 
     const query = `
-        UPDATE job_postings
+        UPDATE job_openings
         SET ${setClauses.join(', ')}
         WHERE id = $${valueIndex} AND tenant_id = $${valueIndex + 1}
         RETURNING *;
@@ -188,35 +200,33 @@ export async function updateJobPosting(id: string, tenantId: string, updates: Pa
 
     try {
         const res = await client.query(query, values);
-        return res.rows.length > 0 ? mapRowToJobPosting(res.rows[0]) : undefined;
+        return res.rows.length > 0 ? mapRowToJobOpening(res.rows[0]) : undefined;
     } catch (err) {
-        console.error(`Error updating job posting ${id} for tenant ${tenantId}:`, err);
+        console.error(`Error updating job opening ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
-// Delete job posting (ensure it belongs to the tenant and has no candidates)
-export async function deleteJobPosting(id: string, tenantId: string): Promise<boolean> {
+export async function deleteJobOpening(id: string, tenantId: string): Promise<boolean> {
     const client = await pool.connect();
     try {
-        const checkCandidatesQuery = 'SELECT 1 FROM candidates WHERE job_posting_id = $1 AND tenant_id = $2 LIMIT 1';
-        const candidateRes = await client.query(checkCandidatesQuery, [id, tenantId]);
-        if (candidateRes.rowCount > 0) {
-            throw new Error('Cannot delete job posting with associated candidates.');
+        const checkApplicationsQuery = 'SELECT 1 FROM job_applications WHERE job_id = $1 AND tenant_id = $2 LIMIT 1';
+        const appRes = await client.query(checkApplicationsQuery, [id, tenantId]);
+        if (appRes.rowCount > 0) {
+            throw new Error('Cannot delete job opening with associated applications. Please remove applications first.');
         }
-        const deleteQuery = 'DELETE FROM job_postings WHERE id = $1 AND tenant_id = $2';
+        const deleteQuery = 'DELETE FROM job_openings WHERE id = $1 AND tenant_id = $2';
         const res = await client.query(deleteQuery, [id, tenantId]);
         return res.rowCount > 0;
     } catch (err) {
-        console.error(`Error deleting job posting ${id} for tenant ${tenantId}:`, err);
+        console.error(`Error deleting job opening ${id} for tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
-
 
 // --- Candidate Operations ---
 
@@ -224,55 +234,33 @@ function mapRowToCandidate(row: any): Candidate {
     return {
         id: row.id,
         tenantId: row.tenant_id,
-        name: row.name,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        name: `${row.first_name} ${row.last_name}`, // Construct full name
         email: row.email,
         phone: row.phone ?? undefined,
-        jobPostingId: row.job_posting_id,
-        applicationDate: new Date(row.application_date).toISOString(),
-        status: row.status as CandidateStatus,
-        resumeUrl: row.resume_url ?? undefined,
-        coverLetter: row.cover_letter ?? undefined,
-        notes: row.notes ?? undefined,
+        resume_url: row.resume_url ?? undefined,
         source: row.source ?? undefined,
-        expectedSalary: row.expected_salary ?? undefined,
+        current_company: row.current_company ?? undefined,
+        current_designation: row.current_designation ?? undefined,
+        total_experience: row.total_experience ? parseFloat(row.total_experience) : undefined,
+        notice_period: row.notice_period ? parseInt(row.notice_period, 10) : undefined,
+        current_salary: row.current_salary ?? undefined,
+        expected_salary: row.expected_salary ?? undefined,
+        created_at: row.created_at ? new Date(row.created_at).toISOString() : undefined,
+        updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : undefined,
+        // Fields from job_applications are not directly on candidate row unless joined
+        job_posting_id: row.job_posting_id || row.job_id, // from join with job_applications
+        application_date: row.application_date ? new Date(row.application_date).toISOString() : (row.app_applied_date ? new Date(row.app_applied_date).toISOString() : undefined),
+        status: row.status || row.current_stage, // from join with job_applications
     };
-}
-
-// Get candidates for a specific tenant, optionally filtered
-export async function getAllCandidates(tenantId: string, filters?: { jobPostingId?: string, status?: CandidateStatus }): Promise<Candidate[]> {
-    const client = await pool.connect();
-    let query = 'SELECT * FROM candidates';
-    const conditions: string[] = ['tenant_id = $1'];
-    const values: any[] = [tenantId];
-    let valueIndex = 2;
-
-    if (filters?.jobPostingId) {
-        conditions.push(`job_posting_id = $${valueIndex++}`);
-        values.push(filters.jobPostingId);
-    }
-    if (filters?.status) {
-        conditions.push(`status = $${valueIndex++}`);
-        values.push(filters.status);
-    }
-
-    query += ` WHERE ${conditions.join(' AND ')}`;
-    query += ' ORDER BY application_date DESC';
-
-    try {
-        const res = await client.query(query, values);
-        return res.rows.map(mapRowToCandidate);
-    } catch (err) {
-        console.error(`Error fetching candidates for tenant ${tenantId}:`, err);
-        throw err;
-    } finally {
-        client.release();
-    }
 }
 
 // Get candidate by ID (ensure it belongs to the tenant)
 export async function getCandidateById(id: string, tenantId: string): Promise<Candidate | undefined> {
     const client = await pool.connect();
     try {
+        // This function fetches the candidate MASTER record, not a specific application status
         const res = await client.query('SELECT * FROM candidates WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
         return res.rows.length > 0 ? mapRowToCandidate(res.rows[0]) : undefined;
     } catch (err) {
@@ -283,63 +271,128 @@ export async function getCandidateById(id: string, tenantId: string): Promise<Ca
     }
 }
 
-// Add candidate for a specific tenant and job posting
-export async function addCandidate(candidateData: CandidateFormData): Promise<Candidate> {
-    const client = await pool.connect();
-    if (!candidateData.tenantId || !candidateData.jobPostingId) {
-        throw new Error("Tenant ID and Job Posting ID are required to add a candidate.");
-    }
-    const query = `
-        INSERT INTO candidates (tenant_id, name, email, phone, job_posting_id, application_date, status, resume_url, cover_letter, notes, source, expected_salary, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, NOW(), NOW())
-        RETURNING *;
-    `;
-    const values = [
-        candidateData.tenantId,
-        candidateData.name,
-        candidateData.email,
-        candidateData.phone || null,
-        candidateData.jobPostingId,
-        candidateData.status || 'Applied',
-        candidateData.resumeUrl || null,
-        candidateData.coverLetter || null,
-        candidateData.notes || null,
-        candidateData.source || null,
-        candidateData.expectedSalary || null,
-    ];
+// Function to find an existing candidate by email for a tenant
+export async function findCandidateByEmail(email: string, tenantId: string, client?: any): Promise<Candidate | undefined> {
+    const conn = client || await pool.connect();
     try {
-        const res = await client.query(query, values);
-        return mapRowToCandidate(res.rows[0]);
+        const res = await conn.query('SELECT * FROM candidates WHERE email = $1 AND tenant_id = $2 LIMIT 1', [email, tenantId]);
+        return res.rows.length > 0 ? mapRowToCandidate(res.rows[0]) : undefined;
+    } catch (err) {
+        console.error(`Error finding candidate by email ${email} for tenant ${tenantId}:`, err);
+        throw err;
+    } finally {
+        if (!client) conn.release();
+    }
+}
+
+
+// Add candidate and their application to a specific job opening
+// Returns the JobApplication object (which would include candidate details if joined)
+export async function addCandidateAndApplyForJob(
+    candidateData: Omit<CandidateFormData, 'name' | 'job_posting_id'>,
+    jobOpeningId: string,
+    tenantId: string
+): Promise<JobApplication> {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        let candidate = await findCandidateByEmail(candidateData.email, tenantId, client);
+        let candidateId: string;
+
+        if (candidate) {
+            candidateId = candidate.id!;
+            // Optionally update existing candidate details here if needed
+            const updateClauses: string[] = [];
+            const updateValues: any[] = [];
+            let valIdx = 1;
+            if (candidateData.first_name && candidateData.first_name !== candidate.first_name) { updateClauses.push(`first_name = $${valIdx++}`); updateValues.push(candidateData.first_name); }
+            if (candidateData.last_name && candidateData.last_name !== candidate.last_name) { updateClauses.push(`last_name = $${valIdx++}`); updateValues.push(candidateData.last_name); }
+            if (candidateData.phone && candidateData.phone !== candidate.phone) { updateClauses.push(`phone = $${valIdx++}`); updateValues.push(candidateData.phone); }
+            // Add other updatable fields...
+            if (updateClauses.length > 0) {
+                updateClauses.push(`updated_at = NOW()`);
+                updateValues.push(candidateId);
+                updateValues.push(tenantId);
+                await client.query(`UPDATE candidates SET ${updateClauses.join(', ')} WHERE id = $${valIdx++} AND tenant_id = $${valIdx++}`, updateValues);
+            }
+        } else {
+            const candQuery = `
+                INSERT INTO candidates (
+                    tenant_id, first_name, last_name, email, phone, resume_url, source, 
+                    current_company, current_designation, total_experience, notice_period, 
+                    current_salary, expected_salary, created_at, updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+                RETURNING id;
+            `;
+            const candValues = [
+                tenantId, candidateData.first_name, candidateData.last_name, candidateData.email,
+                candidateData.phone || null, candidateData.resume_url || null, candidateData.source || null,
+                candidateData.current_company || null, candidateData.current_designation || null,
+                candidateData.total_experience || null, candidateData.notice_period || null,
+                candidateData.current_salary || null, candidateData.expected_salary || null,
+            ];
+            const candRes = await client.query(candQuery, candValues);
+            candidateId = candRes.rows[0].id;
+        }
+
+        // Check if candidate already applied for this job opening
+        const existingAppRes = await client.query(
+            'SELECT id FROM job_applications WHERE tenant_id = $1 AND candidate_id = $2 AND job_id = $3',
+            [tenantId, candidateId, jobOpeningId]
+        );
+        if (existingAppRes.rowCount > 0) {
+            throw new Error('This candidate has already applied for this job opening.');
+        }
+
+        const appQuery = `
+            INSERT INTO job_applications (tenant_id, candidate_id, job_id, applied_date, current_stage, created_at, updated_at)
+            VALUES ($1, $2, $3, NOW(), $4, NOW(), NOW())
+            RETURNING *;
+        `;
+        const appValues = [tenantId, candidateId, jobOpeningId, candidateData.status || 'Applied'];
+        const appRes = await client.query(appQuery, appValues);
+        
+        await client.query('COMMIT');
+        // mapRowToJobApplication needs to be created
+        return mapRowToJobApplication(appRes.rows[0]);
+
     } catch (err: any) {
-        console.error('Error adding candidate:', err);
-         if (err.code === '23505') {
-             if (err.constraint === 'candidates_tenant_id_email_job_posting_id_key') {
-                  throw new Error('This email address has already applied for this job.');
+        await client.query('ROLLBACK');
+        console.error('[DB addCandidateAndApplyForJob] Error:', err);
+        if (err.code === '23503') { // Foreign key violation
+             if (err.constraint === 'job_applications_job_id_fkey') {
+                 throw new Error('Invalid job opening selected.');
              }
-         }
+        }
         throw err;
     } finally {
         client.release();
     }
 }
 
-// Update candidate (ensure it belongs to the tenant)
-export async function updateCandidate(id: string, tenantId: string, updates: Partial<Omit<Candidate, 'id' | 'applicationDate' | 'jobPostingId' | 'tenantId'>>): Promise<Candidate | undefined> {
+// Update candidate (master record)
+export async function updateCandidate(id: string, tenantId: string, updates: Partial<Omit<CandidateFormData, 'job_posting_id' | 'name'>>): Promise<Candidate | undefined> {
     const client = await pool.connect();
     const setClauses: string[] = [];
     const values: any[] = [];
     let valueIndex = 1;
 
     const columnMap: { [K in keyof typeof updates]?: string } = {
-        name: 'name',
+        first_name: 'first_name',
+        last_name: 'last_name',
         email: 'email',
         phone: 'phone',
-        status: 'status',
-        resumeUrl: 'resume_url',
-        coverLetter: 'cover_letter',
-        notes: 'notes',
+        resume_url: 'resume_url',
         source: 'source',
-        expectedSalary: 'expected_salary',
+        current_company: 'current_company',
+        current_designation: 'current_designation',
+        total_experience: 'total_experience',
+        notice_period: 'notice_period',
+        current_salary: 'current_salary',
+        expected_salary: 'expected_salary',
+        // status is on job_applications, not candidates table
     };
 
     for (const key in updates) {
@@ -353,7 +406,11 @@ export async function updateCandidate(id: string, tenantId: string, updates: Par
         }
     }
 
-    if (setClauses.length === 0) return getCandidateById(id, tenantId);
+    if (setClauses.length === 0) {
+        client.release();
+        return getCandidateById(id, tenantId);
+    }
+
     setClauses.push(`updated_at = NOW()`);
     values.push(id);
     values.push(tenantId);
@@ -370,26 +427,110 @@ export async function updateCandidate(id: string, tenantId: string, updates: Par
         return res.rows.length > 0 ? mapRowToCandidate(res.rows[0]) : undefined;
     } catch (err: any) {
         console.error(`Error updating candidate ${id} for tenant ${tenantId}:`, err);
-        if (err.code === '23505') {
-             if (err.constraint === 'candidates_tenant_id_email_job_posting_id_key') {
-                  throw new Error('This email address has already applied for this job.');
-             }
-         }
+        if (err.code === '23505' && err.constraint?.includes('email')) { // Example, adjust to your unique constraints
+            throw new Error('This email address is already in use by another candidate in this tenant.');
+        }
         throw err;
     } finally {
         client.release();
     }
 }
 
-// Delete candidate (ensure it belongs to the tenant)
+
 export async function deleteCandidate(id: string, tenantId: string): Promise<boolean> {
     const client = await pool.connect();
+    // Deleting a candidate will also delete their job_applications due to ON DELETE CASCADE
     const query = 'DELETE FROM candidates WHERE id = $1 AND tenant_id = $2';
     try {
         const res = await client.query(query, [id, tenantId]);
         return res.rowCount > 0;
     } catch (err) {
         console.error(`Error deleting candidate ${id} for tenant ${tenantId}:`, err);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+// --- Job Application Operations ---
+
+function mapRowToJobApplication(row: any): JobApplication {
+    return {
+        id: row.id || row.application_id, // application_id is the PK
+        tenantId: row.tenant_id,
+        candidate_id: row.candidate_id,
+        job_id: row.job_id,
+        applied_date: new Date(row.applied_date).toISOString(),
+        current_stage: row.current_stage as CandidateApplicationStatus,
+        created_at: row.created_at ? new Date(row.created_at).toISOString() : undefined,
+        updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : undefined,
+        // Candidate details can be joined here
+        candidate_name: row.candidate_name,
+        candidate_email: row.candidate_email,
+        candidate_phone: row.candidate_phone,
+        candidate_resume_url: row.candidate_resume_url,
+    };
+}
+
+export async function getApplicationsForJobOpening(jobOpeningId: string, tenantId: string, filters?: { status?: CandidateApplicationStatus }): Promise<JobApplication[]> {
+    const client = await pool.connect();
+    let query = `
+        SELECT ja.*, 
+               c.first_name || ' ' || c.last_name AS candidate_name, 
+               c.email AS candidate_email,
+               c.phone AS candidate_phone,
+               c.resume_url AS candidate_resume_url 
+        FROM job_applications ja
+        JOIN candidates c ON ja.candidate_id = c.id AND ja.tenant_id = c.tenant_id
+    `;
+    const conditions: string[] = ['ja.tenant_id = $1', 'ja.job_id = $2'];
+    const values: any[] = [tenantId, jobOpeningId];
+    let valueIndex = 3;
+
+    if (filters?.status) {
+        conditions.push(`ja.current_stage = $${valueIndex++}`);
+        values.push(filters.status);
+    }
+
+    query += ` WHERE ${conditions.join(' AND ')}`;
+    query += ' ORDER BY ja.applied_date DESC';
+
+    try {
+        const res = await client.query(query, values);
+        return res.rows.map(mapRowToJobApplication);
+    } catch (err) {
+        console.error(`Error fetching applications for job opening ${jobOpeningId}, tenant ${tenantId}:`, err);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+export async function updateApplicationStatus(applicationId: string, tenantId: string, status: CandidateApplicationStatus, notes?: string): Promise<JobApplication | undefined> {
+    const client = await pool.connect();
+    // In a real app, you might want to log who changed the status and when, possibly in a separate audit table
+    const query = `
+        UPDATE job_applications
+        SET current_stage = $1, updated_at = NOW() 
+        WHERE id = $2 AND tenant_id = $3
+        RETURNING *; 
+    `;
+    // Notes are on the candidate record, not application. If notes are for application stage, add column.
+    try {
+        const res = await client.query(query, [status, applicationId, tenantId]);
+        if (res.rows.length > 0) {
+            // To return full JobApplication with candidate details, we'd need to re-fetch or join
+            const updatedAppRes = await client.query(`
+                SELECT ja.*, c.first_name || ' ' || c.last_name AS candidate_name, c.email AS candidate_email
+                FROM job_applications ja
+                JOIN candidates c ON ja.candidate_id = c.id
+                WHERE ja.id = $1 AND ja.tenant_id = $2
+            `, [applicationId, tenantId]);
+            return mapRowToJobApplication(updatedAppRes.rows[0]);
+        }
+        return undefined;
+    } catch (err) {
+        console.error(`Error updating application status for ${applicationId}, tenant ${tenantId}:`, err);
         throw err;
     } finally {
         client.release();
