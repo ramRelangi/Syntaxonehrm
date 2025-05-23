@@ -2,6 +2,7 @@
 // src/app/(app)/[domain]/smart-resume-parser/page.tsx
 "use client";
 
+import * as React from 'react'; // Added React import
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -12,7 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, UploadCloud, CheckCircle, XCircle, User, Mail, Phone, Linkedin, Settings, Wrench, AlertTriangle } from 'lucide-react'; // Added AlertTriangle
+import { Loader2, UploadCloud, CheckCircle, XCircle, User, Mail, Phone, Linkedin, Settings, Wrench, AlertTriangle } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from '@/components/ui/badge';
 import { useParams } from "next/navigation";
