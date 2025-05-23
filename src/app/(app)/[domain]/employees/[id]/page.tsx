@@ -6,14 +6,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from "@/components/ui/button";
 import { notFound, useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { User, Mail, Phone, Briefcase, Building, Calendar as CalendarIconLucide, Activity, Pencil, ArrowLeft, UsersIcon, MapPin, Tag, UserCheck, FileText as LeaveIcon, ShieldCheck, LandPlot, BriefcaseBusiness, CalendarClock } from 'lucide-react';
+import { User, Mail, Phone, Briefcase, Building, Calendar as CalendarIconLucide, Activity, Pencil, ArrowLeft, UsersIcon, MapPin, Tag, UserCheck, FileText as LeaveIcon, ShieldCheck, LandPlot, BriefcaseBusiness, CalendarClock, Dot, CheckCircle, XCircle } from 'lucide-react';
 import { Badge } from "@/components/ui/badge";
 import { format, parseISO, isValid } from 'date-fns';
-import type { Employee, EmploymentType } from '@/modules/employees/types';
+import type { Employee, EmploymentType, EmployeeStatus } from '@/modules/employees/types';
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertTriangle } from 'lucide-react';
+import type { UserRole } from '@/modules/auth/types';
 
 interface EmployeeDetailPageProps {
   // Params are accessed via hook
@@ -30,18 +31,18 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T | und
         if (response.status === 404) {
             console.warn(`[Employee Detail Page - fetchData] Resource not found (404) for ${fullUrl}.`);
             const errorText = await response.text().catch(() => "");
+            let errorMessage = `Resource not found at ${fullUrl}`;
             if (errorText) {
                  try {
                     const errorPayload = JSON.parse(errorText);
                     console.error(`[Employee Detail Page - fetchData] 404 API Response JSON:`, errorPayload);
-                    // You might want to throw a specific error or handle it based on errorPayload.error
-                    throw new Error(errorPayload.error || `Resource not found at ${fullUrl}`);
+                    errorMessage = errorPayload.error || errorMessage;
                  } catch {
                     console.error(`[Employee Detail Page - fetchData] 404 API Response (not JSON):`, errorText);
-                    throw new Error(`Resource not found at ${fullUrl}. Server response: ${errorText.substring(0,100)}`);
+                    errorMessage = `${errorMessage}. Server response: ${errorText.substring(0,100)}`;
                  }
             }
-            return undefined;
+            throw new Error(errorMessage); 
         }
         if (!response.ok) {
             const errorText = await response.text();
@@ -71,51 +72,51 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T | und
     }
 }
 
-
-const getStatusVariant = (status?: Employee['status']): "default" | "secondary" | "outline" | "destructive" => {
+const getStatusVariant = (status?: EmployeeStatus): "default" | "secondary" | "outline" | "destructive" => {
   if (!status) return 'outline';
   switch (status) {
-    case 'Active': return 'default';
-    case 'On Leave': return 'secondary';
-    case 'Inactive': return 'outline';
+    case 'Active': return 'default'; 
+    case 'On Leave': return 'secondary'; 
+    case 'Inactive': return 'destructive'; 
     default: return 'outline';
   }
 };
 
-const getEmploymentTypeVariant = (type?: EmploymentType): "default" | "secondary" | "outline" => {
-  switch (type) {
-    case 'Full-time': return 'default';
-    case 'Part-time': return 'secondary';
-    case 'Contract': return 'outline';
-    default: return 'outline';
+const getStatusIcon = (status?: EmployeeStatus) => {
+  if (!status) return <Dot className="h-4 w-4 text-muted-foreground" />;
+  switch (status) {
+    case 'Active': return <CheckCircle className="h-4 w-4 text-green-600" />;
+    case 'On Leave': return <CalendarClock className="h-4 w-4 text-blue-600" />;
+    case 'Inactive': return <XCircle className="h-4 w-4 text-red-600" />;
+    default: return <Dot className="h-4 w-4 text-muted-foreground" />;
   }
-}
+};
+
 
 export default function TenantEmployeeDetailPage() {
   const params = useParams();
   const router = useRouter();
   const tenantDomain = params.domain as string;
-  const employeeIdFromUrl = params.id as string; // This is user_id if "My Profile", or employees.id if Admin/Manager view
+  const employeeIdFromUrl = params.id as string; 
   const { toast } = useToast();
 
   const [employee, setEmployee] = React.useState<Employee | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [currentUserRole, setCurrentUserRole] = React.useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = React.useState<UserRole | null>(null);
+  const [currentUserId, setCurrentUserId] = React.useState<string | null>(null); 
 
 
   React.useEffect(() => {
-    // Fetch current user's role and ID to determine if viewing own profile
     const fetchSessionInfo = async () => {
         try {
-            const res = await fetch('/api/auth/session');
+            const res = await fetch('/api/auth/session'); 
             if (res.ok) {
                 const session = await res.json();
                 setCurrentUserRole(session.userRole);
-                setCurrentUserId(session.userId);
+                setCurrentUserId(session.userId); 
             } else {
-                console.error("Failed to fetch session info for employee detail page:", await res.text());
+                console.error("Failed to fetch session info:", await res.text());
                 setError("Could not verify user session.");
             }
         } catch (e) {
@@ -134,21 +135,17 @@ export default function TenantEmployeeDetailPage() {
         setError("Required identifiers missing.");
         setIsLoading(false);
       }
-      // If roles/ids not yet loaded, wait.
       return;
     }
 
     const fetchEmployeeDetails = async () => {
-      // The ID in the URL is the employee.id (PK) for direct access,
-      // OR it's the user.id if it's the "My Profile" link for an employee.
-      // The API /api/employees/[id] handles this differentiation.
       console.log(`[TenantEmployeeDetailPage - fetchEffect] Starting fetch for URL param id: '${employeeIdFromUrl}' in tenant '${tenantDomain}'`);
       setIsLoading(true);
       setError(null);
       try {
         const data = await fetchData<Employee | undefined>(`/api/employees/${employeeIdFromUrl}`);
         if (!data) {
-          console.warn(`[TenantEmployeeDetailPage - fetchEffect] Employee not found for ID '${employeeIdFromUrl}'. Triggering notFound().`);
+          console.warn(`[TenantEmployeeDetailPage - fetchEffect] Employee not found via API for ID '${employeeIdFromUrl}'. Triggering notFound().`);
           notFound();
           return;
         }
@@ -170,7 +167,7 @@ export default function TenantEmployeeDetailPage() {
     };
 
     fetchEmployeeDetails();
-  }, [employeeIdFromUrl, tenantDomain, toast, currentUserRole, currentUserId]);
+  }, [employeeIdFromUrl, tenantDomain, toast, currentUserRole, currentUserId]); 
 
    const formatDate = (dateString?: string | null) => {
      if (!dateString) return "N/A";
@@ -180,19 +177,7 @@ export default function TenantEmployeeDetailPage() {
      } catch (e) { console.error("Error formatting date:", e); return "Invalid Date"; }
    };
 
-   if (!tenantDomain || !employeeIdFromUrl) {
-      return (
-        <div className="flex flex-col items-center justify-center min-h-[400px]">
-          <Alert variant="destructive">
-            <AlertTriangle className="h-5 w-5" />
-            <AlertTitle>Context Error</AlertTitle>
-            <AlertDescription>Could not determine tenant or employee context.</AlertDescription>
-          </Alert>
-        </div>
-      );
-   }
-
-   if (isLoading || currentUserRole === null) { // Also wait for role info
+   if (isLoading || currentUserRole === null) { 
      return (
          <div className="flex flex-col gap-6">
             <div className="flex items-center justify-between flex-wrap gap-4">
@@ -245,7 +230,6 @@ export default function TenantEmployeeDetailPage() {
   }
 
    if (!employee) {
-       // This path should ideally be caught by notFound() in useEffect if data is truly undefined from API
       return (
          <div className="flex flex-col items-center justify-center min-h-[400px]">
              <Alert variant="default" className="max-w-md">
@@ -260,18 +244,17 @@ export default function TenantEmployeeDetailPage() {
        );
   }
 
-  // Determine if the current user can edit this profile
   const canEditThisProfile = currentUserRole === 'Admin' || currentUserRole === 'Manager' || (currentUserRole === 'Employee' && employee.userId === currentUserId);
 
 
-  const InfoItem = ({ icon: Icon, label, value, isLink = false, hrefPrefix = "" }: { icon: React.ElementType, label: string, value?: string | null, isLink?: boolean, hrefPrefix?: string }) => {
-    if (!value && value !== 0 && typeof value !== 'boolean') return null; // Allow boolean false and 0 to display
+  const InfoItem = ({ icon: Icon, label, value, isLink = false, hrefPrefix = "" }: { icon: React.ElementType, label: string, value?: string | null | boolean, isLink?: boolean, hrefPrefix?: string }) => {
+    if (value === null || value === undefined || value === '') return null;
     return (
         <div className="flex items-start gap-3 py-2">
             <Icon className="h-5 w-5 text-muted-foreground mt-1 flex-shrink-0"/>
             <div className="flex-grow">
                 <p className="text-xs font-medium text-muted-foreground">{label}</p>
-                {isLink && value ? (
+                {isLink && typeof value === 'string' ? (
                     <a href={`${hrefPrefix}${value}`} className="text-sm text-primary hover:underline break-all">{value}</a>
                 ) : (
                     <p className="text-sm text-foreground break-words">{typeof value === 'boolean' ? (value ? 'Yes' : 'No') : (value || 'N/A')}</p>
@@ -299,7 +282,7 @@ export default function TenantEmployeeDetailPage() {
            <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
               <User className="h-7 w-7 text-primary" /> {employee.name}
            </h1>
-           {employee.employeeId && <Badge variant="outline" className="text-sm">ID: {employee.employeeId}</Badge>}
+           {employee.employeeId && <Badge variant="outline" className="text-sm font-mono">ID: {employee.employeeId}</Badge>}
          </div>
          {canEditThisProfile && (
              <Button asChild variant="default">
@@ -311,7 +294,6 @@ export default function TenantEmployeeDetailPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Personal & Contact Info Card */}
         <Card className="lg:col-span-2 shadow-md">
             <CardHeader>
                 <CardTitle className="text-xl flex items-center gap-2"><UserCheck className="h-5 w-5 text-primary" />Personal & Contact Information</CardTitle>
@@ -322,9 +304,9 @@ export default function TenantEmployeeDetailPage() {
                     <InfoItem icon={Mail} label="Personal Email" value={employee.personal_email} isLink hrefPrefix="mailto:" />
                     <InfoItem icon={Phone} label="Phone" value={employee.phone} isLink hrefPrefix="tel:" />
                     <InfoItem icon={CalendarIconLucide} label="Date of Birth" value={formatDate(employee.dateOfBirth)} />
+                     <InfoItem icon={User} label="Gender" value={employee.gender} />
                 </div>
                 <div className="space-y-1 pl-0 sm:pl-6 py-2 sm:py-0">
-                    <InfoItem icon={User} label="Gender" value={employee.gender} />
                     <InfoItem icon={ShieldCheck} label="Marital Status" value={employee.marital_status} />
                     <InfoItem icon={LandPlot} label="Nationality" value={employee.nationality} />
                     <InfoItem icon={Activity} label="Blood Group" value={employee.blood_group} />
@@ -332,7 +314,6 @@ export default function TenantEmployeeDetailPage() {
             </CardContent>
         </Card>
 
-        {/* Employment Details Card */}
         <Card className="shadow-md">
             <CardHeader>
                 <CardTitle className="text-xl flex items-center gap-2"><BriefcaseBusiness className="h-5 w-5 text-primary" />Employment Details</CardTitle>
@@ -344,14 +325,14 @@ export default function TenantEmployeeDetailPage() {
                 <InfoItem icon={CalendarClock} label="Hire Date" value={formatDate(employee.hireDate)} />
                 <InfoItem icon={MapPin} label="Work Location" value={employee.workLocation} />
                 <div className="flex items-start gap-3 py-2">
-                    <Activity className="h-5 w-5 text-muted-foreground mt-1 flex-shrink-0"/>
+                    {getStatusIcon(employee.status)}
                     <div>
                         <p className="text-xs font-medium text-muted-foreground">Status</p>
                         <Badge variant={getStatusVariant(employee.status)} className="mt-1">{employee.status}</Badge>
                     </div>
                 </div>
-                {employee.reportingManagerId && (
-                    <InfoItem icon={UsersIcon} label="Reporting Manager" value={employee.reportingManagerId} /> // TODO: Fetch manager name
+                {employee.reportingManagerId && ( 
+                    <InfoItem icon={UsersIcon} label="Reporting Manager ID" value={employee.reportingManagerId} />
                 )}
             </CardContent>
         </Card>
@@ -376,7 +357,6 @@ export default function TenantEmployeeDetailPage() {
                     <CardDescription>View leave balances and request history for this employee.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    {/* Link uses user_id if available, otherwise employee.id as fallback (though user_id is preferred for consistency with LeavePageClient) */}
                     <Button asChild>
                         <Link href={`/${tenantDomain}/leave?employeeId=${employee.userId || employee.id}`}>
                             View Leave Details

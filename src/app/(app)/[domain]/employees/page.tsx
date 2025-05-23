@@ -1,5 +1,4 @@
 
-// src/app/(app)/[domain]/employees/page.tsx
 "use client";
 
 import * as React from "react";
@@ -16,6 +15,7 @@ import type { Employee } from '@/modules/employees/types';
 import type { UserRole } from "@/modules/auth/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
+// Client-side fetch, API route handles auth and tenant context
 async function fetchData<T>(url: string, options?: RequestInit): Promise<T> {
     const fullUrl = url.startsWith('/') ? url : `/${url}`;
     console.log(`[Employees Page - fetchData] Fetching data from: ${fullUrl}`);
@@ -64,7 +64,6 @@ export default function TenantEmployeesPage() {
   const [error, setError] = React.useState<string | null>(null);
   const { toast } = useToast();
 
-  // These are client-side derived/simulated; primary auth happens server-side in actions/layout
   const [userRole, setUserRole] = React.useState<UserRole | null>(null);
   const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
 
@@ -72,29 +71,33 @@ export default function TenantEmployeesPage() {
     const fetchSessionInfo = async () => {
       console.log("[Employees Page] Attempting to fetch client-side session info...");
       try {
-        // This conceptual fetch needs to be implemented or session passed via props/context
-        // For now, let's assume the API endpoint /api/auth/session exists and returns { userId, userRole }
-        const sessionResponse = await fetch('/api/auth/session'); // Placeholder
+        const sessionResponse = await fetch('/api/auth/session');
         if (sessionResponse.ok) {
           const session = await sessionResponse.json();
           console.log("[Employees Page] Client-side session info fetched:", session);
           setUserRole(session.userRole);
-          setCurrentUserId(session.userId);
+          setCurrentUserId(session.userId); // This is the user.id (UUID)
         } else {
-          console.warn("[Employees Page] Failed to fetch client-side session info, status:", sessionResponse.status);
-          setError("Could not verify user session.");
+          const errorData = await sessionResponse.json().catch(() => ({}));
+          console.warn("[Employees Page] Failed to fetch client-side session info, status:", sessionResponse.status, "Error:", errorData.error || errorData.message);
+          setError(errorData.error || errorData.message || "Could not verify user session.");
           setUserRole(null);
           setCurrentUserId(null);
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error("[Employees Page] Error fetching client-side session info:", e);
-        setError("Error fetching session details.");
+        setError("Error fetching session details: " + e.message);
         setUserRole(null);
         setCurrentUserId(null);
       }
     };
-    fetchSessionInfo();
-  }, []);
+    if (tenantDomain) {
+        fetchSessionInfo();
+    } else {
+        setError("Tenant domain not found.");
+        setIsLoading(false);
+    }
+  }, [tenantDomain]);
 
   const fetchEmployees = React.useCallback(async () => {
     if (!tenantDomain) {
@@ -105,7 +108,6 @@ export default function TenantEmployeesPage() {
     // Wait for session info to be available before fetching employees
     if (userRole === null || currentUserId === null) {
         console.log("[Employees Page - fetchEmployees] Waiting for session info...");
-        // setIsLoading(false); // Don't set loading false yet, let it complete
         return;
     }
 
@@ -113,6 +115,7 @@ export default function TenantEmployeesPage() {
     setIsLoading(true);
     setError(null);
     try {
+      // API route will filter based on role (fetches all for Admin/Manager, self for Employee)
       const data = await fetchData<Employee[]>('/api/employees');
       setEmployees(data);
       console.log(`[Employees Page - ${tenantDomain}] Successfully fetched ${data.length} employees.`);
@@ -129,14 +132,13 @@ export default function TenantEmployeesPage() {
       setIsLoading(false);
       console.log(`[Employees Page - ${tenantDomain}] Finished fetchEmployees.`);
     }
-  }, [toast, tenantDomain, userRole, currentUserId]); // Add userRole and currentUserId as dependencies
+  }, [toast, tenantDomain, userRole, currentUserId]);
 
   React.useEffect(() => {
-    // Only fetch employees if role and user ID are known
-    if (userRole !== null && currentUserId !== null) {
+    if (userRole !== null && currentUserId !== null && tenantDomain) {
         fetchEmployees();
     }
-  }, [fetchEmployees, userRole, currentUserId]);
+  }, [fetchEmployees, userRole, currentUserId, tenantDomain]);
 
    if (!tenantDomain) {
        return <div className="text-center text-destructive py-10">Error: Could not determine tenant context.</div>;
@@ -148,7 +150,7 @@ export default function TenantEmployeesPage() {
   };
 
   const renderContent = () => {
-     if (isLoading || userRole === null) {
+     if (isLoading || userRole === null) { // Still loading if role isn't determined
        return (
            <div className="space-y-4">
                <Skeleton className="h-10 w-1/3" />
@@ -170,14 +172,17 @@ export default function TenantEmployeesPage() {
      }
 
      if (userRole === 'Employee') {
+         // Employees see their own profile. The API should return only their record.
          if (employees.length === 1 && currentUserId && employees[0].userId === currentUserId) {
+             // Link to employee detail page using employee.id (PK), not user.id
+             const employeePrimaryKey = employees[0].id;
              return (
                  <div className="text-center py-10">
                      <UserCog className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                      <h2 className="text-xl font-semibold">Your Profile</h2>
                      <p className="text-muted-foreground mb-4">You are viewing your employee information.</p>
                      <Button asChild>
-                         <Link href={`/${tenantDomain}/employees/${employees[0].userId}`}>
+                         <Link href={`/${tenantDomain}/employees/${employeePrimaryKey}`}>
                              View My Detailed Profile
                          </Link>
                      </Button>
@@ -185,15 +190,20 @@ export default function TenantEmployeesPage() {
              );
          } else if (employees.length === 0 && currentUserId){
               return <p className="text-center py-10 text-muted-foreground">Your employee profile could not be loaded or is not yet available.</p>;
+         } else if (employees.length > 1) {
+             // This case shouldn't happen if API correctly filters for employee role
+             console.warn("[Employees Page] Employee role sees multiple records. This should not happen.");
+             return <p className="text-center py-10 text-destructive">Error: Inconsistent data. Please contact support.</p>;
          }
      }
 
-     // For Admin/Manager or if Employee has multiple records (should not happen)
+     // For Admin/Manager
      return (
        <EmployeeDataTable
          columns={columns}
          data={employees}
          onEmployeeDeleted={handleEmployeeDeleted}
+         // tenantDomain is used by ActionsCell via params hook now
        />
      );
    };
@@ -227,4 +237,3 @@ export default function TenantEmployeesPage() {
     </div>
   );
 }
-

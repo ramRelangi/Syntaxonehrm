@@ -1,4 +1,4 @@
-// src/app/(app)/[domain]/employees/add/page.tsx
+
 "use client";
 
 import * as React from "react";
@@ -13,9 +13,9 @@ interface AddEmployeePageProps {
   // Params are accessed via hook
 }
 
-export default function TenantAddEmployeePage({ params: routeParams }: AddEmployeePageProps) {
-  // const params = useParams(); // No longer needed if passed as prop
-  const tenantDomain = routeParams.domain as string; // Use destructured and typed params
+export default function TenantAddEmployeePage() {
+  const params = useParams();
+  const tenantDomain = params.domain as string;
   const [currentUserRole, setCurrentUserRole] = React.useState<UserRole | null>(null);
   const [isLoadingRole, setIsLoadingRole] = React.useState(true);
   const [roleError, setRoleError] = React.useState<string | null>(null);
@@ -26,7 +26,7 @@ export default function TenantAddEmployeePage({ params: routeParams }: AddEmploy
       setRoleError(null);
       console.log("[Add Employee Page] Fetching user role...");
       try {
-        const sessionResponse = await fetch('/api/auth/session'); // Ensure this endpoint exists and returns role
+        const sessionResponse = await fetch('/api/auth/session');
         if (sessionResponse.ok) {
           const session = await sessionResponse.json();
           console.log("[Add Employee Page] Session details fetched:", session);
@@ -117,7 +117,7 @@ export default function TenantAddEmployeePage({ params: routeParams }: AddEmploy
             formDescription="Enter the employee's information below."
             submitButtonText="Add Employee"
             tenantDomain={tenantDomain}
-            currentUserRole={currentUserRole} // Pass the fetched role
+            currentUserRole={currentUserRole}
           />
         </CardContent>
       </Card>

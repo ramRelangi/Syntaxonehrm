@@ -2,9 +2,9 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import type { Employee } from "@/modules/employees/types";
+import type { Employee, EmployeeStatus } from "@/modules/employees/types";
 import { Button } from "@/components/ui/button";
-import { ArrowUpDown, MoreHorizontal, Pencil, Trash2, Eye } from "lucide-react";
+import { ArrowUpDown, MoreHorizontal, Pencil, Trash2, Eye, CheckCircle, XCircle, CalendarClock, Dot } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,26 +25,31 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"; // Removed AlertDialogTrigger from here
+} from "@/components/ui/alert-dialog"; 
 import { useState } from "react";
-import { useParams } from "next/navigation"; // Import useParams
+import { useParams } from "next/navigation";
+import { format, parseISO } from 'date-fns';
 
-// Helper function to determine badge variant based on status
-const getStatusVariant = (status?: Employee['status']): "default" | "secondary" | "outline" | "destructive" => {
+const getStatusVariant = (status?: EmployeeStatus): "default" | "secondary" | "outline" | "destructive" => {
   if (!status) return 'outline';
   switch (status) {
-    case 'Active':
-      return 'default';
-    case 'On Leave':
-      return 'secondary';
-    case 'Inactive':
-      return 'destructive'; // Changed to destructive for Inactive
-    default:
-      return 'outline';
+    case 'Active': return 'default';
+    case 'On Leave': return 'secondary';
+    case 'Inactive': return 'destructive';
+    default: return 'outline';
   }
 };
 
-// Action Cell Component for Delete Confirmation
+const getStatusIcon = (status?: EmployeeStatus) => {
+  if (!status) return <Dot className="h-3 w-3 text-muted-foreground" />;
+  switch (status) {
+    case 'Active': return <CheckCircle className="h-3 w-3 text-green-500" />;
+    case 'On Leave': return <CalendarClock className="h-3 w-3 text-blue-500" />;
+    case 'Inactive': return <XCircle className="h-3 w-3 text-red-500" />;
+    default: return <Dot className="h-3 w-3 text-muted-foreground" />;
+  }
+};
+
 const ActionsCell = ({ employee, onEmployeeDeleted }: { employee: Employee, onEmployeeDeleted: () => void }) => {
   const { toast } = useToast();
   const params = useParams();
@@ -72,7 +77,7 @@ const ActionsCell = ({ employee, onEmployeeDeleted }: { employee: Employee, onEm
         className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
       });
       onEmployeeDeleted();
-      setIsAlertDialogOpen(false); // Close dialog on success
+      setIsAlertDialogOpen(false); 
     } catch (error: any) {
       toast({
         title: "Error Deleting Employee",
@@ -97,6 +102,7 @@ const ActionsCell = ({ employee, onEmployeeDeleted }: { employee: Employee, onEm
           <DropdownMenuLabel>Actions for {employee.name}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
+             {/* Link to detail page using employee.id (PK) */}
              <Link href={`/${tenantDomain}/employees/${employee.id}`} className="flex items-center w-full">
                  <Eye className="mr-2 h-4 w-4" /> View Details
              </Link>
@@ -107,11 +113,13 @@ const ActionsCell = ({ employee, onEmployeeDeleted }: { employee: Employee, onEm
              </Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-            <AlertDialogTrigger asChild>
-               <Button variant="ghost" className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10 px-2 py-1.5 text-sm" disabled={isDeleting}>
-                  <Trash2 className="mr-2 h-4 w-4" /> Delete
-               </Button>
-           </AlertDialogTrigger>
+            <DropdownMenuItem
+               onSelect={() => setIsAlertDialogOpen(true)}
+               className="text-destructive focus:text-destructive focus:bg-destructive/10 flex items-center w-full"
+               disabled={isDeleting}
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> Delete
+            </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -144,76 +152,83 @@ export const columns: ColumnDef<Employee>[] = [
     ),
     cell: ({ row }) => {
         const employee = row.original;
-        // The 'id' here is the employee's primary key (employees.id)
-        return <Link href={`employees/${employee.id}`} className="hover:underline text-primary">{employee.name}</Link>;
+        const params = useParams();
+        const tenantDomain = params.domain as string;
+        // Link to detail page using employee.id (PK)
+        return <Link href={`/${tenantDomain}/employees/${employee.id}`} className="hover:underline text-primary">{employee.name}</Link>;
     }
   },
   {
-    accessorKey: "employeeId", // Human-readable ID
+    accessorKey: "employeeId", 
     header: "Employee ID",
+    cell: ({ row }) => row.original.employeeId || 'N/A',
   },
   {
-    accessorKey: "email", // Official Email
+    accessorKey: "email", 
     header: "Official Email",
   },
   {
-    accessorKey: "position", // Direct field from employees table
+    accessorKey: "position", 
      header: ({ column }) => (
         <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
           Position <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
     ),
+    cell: ({ row }) => row.original.position || 'N/A',
   },
   {
-    accessorKey: "department", // Direct field from employees table
+    accessorKey: "department", 
      header: ({ column }) => (
         <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
           Department <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
     ),
+    cell: ({ row }) => row.original.department || 'N/A',
   },
    {
-    accessorKey: "hireDate", // Direct field from employees table
+    accessorKey: "hireDate", 
     header: ({ column }) => (
         <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
           Hire Date <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
     ),
      cell: ({ row }) => {
-      const date = row.getValue("hireDate") as string | undefined;
+      const date = row.getValue("hireDate") as string | undefined | null;
       if (!date) return "N/A";
        try {
          return format(parseISO(date), "MMM d, yyyy");
        } catch (e) {
-         return date;
+         return date; 
        }
     },
   },
   {
-    accessorKey: "status", // Direct field from employees table
+    accessorKey: "status", 
     header: "Status",
     cell: ({ row }) => {
-      const status = row.getValue("status") as Employee['status'];
-      return <Badge variant={getStatusVariant(status)}>{status}</Badge>;
+      const status = row.original.status;
+      return <Badge variant={getStatusVariant(status)} className="flex items-center gap-1 min-w-[80px] justify-center">
+                {getStatusIcon(status)}
+                {status}
+             </Badge>;
     },
      filterFn: (row, id, value) => {
-      return value.includes(row.getValue(id))
+       const rowStatus = row.original.status;
+       return Array.isArray(value) && value.includes(rowStatus);
     },
   },
    {
     id: "actions",
     cell: ({ row, table }) => {
       const employee = row.original;
-      // @ts-ignore - onEmployeeDeleted is injected by DataTable
       const onEmployeeDeleted = table.options.meta?.onEmployeeDeleted;
-      return <ActionsCell employee={employee} onEmployeeDeleted={onEmployeeDeleted} />;
+      return <ActionsCell employee={employee} onEmployeeDeleted={onEmployeeDeleted || (() => console.warn("onEmployeeDeleted not passed to ActionsCell"))} />;
     },
   },
 ];
 
-// Add meta type to table options for passing callbacks
 declare module '@tanstack/react-table' {
   interface TableMeta<TData extends Employee> {
-    onEmployeeDeleted: () => void;
+    onEmployeeDeleted?: () => void;
   }
 }

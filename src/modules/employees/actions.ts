@@ -1,8 +1,8 @@
 
 'use server';
 
-import type { Employee, EmployeeFormData } from '@/modules/employees/types';
-import { employeeSchema, userRoleSchema } from '@/modules/employees/types'; // Corrected: userRoleSchema is in employees/types, not auth/types for this context
+import type { Employee, EmployeeFormData, EmployeeStatus } from '@/modules/employees/types';
+import { employeeSchema, userRoleSchema } from '@/modules/employees/types';
 import {
   getAllEmployees as dbGetAllEmployees,
   getEmployeeById as dbGetEmployeeById,
@@ -21,14 +21,18 @@ import { addUser as dbAddUser } from '@/modules/auth/lib/db';
 import { generateTemporaryPassword } from '@/modules/auth/lib/utils';
 import bcrypt from 'bcrypt';
 import type { SessionData, UserRole } from '@/modules/auth/types';
+import pool from '@/lib/db'; // For linking user to employee in addEmployee action
 
 const SALT_ROUNDS = 10;
 
 // Schema for validating form data for add/update actions
 // It omits server-generated IDs but includes fields that are now directly on employees table
-const actionEmployeeSchema = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true, name: true }).extend({
-    reportingManagerId: z.string().uuid("Invalid manager ID format.").nullable().optional(),
-    // Role is for the user account, handled during user creation
+// This should align with EmployeeFormData
+const actionEmployeeSchema = employeeSchema.omit({ 
+    id: true, tenantId: true, userId: true, employeeId: true, 
+    name: true, created_at: true, updated_at: true, is_active: true 
+}).extend({
+    // role is part of form data for creation by admin, but also needs to be passed for user creation
 });
 
 
@@ -96,10 +100,19 @@ export async function getEmployeeByIdAction(id: string): Promise<Employee | unde
 
         if (userRole === 'Employee') {
             console.log(`[Action getEmployeeByIdAction] Employee role. URL param id: ${idToQuery}. Session userId: ${currentUserIdLower}`);
-            if (idToQuery !== currentUserIdLower) {
-                console.warn(`[Action getEmployeeByIdAction] Auth_Warning (Employee Role): Attempt to access profile where URL ID '${idToQuery}' (expected to be employee.id for edit links) does not match session userId '${currentUserIdLower}'. This implies an edit attempt for another user or a MyProfile link using employee.id. Fetching by employee.id '${idToQuery}' to verify ownership.`);
-                employeeProfile = await dbGetEmployeeById(idToQuery, tenantIdToQuery);
+            // For "My Profile" link, idToQuery is user_id. For "Edit My Profile", idToQuery is employee.id (PK)
+            if (idToQuery === currentUserIdLower) { // This is "My Profile" view, ID in URL is user_id
+                console.log(`[Action getEmployeeByIdAction] Employee role. ID from URL matches session userId. Fetching own profile using dbGetEmployeeByUserId with userId: ${idToQuery}, tenantId: ${tenantIdToQuery}`);
+                employeeProfile = await dbGetEmployeeByUserId(idToQuery, tenantIdToQuery);
                 if (employeeProfile) {
+                     console.log(`[Action getEmployeeByIdAction] dbGetEmployeeByUserId SUCCESS for own profile. Fetched Employee PK: ${employeeProfile.id}, Name: ${employeeProfile.name}`);
+                } else {
+                    console.warn(`[Action getEmployeeByIdAction] dbGetEmployeeByUserId FAILED to find profile for current user. userId: ${idToQuery}, tenantId: ${tenantIdToQuery}. This user may not have a linked employee record or tenantId mismatch.`);
+                }
+            } else { // This is likely an "Edit My Profile" link, or an attempt to access someone else. ID in URL is employee.id (PK).
+                console.log(`[Action getEmployeeByIdAction] Employee role. ID from URL (${idToQuery}) does not match session userId (${currentUserIdLower}). Assuming ID is employee.id (PK). Fetching by PK to verify ownership.`);
+                employeeProfile = await dbGetEmployeeById(idToQuery, tenantIdToQuery);
+                 if (employeeProfile) {
                     console.log(`[Action getEmployeeByIdAction] Fetched employee by PK ${idToQuery}. Record details: ID=${employeeProfile.id}, Linked_UserID_On_Record=${employeeProfile.userId}, Name=${employeeProfile.name}`);
                     if (employeeProfile.userId?.toLowerCase() !== currentUserIdLower) {
                         console.warn(`[Action getEmployeeByIdAction] Auth_Failed (Employee Role): Attempt to access/edit profile for Employee PK ${idToQuery}. Record's linked user_id (${employeeProfile.userId}) does NOT match session userId (${currentUserIdLower}).`);
@@ -107,16 +120,8 @@ export async function getEmployeeByIdAction(id: string): Promise<Employee | unde
                     }
                     console.log(`[Action getEmployeeByIdAction] Auth_Success (Employee Role): Employee PK ${idToQuery} belongs to session user ${currentUserIdLower}.`);
                 } else {
-                    console.warn(`[Action getEmployeeByIdAction] Auth_Failed (Employee Role): Employee PK ${idToQuery} not found for tenant ${tenantIdToQuery}.`);
-                    throw new Error("Employee profile not found.");
-                }
-            } else { // idToQuery (from URL) === currentUserIdLower (from session) -> This is for "My Profile" view
-                console.log(`[Action getEmployeeByIdAction] Employee role. ID from URL matches session userId. Fetching own profile using dbGetEmployeeByUserId with userId: ${idToQuery}, tenantId: ${tenantIdToQuery}`);
-                employeeProfile = await dbGetEmployeeByUserId(idToQuery, tenantIdToQuery);
-                 if (employeeProfile) {
-                     console.log(`[Action getEmployeeByIdAction] dbGetEmployeeByUserId SUCCESS for own profile. Fetched Employee PK: ${employeeProfile.id}, Name: ${employeeProfile.name}`);
-                } else {
-                    console.warn(`[Action getEmployeeByIdAction] dbGetEmployeeByUserId FAILED to find profile for current user. userId: ${idToQuery}, tenantId: ${tenantIdToQuery}.`);
+                    console.warn(`[Action getEmployeeByIdAction] Auth_Failed (Employee Role): Employee PK ${idToQuery} not found for tenant ${tenantIdToQuery}. Cannot verify ownership.`);
+                    throw new Error("Employee profile not found or you are not authorized.");
                 }
             }
         } else { // Admin or Manager
@@ -150,7 +155,6 @@ export async function getEmployeeByIdAction(id: string): Promise<Employee | unde
     }
 }
 
-
 export async function addEmployee(formData: EmployeeFormData): Promise<{ success: boolean; employee?: Employee; errors?: z.ZodIssue[] | { code: string; path: (string|number)[]; message: string }[] }> {
    console.log("[Action addEmployee] Received formData (raw from form):", JSON.stringify(formData, null, 2));
    let sessionData: SessionData | null;
@@ -163,6 +167,7 @@ export async function addEmployee(formData: EmployeeFormData): Promise<{ success
        console.log(`[Action addEmployee] Session data retrieved: tenantId=${sessionData.tenantId}, userRole=${sessionData.userRole}, tenantDomain=${sessionData.tenantDomain}`);
    } catch (e: any) {
        console.error("[Action addEmployee] Error fetching session data:", e);
+       console.error("[Action addEmployee] Error stack:", e.stack);
        return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'Failed to verify session: ' + e.message }] };
    }
 
@@ -174,14 +179,16 @@ export async function addEmployee(formData: EmployeeFormData): Promise<{ success
    }
    console.log(`[Action addEmployee] Attempting to add employee for tenant: ${tenantId}`);
 
-    // Prepare data for validation, explicitly handling reportingManagerId
     const dataForValidation = {
         ...formData,
-        reportingManagerId: formData.reportingManagerId || null, // Ensure null if empty/undefined
-        role: formData.role || 'Employee', // Default role for user account
+        reportingManagerId: formData.reportingManagerId || null,
+        role: formData.role || 'Employee', // Role for the User account
+        status: formData.status || 'Active',
+        employmentType: formData.employmentType || 'Full-time',
     };
    console.log("[Action addEmployee] Data for Zod validation:", JSON.stringify(dataForValidation, null, 2));
 
+   // Use the schema that matches EmployeeFormData (omits server-generated fields)
    const validation = actionEmployeeSchema.safeParse(dataForValidation);
 
   if (!validation.success) {
@@ -191,31 +198,20 @@ export async function addEmployee(formData: EmployeeFormData): Promise<{ success
   console.log("[Action addEmployee] Zod Validation successful. Validated data:", JSON.stringify(validation.data, null, 2));
 
   // Destructure all relevant fields from validation.data
-  const {
-      first_name, middle_name, last_name, email, personal_email, phone, gender, dateOfBirth,
-      marital_status, nationality, blood_group, emergency_contact_name, emergency_contact_number,
-      status, reportingManagerId, position, department, workLocation, employmentType, hireDate,
-      role: employeeRoleForUser // This is the role for the users table
-  } = validation.data;
+  const { role: employeeRoleForUser, ...employeeDetailsForm } = validation.data;
 
   let actualRoleToSet: UserRole = employeeRoleForUser || 'Employee';
   if (userRolePerformingAction === 'Manager' && actualRoleToSet !== 'Employee') {
       console.warn(`[Action addEmployee] Manager attempting to set role to ${actualRoleToSet}. Forcing to 'Employee'.`);
       actualRoleToSet = 'Employee';
   }
-
-  // Prepare the data specifically for dbAddEmployeeInternal
-  const employeeDataForDb: Omit<EmployeeFormData, 'name' | 'role'> & { tenantId: string, userId: string, status: Employee['status'], role: UserRole } = {
-    first_name, middle_name, last_name, email, personal_email, phone, gender, dateOfBirth,
-    marital_status, nationality, blood_group, emergency_contact_name, emergency_contact_number,
-    status: status || 'Active', // Ensure status has a default for DB
-    reportingManagerId: reportingManagerId === "" ? null : reportingManagerId, // Ensure null if empty string
-    position, department, workLocation, employmentType, hireDate,
-    // These are added contextually before calling dbAddEmployeeInternal
+  
+  const employeeDataToSave: Omit<EmployeeFormData, 'role'> & { tenantId: string, userId: string, status: EmployeeStatus } = {
+    ...employeeDetailsForm, // This contains all fields from EmployeeFormData EXCEPT role
+    reportingManagerId: employeeDetailsForm.reportingManagerId || null,
     tenantId: "", // Will be set
     userId: "",   // Will be set
-    is_active: (status || 'Active') === 'Active', // is_active derived from status
-    role: actualRoleToSet, // This role is for the user, passed to dbAddUser
+    status: employeeDetailsForm.status || 'Active', // Ensure status is set
   };
 
 
@@ -225,30 +221,45 @@ export async function addEmployee(formData: EmployeeFormData): Promise<{ success
     const temporaryPassword = generateTemporaryPassword(12);
     console.log('[Action addEmployee] Generated temporary password length:', temporaryPassword.length);
     const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
+    
     let newUser;
     try {
-        newUser = await dbAddUser({
-            tenantId,
-            email,
-            username: email, // Using email as username for simplicity; can be changed
+        const userDataForDb = {
+            tenant_id: tenantId,
+            username: employeeDataToSave.email.toLowerCase(), // Use email as username
             passwordHash,
-            name: `${first_name} ${last_name}`,
+            email: employeeDataToSave.email.toLowerCase(),
+            name: `${employeeDataToSave.first_name} ${employeeDataToSave.last_name || ''}`.trim(),
             role: actualRoleToSet,
             is_active: true,
-            employee_id: undefined, // employee_id (PK from employees) will be linked later if needed by FK in users
-        });
+            employee_id: undefined, 
+        };
+        console.log("[Action addEmployee] Data being passed to dbAddUser:", JSON.stringify(userDataForDb));
+        newUser = await dbAddUser(userDataForDb);
     } catch (userError: any) {
         console.error("[Action addEmployee] Error creating user in users table:", userError);
         return { success: false, errors: [{ code: 'custom', path: ['email'], message: userError.message || 'Failed to create user account for employee.' }] };
     }
     console.log(`[Action addEmployee] User account created with ID: ${newUser.user_id} and Role: ${actualRoleToSet}`);
 
-    // Update employeeDataForDb with actual tenantId and userId
-    employeeDataForDb.tenantId = tenantId;
-    employeeDataForDb.userId = newUser.user_id;
+    employeeDataToSave.tenantId = tenantId;
+    employeeDataToSave.userId = newUser.user_id;
 
-    const newEmployee = await dbAddEmployeeInternal(employeeDataForDb);
+    // Pass only the fields relevant to EmployeeFormData for dbAddEmployeeInternal
+    const newEmployee = await dbAddEmployeeInternal(employeeDataToSave);
     console.log(`[Action addEmployee] Employee record added successfully (ID: ${newEmployee.id}, EmployeeID: ${newEmployee.employeeId}).`);
+
+    // Link user to employee by updating users.employee_id with newEmployee.id (PK of employees table)
+    const client = await pool.connect();
+    try {
+        await client.query('UPDATE users SET employee_id = $1 WHERE user_id = $2 AND tenant_id = $3', 
+        [newEmployee.id, newUser.user_id, tenantId]);
+        console.log(`[Action addEmployee] Linked user ${newUser.user_id} to employee ${newEmployee.id}.`);
+    } catch (linkError) {
+        console.error(`[Action addEmployee] CRITICAL: Failed to link user ${newUser.user_id} to employee ${newEmployee.id}:`, linkError);
+    } finally {
+        client.release();
+    }
 
     try {
         console.log(`[Action addEmployee] Attempting to queue welcome email for ${newEmployee.email} to ${tenantDomain}...`);
@@ -256,8 +267,8 @@ export async function addEmployee(formData: EmployeeFormData): Promise<{ success
             tenantId,
             newEmployee.name,
             newEmployee.email,
-            newUser.user_id,
-            newEmployee.employeeId!,
+            newUser.user_id, // Pass user's UUID
+            newEmployee.employeeId!, // Pass official employee_id (EMP-XXX)
             temporaryPassword,
             tenantDomain
         );
@@ -284,7 +295,7 @@ export async function addEmployee(formData: EmployeeFormData): Promise<{ success
     if (error.message) {
         const prefix = "Error: ";
         errorMessage = error.message.startsWith(prefix) ? error.message.substring(prefix.length) : error.message;
-        if (error.message.includes('Email address already exists')) errorPath = ['email'];
+        if (error.message.includes('email address already exists')) errorPath = ['email'];
         else if (error.message.toLowerCase().includes('invalid manager id format')) errorPath = ['reportingManagerId'];
     }
     if (error.code && typeof error.code === 'string') {
@@ -311,7 +322,7 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
 
    const { tenantId, userRole: userRolePerformingAction, userId: currentUserIdPerformingAction, tenantDomain } = sessionData;
 
-    const employeeToUpdate = await dbGetEmployeeById(id.toLowerCase(), tenantId); // Fetch by Employee PK
+    const employeeToUpdate = await dbGetEmployeeById(id.toLowerCase(), tenantId); 
     if (!employeeToUpdate) {
         console.warn(`[Action updateEmployee] Employee PK ${id} not found for tenant ${tenantId}.`);
         return { success: false, errors: [{ code: 'custom', path: ['id'], message: 'Employee not found.' }] };
@@ -320,43 +331,58 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
    let dataForValidation: Partial<EmployeeFormData> & { role?: UserRole } = { ...formData };
 
     if (userRolePerformingAction === 'Employee') {
-        // Employee can only edit their own profile and limited fields
         if (employeeToUpdate.userId?.toLowerCase() !== currentUserIdPerformingAction.toLowerCase()) {
             console.warn(`[Action updateEmployee] Auth_Failed (Employee Role): Attempt to update employee PK ${id}. Record's user_id (${employeeToUpdate.userId}) != session userId (${currentUserIdPerformingAction}).`);
             return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'Unauthorized to update this employee profile.' }] };
         }
-        const allowedUpdates: Partial<EmployeeFormData> = {};
-        if (formData.phone !== undefined) allowedUpdates.phone = formData.phone;
-        if (formData.dateOfBirth !== undefined) allowedUpdates.dateOfBirth = formData.dateOfBirth;
-        if (formData.personal_email !== undefined) allowedUpdates.personal_email = formData.personal_email;
-        // Add other allowed fields here if necessary (e.g., marital_status, emergency contacts)
+        // Define allowed fields for 'Employee' role to update
+        const allowedFields: (keyof EmployeeFormData)[] = [
+            'personal_email', 'phone', 'dateOfBirth', 'marital_status', 
+            'nationality', 'blood_group', 'emergency_contact_name', 
+            'emergency_contact_number' 
+            // Add other purely personal fields if necessary
+        ];
+        
+        const updatesToApply: Partial<EmployeeFormData> = {};
+        let hasAllowedUpdates = false;
+        const attemptedDisallowedUpdates: string[] = [];
 
-        const disallowedKeys = Object.keys(formData).filter(key => !['phone', 'dateOfBirth', 'personal_email'].includes(key)); // update with allowed keys
-        if (disallowedKeys.length > 0 && Object.keys(formData).some(key => disallowedKeys.includes(key as keyof EmployeeFormData))) {
-             console.warn(`[Action updateEmployee] Employee ${currentUserIdPerformingAction} attempted to update disallowed fields: ${disallowedKeys.join(', ')} on employee PK ${id}.`);
-             if (Object.keys(allowedUpdates).length === 0 && Object.keys(formData).length > 0) {
-                return { success: false, errors: [{ code: 'custom', path: ['root'], message: `You are not allowed to update fields: ${disallowedKeys.join(', ')}.` }] };
-             }
+        for (const key in formData) {
+            if (Object.prototype.hasOwnProperty.call(formData, key)) {
+                if (allowedFields.includes(key as keyof EmployeeFormData)) {
+                    (updatesToApply as any)[key] = (formData as any)[key];
+                    hasAllowedUpdates = true;
+                } else if (key !== 'role') { // Role is handled separately, don's list as disallowed
+                    attemptedDisallowedUpdates.push(key);
+                }
+            }
         }
-        dataForValidation = allowedUpdates; // Only allowed fields for employee role
-        if (Object.keys(dataForValidation).length === 0 && Object.keys(formData).length > 0) {
-             console.log(`[Action updateEmployee] Employee ${currentUserIdPerformingAction} submitted only disallowed changes for employee PK ${id}.`);
+
+        if (attemptedDisallowedUpdates.length > 0 && !hasAllowedUpdates) {
+             console.warn(`[Action updateEmployee] Employee ${currentUserIdPerformingAction} attempted to update only disallowed fields: ${attemptedDisallowedUpdates.join(', ')} on employee PK ${id}.`);
+             return { success: false, errors: [{ code: 'custom', path: ['root'], message: `You are not allowed to update fields: ${attemptedDisallowedUpdates.join(', ')}.` }] };
+        }
+        if (!hasAllowedUpdates && Object.keys(formData).length > 0 && !formData.role) { // Check if any form data was sent but no allowed fields
+             console.log(`[Action updateEmployee] Employee ${currentUserIdPerformingAction} submitted only disallowed changes or no relevant changes for employee PK ${id}.`);
              return { success: false, errors: [{ code: 'custom', path: ['root'], message: 'No updatable fields provided or you are not allowed to update the submitted fields.' }] };
         }
-         if (Object.keys(dataForValidation).length === 0 && Object.keys(formData).length === 0) {
+         if (!hasAllowedUpdates && Object.keys(formData).length === 0) { // No data submitted at all
             console.log(`[Action updateEmployee] No data submitted for update by employee ${currentUserIdPerformingAction}.`);
-            return { success: true, employee: employeeToUpdate, errors: [{ code: 'custom', path: ['root'], message: 'No changes submitted.' }] };
+            return { success: true, employee: employeeToUpdate }; // Return current data
         }
-    } else if (formData.role && userRolePerformingAction === 'Admin') { // Only Admin can change role
+        dataForValidation = updatesToApply; // Only use allowed updates for validation
+        if (formData.role) { // If role was somehow sent, remove it for 'Employee'
+            delete (dataForValidation as any).role;
+        }
+
+    } else if (formData.role && userRolePerformingAction === 'Admin') { 
          dataForValidation.role = formData.role;
     } else if (formData.role && userRolePerformingAction !== 'Admin') {
         console.warn(`[Action updateEmployee] Non-Admin role ${userRolePerformingAction} attempting to change user role. Ignoring role change.`);
-        delete dataForValidation.role; // Prevent non-admins from changing roles
+        delete dataForValidation.role; 
     }
 
 
-   console.log(`[Action updateEmployee] Attempting to update employee PK ${id} for tenant: ${tenantId} with data:`, dataForValidation);
-   // Use a partial version of actionEmployeeSchema for updates
    const schemaForUpdate = actionEmployeeSchema.partial();
    const validation = schemaForUpdate.safeParse(dataForValidation);
 
@@ -369,24 +395,22 @@ export async function updateEmployee(id: string, formData: Partial<Omit<Employee
 
   const finalDataToUpdate = {
     ...validation.data,
-    reportingManagerId: validation.data.reportingManagerId === "" ? null : validation.data.reportingManagerId,
+    reportingManagerId: validation.data.reportingManagerId === "" ? null : (validation.data.reportingManagerId || null),
   };
-
 
   try {
     console.log("[Action updateEmployee] Calling dbUpdateEmployee...");
-    // Pass role separately if it needs to be updated on the users table
     const { role: roleToUpdate, ...employeeUpdatesForDb } = finalDataToUpdate;
 
     const updatedEmployee = await dbUpdateEmployee(id, tenantId, {
-        ...employeeUpdatesForDb,
-        role: (userRolePerformingAction === 'Admin' && roleToUpdate) ? roleToUpdate : undefined, // Only pass role if admin is updating
+        ...employeeUpdatesForDb, // This is Omit<EmployeeFormData, 'role'>
+        role: (userRolePerformingAction === 'Admin' && roleToUpdate) ? roleToUpdate : undefined,
     });
 
     if (updatedEmployee) {
        console.log(`[Action updateEmployee] Employee PK ${id} updated successfully. Revalidating paths...`);
         revalidatePath(`/${tenantDomain}/employees`);
-        revalidatePath(`/${tenantDomain}/employees/${updatedEmployee.id}`); // Use PK from returned object
+        revalidatePath(`/${tenantDomain}/employees/${updatedEmployee.id}`); 
         revalidatePath(`/${tenantDomain}/employees/${updatedEmployee.id}/edit`);
         revalidatePath(`/${tenantDomain}/dashboard`);
       return { success: true, employee: updatedEmployee };

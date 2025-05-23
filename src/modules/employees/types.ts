@@ -2,82 +2,105 @@
 import { z } from 'zod';
 import { userRoleSchema } from '@/modules/auth/types';
 
-// Re-align with the ENUM type defined in init-db.ts
+// ENUM types based on your comprehensive schema in init-db.ts
 export const employmentTypeSchema = z.enum(['Full-time', 'Part-time', 'Contract', 'Internship', 'Temporary']);
 export type EmploymentType = z.infer<typeof employmentTypeSchema>;
 
-// Re-align with the ENUM type defined in init-db.ts
 export const genderSchema = z.enum(['Male', 'Female', 'Other', 'Prefer not to say']);
 export type Gender = z.infer<typeof genderSchema>;
 
-// Employee interface reflecting the columns directly on the 'employees' table
-// as per the latest init-db.ts.
+export const employeeStatusSchema = z.enum(['Active', 'Inactive', 'On Leave']);
+export type EmployeeStatus = z.infer<typeof employeeStatusSchema>;
+
+// Main Employee Interface - reflecting columns directly on 'employees' table
 export interface Employee {
   id: string; // PK: employees.id (UUID)
   tenantId: string;
-  userId?: string; // FK: users.user_id (UUID)
-  employeeId?: string; // Human-readable ID (VARCHAR)
-  name: string; // Generated from first, middle, last name
+  userId?: string | null; // FK: users.user_id (UUID), can be null
+  employeeId?: string | null; // Human-readable ID (VARCHAR), nullable
+
   first_name: string;
-  middle_name?: string;
+  middle_name?: string | null;
   last_name: string;
-  email: string; // Official email
-  personal_email?: string;
-  phone?: string;
-  gender?: Gender;
-  dateOfBirth?: string; // YYYY-MM-DD
-  marital_status?: string;
-  nationality?: string;
-  blood_group?: string;
-  emergency_contact_name?: string;
-  emergency_contact_number?: string;
-  is_active: boolean;
-  status: 'Active' | 'Inactive' | 'On Leave'; // From employees.status
+  name: string; // Generated column: first_name + middle_name + last_name
+
+  dateOfBirth?: string | null; // YYYY-MM-DD format
+  gender?: Gender | null;
+  marital_status?: string | null;
+  nationality?: string | null;
+  blood_group?: string | null;
+
+  email: string; // Official email, maps to employees.email
+  personal_email?: string | null;
+  phone?: string | null;
+
+  emergency_contact_name?: string | null;
+  emergency_contact_number?: string | null;
+
+  // Direct employment-related fields on the 'employees' table
+  position?: string | null;       // e.g., "Software Engineer" (VARCHAR)
+  department?: string | null;     // e.g., "Technology" (VARCHAR)
+  hireDate?: string | null;       // YYYY-MM-DD format, maps to employees.hire_date
+  workLocation?: string | null;   // e.g., "Main Office", "Remote"
+  employmentType?: EmploymentType | null;
   reportingManagerId?: string | null; // FK to employees.id (UUID)
 
-  // Fields now directly on the employees table as per comprehensive schema
-  position?: string; // VARCHAR on employees table
-  department?: string; // VARCHAR on employees table
-  workLocation?: string; // VARCHAR on employees table
-  employmentType?: EmploymentType; // ENUM on employees table
-  hireDate?: string; // DATE on employees table
+  status: EmployeeStatus;        // 'Active', 'Inactive', 'On Leave'
+  is_active: boolean;            // Derived from status usually, or a direct flag
 
-  role?: z.infer<typeof userRoleSchema>; // From users table
+  role?: z.infer<typeof userRoleSchema> | null; // Role from the associated user account
+
+  // Timestamps
+  created_at?: string;
+  updated_at?: string;
 }
 
-// Zod schema for validation, reflecting fields on the 'employees' table
+// Zod schema for validating employee data, reflecting the 'employees' table structure
 export const employeeSchema = z.object({
-  tenantId: z.string().uuid(),
-  userId: z.string().uuid().optional().nullable(),
-  employeeId: z.string().max(20).optional().nullable(), // Corresponds to employees.employee_id
-  first_name: z.string().min(1, "First name is required"),
-  middle_name: z.string().optional().nullable(),
-  last_name: z.string().min(1, "Last name is required"),
-  // 'name' is generated in DB, so not in form data for submission usually
-  email: z.string().email("Invalid official email address"), // Official email
-  personal_email: z.string().email("Invalid personal email address").optional().nullable(),
-  phone: z.string().optional().nullable(),
-  gender: genderSchema.optional().nullable(),
+  id: z.string().uuid().optional(), // PK, server-generated
+  tenantId: z.string().uuid(),        // Server-set based on session
+  userId: z.string().uuid().optional().nullable(), // FK to users, server-set
+  employeeId: z.string().max(20).optional().nullable(), // Human-readable ID, server-generated
+
+  first_name: z.string().min(1, "First name is required").max(50),
+  middle_name: z.string().max(50).optional().nullable(),
+  last_name: z.string().min(1, "Last name is required").max(50),
+  name: z.string().max(155).optional(), // Generated in DB
+
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date of birth must be YYYY-MM-DD").optional().nullable(),
-  marital_status: z.string().optional().nullable(),
-  nationality: z.string().optional().nullable(),
-  blood_group: z.string().optional().nullable(),
-  emergency_contact_name: z.string().optional().nullable(),
-  emergency_contact_number: z.string().optional().nullable(),
-  is_active: z.boolean().default(true),
-  status: z.enum(['Active', 'Inactive', 'On Leave']).default('Active'),
+  gender: genderSchema.optional().nullable(),
+  marital_status: z.string().max(20).optional().nullable(),
+  nationality: z.string().max(50).optional().nullable(),
+  blood_group: z.string().max(10).optional().nullable(),
+
+  email: z.string().email("Invalid official email address").max(100), // Official email
+  personal_email: z.string().email("Invalid personal email address").max(100).optional().nullable(),
+  phone: z.string().max(20).optional().nullable(),
+
+  emergency_contact_name: z.string().max(100).optional().nullable(),
+  emergency_contact_number: z.string().max(20).optional().nullable(),
+
+  // Direct employment-related fields from the 'employees' table
+  position: z.string().max(100).optional().nullable(),
+  department: z.string().max(100).optional().nullable(),
+  hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Hire date must be YYYY-MM-DD").optional().nullable(),
+  workLocation: z.string().max(100).optional().nullable(),
+  employmentType: employmentTypeSchema.optional().nullable().default('Full-time'),
   reportingManagerId: z.string().uuid("Invalid manager ID format.").optional().nullable(),
 
-  // Direct fields on employees table
-  position: z.string().min(1, "Position is required").optional().nullable(),
-  department: z.string().min(1, "Department is required").optional().nullable(),
-  workLocation: z.string().optional().nullable(),
-  employmentType: employmentTypeSchema.optional().nullable().default('Full-time'),
-  hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Hire date must be in YYYY-MM-DD format").optional().nullable(),
+  status: employeeStatusSchema.default('Active'),
+  is_active: z.boolean().default(true),
 
-  role: userRoleSchema.default('Employee'), // For the associated user account
+  role: userRoleSchema.optional().nullable().default('Employee'), // Role for the associated user account
+
+  created_at: z.string().datetime().optional(),
+  updated_at: z.string().datetime().optional(),
 });
 
-// For form data, we omit server-set fields like id, tenantId, userId, employeeId (human-readable).
-// Name is generated.
-export type EmployeeFormData = Omit<z.infer<typeof employeeSchema>, 'id' | 'tenantId' | 'userId' | 'employeeId' | 'name'>;
+// For form data, omits server-set fields. Includes all fields an admin/manager might set.
+export type EmployeeFormData = Omit<z.infer<typeof employeeSchema>,
+  'id' | 'tenantId' | 'userId' | 'employeeId' | 'name' | 'created_at' | 'updated_at' | 'is_active'
+>;
+// is_active is derived from status on save, not directly set in form.
+// name is generated. id, tenantId, userId, employeeId (human) are server-set.
+
