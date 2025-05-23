@@ -1,13 +1,12 @@
 
-// src/app/(app)/[domain]/employees/[id]/page.tsx
 "use client";
 
 import * as React from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { notFound, useParams } from 'next/navigation';
+import { notFound, useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { User, Mail, Phone, Briefcase, Building, Calendar as CalendarIconLucide, Activity, Pencil, ArrowLeft, UsersIcon, MapPin, Tag, UserCheck, FileText as LeaveIcon } from 'lucide-react'; // Added LeaveIcon
+import { User, Mail, Phone, Briefcase, Building, Calendar as CalendarIconLucide, Activity, Pencil, ArrowLeft, UsersIcon, MapPin, Tag, UserCheck, FileText as LeaveIcon, ShieldCheck, LandPlot, BriefcaseBusiness, CalendarClock } from 'lucide-react';
 import { Badge } from "@/components/ui/badge";
 import { format, parseISO, isValid } from 'date-fns';
 import type { Employee, EmploymentType } from '@/modules/employees/types';
@@ -29,11 +28,18 @@ async function fetchData<T>(url: string, options?: RequestInit): Promise<T | und
         console.log(`[Employee Detail Page - fetchData] Response status for ${fullUrl}: ${response.status}`);
 
         if (response.status === 404) {
-            console.log(`[Employee Detail Page - fetchData] Resource not found (404) for ${fullUrl}.`);
-            // Explicitly log the error payload if any for 404s too, before returning undefined
-            const errorText = await response.text().catch(() => ""); // Try to get error text
+            console.warn(`[Employee Detail Page - fetchData] Resource not found (404) for ${fullUrl}.`);
+            const errorText = await response.text().catch(() => "");
             if (errorText) {
-                console.error(`[Employee Detail Page - fetchData] 404 API Response body for ${fullUrl}:`, errorText);
+                 try {
+                    const errorPayload = JSON.parse(errorText);
+                    console.error(`[Employee Detail Page - fetchData] 404 API Response JSON:`, errorPayload);
+                    // You might want to throw a specific error or handle it based on errorPayload.error
+                    throw new Error(errorPayload.error || `Resource not found at ${fullUrl}`);
+                 } catch {
+                    console.error(`[Employee Detail Page - fetchData] 404 API Response (not JSON):`, errorText);
+                    throw new Error(`Resource not found at ${fullUrl}. Server response: ${errorText.substring(0,100)}`);
+                 }
             }
             return undefined;
         }
@@ -87,23 +93,55 @@ const getEmploymentTypeVariant = (type?: EmploymentType): "default" | "secondary
 
 export default function TenantEmployeeDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const tenantDomain = params.domain as string;
-  const employeeIdFromUrl = params.id as string;
+  const employeeIdFromUrl = params.id as string; // This is user_id if "My Profile", or employees.id if Admin/Manager view
   const { toast } = useToast();
 
   const [employee, setEmployee] = React.useState<Employee | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = React.useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
+
 
   React.useEffect(() => {
-    if (!employeeIdFromUrl || !tenantDomain) {
-      console.warn("[TenantEmployeeDetailPage - useEffect] employeeIdFromUrl or tenantDomain is missing. Aborting fetch.");
-      setIsLoading(false);
-      setError("Required identifiers missing.");
+    // Fetch current user's role and ID to determine if viewing own profile
+    const fetchSessionInfo = async () => {
+        try {
+            const res = await fetch('/api/auth/session');
+            if (res.ok) {
+                const session = await res.json();
+                setCurrentUserRole(session.userRole);
+                setCurrentUserId(session.userId);
+            } else {
+                console.error("Failed to fetch session info for employee detail page:", await res.text());
+                setError("Could not verify user session.");
+            }
+        } catch (e) {
+            console.error("Error fetching session info:", e);
+            setError("Error verifying session.");
+        }
+    };
+    fetchSessionInfo();
+  }, []);
+
+
+  React.useEffect(() => {
+    if (!employeeIdFromUrl || !tenantDomain || currentUserRole === null || currentUserId === null) {
+      if (!employeeIdFromUrl || !tenantDomain) {
+        console.warn("[TenantEmployeeDetailPage - useEffect] employeeIdFromUrl or tenantDomain is missing. Aborting fetch.");
+        setError("Required identifiers missing.");
+        setIsLoading(false);
+      }
+      // If roles/ids not yet loaded, wait.
       return;
     }
 
     const fetchEmployeeDetails = async () => {
+      // The ID in the URL is the employee.id (PK) for direct access,
+      // OR it's the user.id if it's the "My Profile" link for an employee.
+      // The API /api/employees/[id] handles this differentiation.
       console.log(`[TenantEmployeeDetailPage - fetchEffect] Starting fetch for URL param id: '${employeeIdFromUrl}' in tenant '${tenantDomain}'`);
       setIsLoading(true);
       setError(null);
@@ -119,7 +157,7 @@ export default function TenantEmployeeDetailPage() {
       } catch (err: any) {
         console.error(`[TenantEmployeeDetailPage - fetchEffect] Error loading employee profile for ID '${employeeIdFromUrl}':`, err);
         setError(err.message || "Failed to load employee data.");
-        if (!err.message?.toLowerCase().includes('unauthorized')) {
+        if (!err.message?.toLowerCase().includes('unauthorized') && !err.message?.toLowerCase().includes('not found')) {
           toast({
             title: "Error Loading Profile",
             description: err.message || "Could not fetch employee details.",
@@ -132,7 +170,7 @@ export default function TenantEmployeeDetailPage() {
     };
 
     fetchEmployeeDetails();
-  }, [employeeIdFromUrl, tenantDomain, toast]);
+  }, [employeeIdFromUrl, tenantDomain, toast, currentUserRole, currentUserId]);
 
    const formatDate = (dateString?: string | null) => {
      if (!dateString) return "N/A";
@@ -154,7 +192,7 @@ export default function TenantEmployeeDetailPage() {
       );
    }
 
-   if (isLoading) {
+   if (isLoading || currentUserRole === null) { // Also wait for role info
      return (
          <div className="flex flex-col gap-6">
             <div className="flex items-center justify-between flex-wrap gap-4">
@@ -200,12 +238,14 @@ export default function TenantEmployeeDetailPage() {
                 <AlertTriangle className="h-5 w-5" />
                 <AlertTitle>Error Loading Profile</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
+                 <Button variant="outline" onClick={() => router.back()} className="mt-4">Go Back</Button>
             </Alert>
         </div>
     );
   }
 
    if (!employee) {
+       // This path should ideally be caught by notFound() in useEffect if data is truly undefined from API
       return (
          <div className="flex flex-col items-center justify-center min-h-[400px]">
              <Alert variant="default" className="max-w-md">
@@ -214,41 +254,42 @@ export default function TenantEmployeeDetailPage() {
                 <AlertDescription>
                     The employee profile you are trying to view could not be found.
                 </AlertDescription>
+                 <Button variant="outline" onClick={() => router.back()} className="mt-4">Go Back</Button>
             </Alert>
         </div>
        );
   }
 
+  // Determine if the current user can edit this profile
+  const canEditThisProfile = currentUserRole === 'Admin' || currentUserRole === 'Manager' || (currentUserRole === 'Employee' && employee.userId === currentUserId);
+
+
   const InfoItem = ({ icon: Icon, label, value, isLink = false, hrefPrefix = "" }: { icon: React.ElementType, label: string, value?: string | null, isLink?: boolean, hrefPrefix?: string }) => {
-    if (!value && value !== 0) return null;
+    if (!value && value !== 0 && typeof value !== 'boolean') return null; // Allow boolean false and 0 to display
     return (
-        <div className="flex items-start gap-3">
-            <Icon className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0"/>
-            <div>
-                <p className="text-sm font-medium text-foreground">{label}</p>
+        <div className="flex items-start gap-3 py-2">
+            <Icon className="h-5 w-5 text-muted-foreground mt-1 flex-shrink-0"/>
+            <div className="flex-grow">
+                <p className="text-xs font-medium text-muted-foreground">{label}</p>
                 {isLink && value ? (
                     <a href={`${hrefPrefix}${value}`} className="text-sm text-primary hover:underline break-all">{value}</a>
                 ) : (
-                    <p className="text-sm text-foreground break-words">{value}</p>
+                    <p className="text-sm text-foreground break-words">{typeof value === 'boolean' ? (value ? 'Yes' : 'No') : (value || 'N/A')}</p>
                 )}
             </div>
         </div>
     );
   };
-
+  
   if (employee) {
     console.log(`[TenantEmployeeDetailPage - render] Rendering page for URL param id: '${employeeIdFromUrl}'. Current 'employee' state: PK='${employee.id}', UserID='${employee.userId}', Name='${employee.name}'. Edit link will use PK: '${employee.id}'.`);
-  } else if (isLoading) {
-    console.log(`[TenantEmployeeDetailPage - render] isLoading is true. employeeIdFromUrl from URL: '${employeeIdFromUrl}'`);
-  } else if (error) {
-    console.log(`[TenantEmployeeDetailPage - render] Error state: ${error}. employeeIdFromUrl from URL: '${employeeIdFromUrl}'`);
   }
 
 
   return (
     <div className="flex flex-col gap-6">
        <div className="flex items-center justify-between flex-wrap gap-4">
-         <div className="flex items-center gap-2">
+         <div className="flex items-center gap-3">
            <Button variant="outline" size="icon" asChild>
              <Link href={`/${tenantDomain}/employees`}>
                <ArrowLeft className="h-4 w-4" />
@@ -256,75 +297,91 @@ export default function TenantEmployeeDetailPage() {
              </Link>
            </Button>
            <h1 className="text-2xl font-bold tracking-tight md:text-3xl flex items-center gap-2">
-              <User className="h-6 w-6" /> {employee.name}
+              <User className="h-7 w-7 text-primary" /> {employee.name}
            </h1>
-           {employee.employeeId && <Badge variant="outline">ID: {employee.employeeId}</Badge>}
+           {employee.employeeId && <Badge variant="outline" className="text-sm">ID: {employee.employeeId}</Badge>}
          </div>
-          <Button asChild variant="outline">
-             <Link href={`/${tenantDomain}/employees/${employee.id}/edit`}>
-                 <Pencil className="mr-2 h-4 w-4"/> Edit Employee
-             </Link>
-         </Button>
+         {canEditThisProfile && (
+             <Button asChild variant="default">
+                <Link href={`/${tenantDomain}/employees/${employee.id}/edit`}>
+                    <Pencil className="mr-2 h-4 w-4"/> Edit Profile
+                </Link>
+            </Button>
+         )}
       </div>
-      <Card className="shadow-sm">
-        <CardHeader>
-          <CardTitle>Employee Information</CardTitle>
-          <CardDescription>Detailed view of the employee's record for {tenantDomain}.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-           <div className="space-y-4">
-             <InfoItem icon={Mail} label="Email" value={employee.email} isLink hrefPrefix="mailto:" />
-             <InfoItem icon={Phone} label="Phone" value={employee.phone} isLink hrefPrefix="tel:" />
-             <InfoItem icon={UserCheck} label="Date of Birth" value={formatDate(employee.dateOfBirth)} />
-           </div>
-           <div className="space-y-4">
-             <InfoItem icon={Briefcase} label="Position" value={employee.position} />
-             <InfoItem icon={Building} label="Department" value={employee.department} />
-             <InfoItem icon={UsersIcon} label="Reporting Manager ID" value={employee.reportingManagerId} />
-           </div>
-           <div className="space-y-4">
-             <InfoItem icon={CalendarIconLucide} label="Hire Date" value={formatDate(employee.hireDate)} />
-             <InfoItem icon={MapPin} label="Work Location" value={employee.workLocation} />
-             <div className="flex items-start gap-3">
-                 <Tag className="h-5 w-5 text-muted-foreground mt-0.5"/>
-                 <div>
-                     <p className="text-sm font-medium">Employment Type</p>
-                     <Badge variant={getEmploymentTypeVariant(employee.employmentType)}>{employee.employmentType || 'N/A'}</Badge>
-                 </div>
-             </div>
-             <div className="flex items-start gap-3">
-                 <Activity className="h-5 w-5 text-muted-foreground mt-0.5"/>
-                 <div>
-                     <p className="text-sm font-medium">Status</p>
-                     <Badge variant={getStatusVariant(employee.status)}>{employee.status}</Badge>
-                 </div>
-             </div>
-           </div>
-        </CardContent>
-      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Personal & Contact Info Card */}
+        <Card className="lg:col-span-2 shadow-md">
+            <CardHeader>
+                <CardTitle className="text-xl flex items-center gap-2"><UserCheck className="h-5 w-5 text-primary" />Personal & Contact Information</CardTitle>
+            </CardHeader>
+            <CardContent className="grid sm:grid-cols-2 gap-x-6 gap-y-0 divide-y sm:divide-y-0 sm:divide-x">
+                <div className="space-y-1 pr-0 sm:pr-6 py-2 sm:py-0">
+                    <InfoItem icon={Mail} label="Official Email" value={employee.email} isLink hrefPrefix="mailto:" />
+                    <InfoItem icon={Mail} label="Personal Email" value={employee.personal_email} isLink hrefPrefix="mailto:" />
+                    <InfoItem icon={Phone} label="Phone" value={employee.phone} isLink hrefPrefix="tel:" />
+                    <InfoItem icon={CalendarIconLucide} label="Date of Birth" value={formatDate(employee.dateOfBirth)} />
+                </div>
+                <div className="space-y-1 pl-0 sm:pl-6 py-2 sm:py-0">
+                    <InfoItem icon={User} label="Gender" value={employee.gender} />
+                    <InfoItem icon={ShieldCheck} label="Marital Status" value={employee.marital_status} />
+                    <InfoItem icon={LandPlot} label="Nationality" value={employee.nationality} />
+                    <InfoItem icon={Activity} label="Blood Group" value={employee.blood_group} />
+                </div>
+            </CardContent>
+        </Card>
+
+        {/* Employment Details Card */}
+        <Card className="shadow-md">
+            <CardHeader>
+                <CardTitle className="text-xl flex items-center gap-2"><BriefcaseBusiness className="h-5 w-5 text-primary" />Employment Details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 divide-y">
+                <InfoItem icon={Briefcase} label="Position" value={employee.position} />
+                <InfoItem icon={Building} label="Department" value={employee.department} />
+                <InfoItem icon={Tag} label="Employment Type" value={employee.employmentType} />
+                <InfoItem icon={CalendarClock} label="Hire Date" value={formatDate(employee.hireDate)} />
+                <InfoItem icon={MapPin} label="Work Location" value={employee.workLocation} />
+                <div className="flex items-start gap-3 py-2">
+                    <Activity className="h-5 w-5 text-muted-foreground mt-1 flex-shrink-0"/>
+                    <div>
+                        <p className="text-xs font-medium text-muted-foreground">Status</p>
+                        <Badge variant={getStatusVariant(employee.status)} className="mt-1">{employee.status}</Badge>
+                    </div>
+                </div>
+                {employee.reportingManagerId && (
+                    <InfoItem icon={UsersIcon} label="Reporting Manager" value={employee.reportingManagerId} /> // TODO: Fetch manager name
+                )}
+            </CardContent>
+        </Card>
+      </div>
+
 
        <div className="grid gap-6 md:grid-cols-2">
-            <Card className="shadow-sm">
-                <CardHeader><CardTitle>Performance Reviews</CardTitle><CardDescription>Placeholder for review history.</CardDescription></CardHeader>
-                <CardContent><p className="text-muted-foreground">Review data will be displayed here.</p></CardContent>
+            <Card className="shadow-md">
+                <CardHeader>
+                    <CardTitle className="text-xl flex items-center gap-2"><User className="h-5 w-5 text-primary"/>Emergency Contact</CardTitle>
+                </CardHeader>
+                 <CardContent className="space-y-1 divide-y">
+                     <InfoItem icon={User} label="Name" value={employee.emergency_contact_name} />
+                     <InfoItem icon={Phone} label="Number" value={employee.emergency_contact_number} isLink hrefPrefix="tel:" />
+                 </CardContent>
             </Card>
-             <Card className="shadow-sm">
+             <Card className="shadow-md">
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                         <LeaveIcon className="h-5 w-5 text-primary"/> Leave Information
                     </CardTitle>
-                    <CardDescription>View leave balances and request history.</CardDescription>
+                    <CardDescription>View leave balances and request history for this employee.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    {employee.userId ? (
-                        <Button asChild>
-                            <Link href={`/${tenantDomain}/leave?employeeId=${employee.userId}`}>
-                                View Leave Details
-                            </Link>
-                        </Button>
-                    ) : (
-                        <p className="text-muted-foreground">No user account linked to view leave details.</p>
-                    )}
+                    {/* Link uses user_id if available, otherwise employee.id as fallback (though user_id is preferred for consistency with LeavePageClient) */}
+                    <Button asChild>
+                        <Link href={`/${tenantDomain}/leave?employeeId=${employee.userId || employee.id}`}>
+                            View Leave Details
+                        </Link>
+                    </Button>
                 </CardContent>
             </Card>
        </div>

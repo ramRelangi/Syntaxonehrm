@@ -5,16 +5,15 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
-import { employeeSchema, type EmployeeFormData, employmentTypeSchema, genderSchema } from '@/modules/employees/types';
-import type { Employee, Gender } from '@/modules/employees/types';
+import { employeeSchema, type EmployeeFormData, employmentTypeSchema, genderSchema, type Employee } from '@/modules/employees/types';
 import type { UserRole } from '@/modules/auth/types';
-import { userRoleSchema } from '@/modules/auth/types'; // Import userRoleSchema
+import { userRoleSchema } from '@/modules/auth/types';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, CalendarIcon, Save, UserPlus, Search, XCircle } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
@@ -22,16 +21,15 @@ import { cn } from '@/lib/utils';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogClose,
 } from "@/components/ui/dialog";
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { z } from 'zod';
+import { z } from 'zod'; // Keep z import
 
 interface EmployeeFormProps {
-  employee?: Employee;
+  employee?: Employee; // This is the full Employee type
   submitButtonText?: string;
   formTitle: string;
   formDescription: string;
@@ -39,7 +37,7 @@ interface EmployeeFormProps {
   currentUserRole: UserRole | null;
 }
 
-// FormShape matches EmployeeFormData for consistency now that role is included.
+// FormShape matches EmployeeFormData for consistency
 type EmployeeFormShape = EmployeeFormData;
 
 const NO_MANAGER_VALUE = "__NO_MANAGER__";
@@ -66,7 +64,7 @@ export function EmployeeForm({
 
   const isEditMode = !!employee;
   const actualSubmitButtonText = submitButtonText || (isEditMode ? "Save Changes" : "Add Employee");
-  const isEmployeeRoleActing = currentUserRole === 'Employee'; // User currently logged in has Employee role
+  const isEmployeeRoleActing = currentUserRole === 'Employee';
   const isUserAdmin = currentUserRole === 'Admin';
 
   const getFormattedDate = (dateString?: string | null): string => {
@@ -74,34 +72,38 @@ export function EmployeeForm({
     try {
       const parsedDate = parseISO(dateString);
       return isValid(parsedDate) ? format(parsedDate, 'yyyy-MM-dd') : "";
-    } catch (e) {
-      console.error("[EmployeeForm] Error parsing date:", e);
-      return "";
-    }
+    } catch (e) { return ""; }
   };
-  
-  const formSchemaForValidation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true })
-    .extend({
-        reportingManagerId: z.string().uuid("Invalid manager ID format.").nullable().optional(),
-    });
 
+  // Schema for form validation (omits server-set IDs but includes fields on 'employees' table)
+  const formSchemaForValidation = employeeSchema.omit({ tenantId: true, userId: true, employeeId: true, name: true });
 
   const form = useForm<EmployeeFormShape>({
     resolver: zodResolver(formSchemaForValidation),
     defaultValues: {
-      name: employee?.name ?? "",
+      first_name: employee?.first_name ?? "",
+      middle_name: employee?.middle_name ?? "",
+      last_name: employee?.last_name ?? "",
       email: employee?.email ?? "",
+      personal_email: employee?.personal_email ?? "",
       phone: employee?.phone ?? "",
       gender: employee?.gender ?? undefined,
+      dateOfBirth: getFormattedDate(employee?.dateOfBirth),
+      marital_status: employee?.marital_status ?? "",
+      nationality: employee?.nationality ?? "",
+      blood_group: employee?.blood_group ?? "",
+      emergency_contact_name: employee?.emergency_contact_name ?? "",
+      emergency_contact_number: employee?.emergency_contact_number ?? "",
+      status: employee?.status ?? "Active",
+      reportingManagerId: employee?.reportingManagerId || null, // Ensure null if undefined
+      // Direct fields from employees table
       position: employee?.position ?? "",
       department: employee?.department ?? "",
-      hireDate: getFormattedDate(employee?.hireDate),
-      status: employee?.status ?? "Active",
-      dateOfBirth: getFormattedDate(employee?.dateOfBirth),
-      reportingManagerId: employee?.reportingManagerId || null,
       workLocation: employee?.workLocation ?? "",
       employmentType: employee?.employmentType ?? "Full-time",
-      role: employee?.role ?? 'Employee', // Default to 'Employee' for new, or use existing
+      hireDate: getFormattedDate(employee?.hireDate),
+      is_active: employee?.is_active ?? true,
+      role: employee?.role ?? 'Employee', // Role for the associated user
     },
   });
 
@@ -128,13 +130,17 @@ export function EmployeeForm({
           console.log(`[EmployeeForm - fetchManagers] Potential managers after filtering: ${filteredData.length}`);
 
           if (isEditMode && employee?.reportingManagerId) {
-            const currentManager = data.find(m => m.id === employee.reportingManagerId);
+            // Try to find in the filtered list first, then in the original data
+            let currentManager = filteredData.find(m => m.id === employee.reportingManagerId);
+            if (!currentManager) {
+                currentManager = data.find(m => m.id === employee.reportingManagerId);
+            }
             if (currentManager) {
               setSelectedManagerName(currentManager.name + (currentManager.status !== 'Active' ? ' (Inactive)' : ''));
             } else {
               setSelectedManagerName("");
-              form.setValue('reportingManagerId', null);
-              console.warn(`[EmployeeForm - fetchManagers] Edit mode: Manager with ID ${employee.reportingManagerId} not found. Cleared selection.`);
+              form.setValue('reportingManagerId', null); // Manager not found or inactive, clear selection
+              console.warn(`[EmployeeForm - fetchManagers] Edit mode: Manager with ID ${employee.reportingManagerId} not found or inactive. Cleared selection.`);
             }
           } else if (!isEditMode) {
             setSelectedManagerName("");
@@ -177,54 +183,61 @@ export function EmployeeForm({
     setIsLoading(true);
     console.log("[Employee Form] Submitting data (raw from form):", data);
 
-    // Ensure reportingManagerId is null if NO_MANAGER_VALUE was selected
-    const actualReportingManagerId = data.reportingManagerId === NO_MANAGER_VALUE ? null : data.reportingManagerId;
-
-    const payload = {
+    // Prepare payload based on EmployeeFormData, ensuring correct null/undefined handling
+    const payload: EmployeeFormData = {
       ...data,
-      phone: data.phone || undefined,
-      gender: data.gender || undefined,
+      first_name: data.first_name,
+      last_name: data.last_name,
+      email: data.email,
+      middle_name: data.middle_name || null,
+      personal_email: data.personal_email || null,
+      phone: data.phone || null,
+      gender: data.gender || null,
       dateOfBirth: data.dateOfBirth || null,
-      reportingManagerId: actualReportingManagerId,
-      workLocation: data.workLocation || undefined,
+      marital_status: data.marital_status || null,
+      nationality: data.nationality || null,
+      blood_group: data.blood_group || null,
+      emergency_contact_name: data.emergency_contact_name || null,
+      emergency_contact_number: data.emergency_contact_number || null,
+      status: data.status || 'Active',
+      reportingManagerId: data.reportingManagerId === NO_MANAGER_VALUE ? null : (data.reportingManagerId || null),
+      position: data.position || null,
+      department: data.department || null,
+      workLocation: data.workLocation || null,
+      employmentType: data.employmentType || 'Full-time',
+      hireDate: data.hireDate || null,
+      is_active: (data.status || 'Active') === 'Active',
+      role: data.role || 'Employee',
     };
-    console.log("[Employee Form] Payload to be sent to API:", payload);
-
-    const apiUrl = isEditMode && employee?.id ? `/api/employees/${employee.id}` : '/api/employees';
-    const method = isEditMode ? 'PUT' : 'POST';
+    console.log("[Employee Form] Payload to be sent to server action:", payload);
 
     try {
-        const response = await fetch(apiUrl, {
-            method: method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
-
-        let result: any;
-        let responseText: string | null = null;
-        try {
-            responseText = await response.text();
-            if (responseText) result = JSON.parse(responseText);
-            else if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`); 
-        } catch (e) {
-            if (!response.ok) { 
-                console.error("[Employee Form] Error parsing API response, raw text:", responseText);
-                throw new Error(responseText || `HTTP error! Status: ${response.status}`);
-            }
-            console.warn("[Employee Form] OK response but failed to parse JSON, raw text:", responseText);
-            result = {}; 
+        let result;
+        if (isEditMode && employee?.id) {
+            result = await fetch(`/api/employees/${employee.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload), // Send the complete form data
+            });
+        } else {
+            result = await fetch('/api/employees', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload), // Send the complete form data
+            });
         }
 
-        if (!response.ok) {
-             console.error("[Employee Form] API Error:", result);
-             const errorMessage = result?.error || result?.message || result?.details?.[0]?.message || `Failed to ${isEditMode ? 'update' : 'add'} employee.`;
-             
+        const responseData = await result.json();
+
+        if (!result.ok) {
+             console.error("[Employee Form] API Error Response:", responseData);
+             const errorMessage = responseData?.error || responseData?.message || responseData?.details?.[0]?.message || `Failed to ${isEditMode ? 'update' : 'add'} employee.`;
              let errorSetOnField = false;
-             if (result?.details && Array.isArray(result.details)) {
-                result.details.forEach((err: any) => {
+             if (responseData?.details && Array.isArray(responseData.details)) {
+                responseData.details.forEach((err: any) => {
                     const path = err.path?.[0] as keyof EmployeeFormShape | 'root.serverError' | undefined;
                     if (path && path !== 'root.serverError' && form.getFieldState(path as keyof EmployeeFormShape)) {
-                        form.setError(path as keyof EmployeeFormShape, { type: "manual", message: err.message });
+                        form.setError(path as keyof EmployeeFormShape, { type: "server", message: err.message });
                         errorSetOnField = true;
                     }
                 });
@@ -235,11 +248,10 @@ export function EmployeeForm({
              throw new Error(errorMessage);
         }
 
-        console.log("[Employee Form] API Success:", result);
-
+        console.log("[Employee Form] API Success:", responseData);
         toast({
             title: `Employee ${isEditMode ? 'Updated' : 'Added'}`,
-            description: `${result?.name || data.name} has been successfully ${isEditMode ? 'updated' : 'added'}. ${!isEditMode && result?.employeeId ? `Employee ID: ${result.employeeId}` : ''}`,
+            description: `${responseData?.name || payload.first_name + ' ' + payload.last_name} has been successfully ${isEditMode ? 'updated' : 'added'}. ${!isEditMode && responseData?.employeeId ? `Employee ID: ${responseData.employeeId}` : ''}`,
             className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
         });
 
@@ -262,8 +274,6 @@ export function EmployeeForm({
     }
   };
   
-  console.log(`[EmployeeForm - Render] isEditMode: ${isEditMode}, currentUserRole: ${currentUserRole}, potentialManagers.length: ${potentialManagers.length}, potentialManagersFiltered.length: ${potentialManagersFiltered.length}, managerSearchTerm: "${managerSearchTerm}"`);
-
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -272,411 +282,122 @@ export function EmployeeForm({
             {form.formState.errors.root.serverError.message}
           </FormMessage>
         )}
-        <div className="space-y-4">
-          {isEditMode && employee?.employeeId && (
-            <FormItem>
-              <FormLabel>Employee ID</FormLabel>
-              <FormControl>
-                <Input value={employee.employeeId} readOnly disabled className="bg-muted" />
-              </FormControl>
-            </FormItem>
-          )}
-          <FormField
-            control={form.control}
-            name="name"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Full Name *</FormLabel>
-                <FormControl>
-                  <Input placeholder="e.g. Jane Doe" {...field} disabled={isEmployeeRoleActing && isEditMode} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-             <FormField
-              control={form.control}
-              name="email"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Email Address *</FormLabel>
-                  <FormControl>
-                    <Input type="email" placeholder="e.g. jane.doe@company.com" {...field} disabled={isEmployeeRoleActing && isEditMode} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-             <FormField
-              control={form.control}
-              name="phone"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Phone Number</FormLabel>
-                  <FormControl>
-                    <Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <FormField control={form.control} name="first_name" render={({ field }) => (
+                <FormItem><FormLabel>First Name *</FormLabel><FormControl><Input placeholder="e.g. Jane" {...field} disabled={isEmployeeRoleActing && isEditMode} /></FormControl><FormMessage /></FormItem>
+            )}/>
+            <FormField control={form.control} name="middle_name" render={({ field }) => (
+                <FormItem><FormLabel>Middle Name</FormLabel><FormControl><Input placeholder="Optional" {...field} value={field.value ?? ""} disabled={isEmployeeRoleActing && isEditMode} /></FormControl><FormMessage /></FormItem>
+            )}/>
+            <FormField control={form.control} name="last_name" render={({ field }) => (
+                <FormItem><FormLabel>Last Name *</FormLabel><FormControl><Input placeholder="e.g. Doe" {...field} disabled={isEmployeeRoleActing && isEditMode} /></FormControl><FormMessage /></FormItem>
+            )}/>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField control={form.control} name="email" render={({ field }) => (
+                <FormItem><FormLabel>Official Email *</FormLabel><FormControl><Input type="email" placeholder="e.g. jane.doe@company.com" {...field} disabled={isEmployeeRoleActing && isEditMode} /></FormControl><FormMessage /></FormItem>
+            )}/>
+            <FormField control={form.control} name="personal_email" render={({ field }) => (
+                <FormItem><FormLabel>Personal Email</FormLabel><FormControl><Input type="email" placeholder="e.g. jane@personal.com" {...field} value={field.value ?? ""} /></FormControl><FormMessage /></FormItem>
+            )}/>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField control={form.control} name="phone" render={({ field }) => (
+                <FormItem><FormLabel>Phone Number</FormLabel><FormControl><Input type="tel" placeholder="e.g. 123-456-7890" {...field} value={field.value ?? ""} /></FormControl><FormMessage /></FormItem>
+            )}/>
+            <FormField control={form.control} name="gender" render={({ field }) => (
+                <FormItem><FormLabel>Gender</FormLabel><Select onValueChange={field.onChange} value={field.value ?? undefined}><FormControl><SelectTrigger><SelectValue placeholder="Select gender" /></SelectTrigger></FormControl><SelectContent>
+                    <SelectItem value={NO_MANAGER_VALUE}>-- Not Specified --</SelectItem>{genderSchema.options.map(option => (<SelectItem key={option} value={option}>{option}</SelectItem>))}</SelectContent></Select><FormMessage /></FormItem>
+            )}/>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField control={form.control} name="dateOfBirth" render={({ field }) => (
+                <FormItem className="flex flex-col pt-2"><FormLabel>Date of Birth</FormLabel><Popover open={dobDatePickerOpen} onOpenChange={setDobDatePickerOpen}><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                    {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined} onSelect={(date) => { field.onChange(date ? format(date, 'yyyy-MM-dd') : ""); setDobDatePickerOpen(false);}} captionLayout="dropdown-buttons" fromYear={1950} toYear={new Date().getFullYear() - 18} initialFocus /></PopoverContent></Popover><FormMessage /></FormItem>
+            )}/>
+             <FormField control={form.control} name="marital_status" render={({ field }) => (
+                <FormItem><FormLabel>Marital Status</FormLabel><FormControl><Input placeholder="e.g. Single, Married" {...field} value={field.value ?? ""} disabled={isEmployeeRoleActing && isEditMode} /></FormControl><FormMessage /></FormItem>
+            )}/>
+        </div>
+         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField control={form.control} name="nationality" render={({ field }) => (
+                <FormItem><FormLabel>Nationality</FormLabel><FormControl><Input placeholder="e.g. American" {...field} value={field.value ?? ""} disabled={isEmployeeRoleActing && isEditMode} /></FormControl><FormMessage /></FormItem>
+            )}/>
+            <FormField control={form.control} name="blood_group" render={({ field }) => (
+                <FormItem><FormLabel>Blood Group</FormLabel><FormControl><Input placeholder="e.g. O+" {...field} value={field.value ?? ""} disabled={isEmployeeRoleActing && isEditMode} /></FormControl><FormMessage /></FormItem>
+            )}/>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+             <FormField control={form.control} name="emergency_contact_name" render={({ field }) => (
+                <FormItem><FormLabel>Emergency Contact Name</FormLabel><FormControl><Input placeholder="e.g. John Smith" {...field} value={field.value ?? ""} /></FormControl><FormMessage /></FormItem>
+            )}/>
+            <FormField control={form.control} name="emergency_contact_number" render={({ field }) => (
+                <FormItem><FormLabel>Emergency Contact Number</FormLabel><FormControl><Input type="tel" placeholder="e.g. 987-654-3210" {...field} value={field.value ?? ""} /></FormControl><FormMessage /></FormItem>
+            )}/>
+        </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-             <FormField
-              control={form.control}
-              name="gender"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Gender</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    value={field.value ?? undefined}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select gender" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value={NO_MANAGER_VALUE}>-- Not Specified --</SelectItem>
-                      {genderSchema.options.map(option => (
-                        <SelectItem key={option} value={option}>{option}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="dateOfBirth"
-              render={({ field }) => (
-                <FormItem className="flex flex-col pt-2">
-                  <FormLabel>Date of Birth</FormLabel>
-                  <Popover open={dobDatePickerOpen} onOpenChange={setDobDatePickerOpen}>
-                    <PopoverTrigger asChild>
-                      <FormControl>
-                        <Button
-                          variant={"outline"}
-                          className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
-                        >
-                          {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
-                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                        </Button>
-                      </FormControl>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
-                        onSelect={(date) => {
-                           field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
-                           setDobDatePickerOpen(false);
-                        }}
-                        captionLayout="dropdown-buttons" fromYear={1950} toYear={new Date().getFullYear() - 18}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
+        <hr className="my-6"/>
+        <h3 className="text-lg font-medium">Employment Information</h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-             <FormField
-              control={form.control}
-              name="position"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Position / Job Title *</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Software Engineer" {...field} disabled={isEmployeeRoleActing} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-             <FormField
-              control={form.control}
-              name="department"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Department *</FormLabel>
-                   <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRoleActing}>
-                     <FormControl>
-                       <SelectTrigger>
-                         <SelectValue placeholder="Select department" />
-                       </SelectTrigger>
-                     </FormControl>
-                     <SelectContent>
-                       <SelectItem value="Technology">Technology</SelectItem>
-                       <SelectItem value="Human Resources">Human Resources</SelectItem>
-                       <SelectItem value="Marketing">Marketing</SelectItem>
-                       <SelectItem value="Sales">Sales</SelectItem>
-                       <SelectItem value="Finance">Finance</SelectItem>
-                       <SelectItem value="Operations">Operations</SelectItem>
-                       <SelectItem value="Construction">Construction</SelectItem>
-                       <SelectItem value="Other">Other</SelectItem>
-                     </SelectContent>
-                   </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
-          
-          {isUserAdmin && !isEditMode && ( // Only show Role for Admins when creating a new employee
-            <FormField
-              control={form.control}
-              name="role"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>User Role *</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select role" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {userRoleSchema.options.map(roleValue => (
-                        <SelectItem key={roleValue} value={roleValue}>{roleValue}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField control={form.control} name="position" render={({ field }) => (
+                <FormItem><FormLabel>Position / Job Title *</FormLabel><FormControl><Input placeholder="e.g. Software Engineer" {...field} value={field.value ?? ""} disabled={isEmployeeRoleActing && isEditMode} /></FormControl><FormMessage /></FormItem>
+            )}/>
+            <FormField control={form.control} name="department" render={({ field }) => (
+                <FormItem><FormLabel>Department *</FormLabel><FormControl><Input placeholder="e.g. Technology" {...field} value={field.value ?? ""} disabled={isEmployeeRoleActing && isEditMode} /></FormControl><FormMessage /></FormItem>
+            )}/>
+        </div>
 
+        {isUserAdmin && !isEditMode && (
+            <FormField control={form.control} name="role" render={({ field }) => (
+                <FormItem><FormLabel>User Role *</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger></FormControl><SelectContent>
+                    {userRoleSchema.options.map(roleValue => (<SelectItem key={roleValue} value={roleValue}>{roleValue}</SelectItem>))}</SelectContent></Select><FormMessage /></FormItem>
+            )}/>
+        )}
 
-        <FormField
-            control={form.control}
-            name="reportingManagerId"
-            render={({ field }) => (
-                <FormItem>
-                    <FormLabel>Reporting Manager</FormLabel>
-                    <div className="flex items-center gap-2">
-                        <Input
-                            readOnly
-                            value={selectedManagerName || (isLoadingManagers && !field.value ? "Loading..." : (field.value && field.value !== NO_MANAGER_VALUE ? selectedManagerName : "None selected"))}
-                            placeholder="Select a manager"
-                            className="flex-grow bg-background border border-input cursor-default"
-                            onClick={() => { if (!isEmployeeRoleActing) setIsManagerLookupOpen(true);}}
-                        />
-                        <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => setIsManagerLookupOpen(true)}
-                            disabled={isLoadingManagers || isEmployeeRoleActing}
-                            className="shrink-0"
-                        >
-                            <Search className="mr-2 h-4 w-4" />
-                            {selectedManagerName ? "Change" : "Select"}
-                        </Button>
-                        {(selectedManagerName || field.value === NO_MANAGER_VALUE) && ( // Show clear if name or "None" selected
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => {
-                                    field.onChange(null); 
-                                    setSelectedManagerName("");
-                                }}
-                                disabled={isEmployeeRoleActing}
-                                className="shrink-0 text-muted-foreground hover:text-destructive"
-                                title="Clear manager selection"
-                            >
-                                <XCircle className="h-4 w-4" />
-                            </Button>
-                        )}
-                    </div>
-                    <FormMessage />
-                </FormItem>
-            )}
-        />
+        <FormField control={form.control} name="reportingManagerId" render={({ field }) => (
+            <FormItem><FormLabel>Reporting Manager</FormLabel><div className="flex items-center gap-2">
+                <Input readOnly value={selectedManagerName || (isLoadingManagers && !field.value ? "Loading..." : (field.value && field.value !== NO_MANAGER_VALUE ? selectedManagerName : "None selected"))} placeholder="Select a manager" className="flex-grow bg-background border border-input cursor-default" onClick={() => { if (!isEmployeeRoleActing && !isEditMode) setIsManagerLookupOpen(true);}} disabled={isEmployeeRoleActing && isEditMode} />
+                <Button type="button" variant="outline" onClick={() => setIsManagerLookupOpen(true)} disabled={isLoadingManagers || (isEmployeeRoleActing && isEditMode)} className="shrink-0"><Search className="mr-2 h-4 w-4" />{selectedManagerName ? "Change" : "Select"}</Button>
+                {(selectedManagerName || field.value === NO_MANAGER_VALUE) && (<Button type="button" variant="ghost" size="icon" onClick={() => { field.onChange(null); setSelectedManagerName("");}} disabled={isEmployeeRoleActing && isEditMode} className="shrink-0 text-muted-foreground hover:text-destructive" title="Clear manager selection"><XCircle className="h-4 w-4" /></Button>)}
+            </div><FormMessage /></FormItem>
+        )}/>
 
         <Dialog open={isManagerLookupOpen} onOpenChange={setIsManagerLookupOpen}>
-            <DialogContent className="sm:max-w-lg">
-                <DialogHeader>
-                    <DialogTitle>Select Reporting Manager</DialogTitle>
-                    <DialogDescription>Search and select an active employee to be the reporting manager.</DialogDescription>
-                </DialogHeader>
-                <div className="py-4 space-y-4">
-                    <div className="relative">
-                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input
-                            type="text"
-                            placeholder="Search managers by name, ID, email..."
-                            value={managerSearchTerm}
-                            onChange={(e) => setManagerSearchTerm(e.target.value)}
-                            className="pl-8"
-                        />
-                    </div>
-                    <ScrollArea className="h-[300px] border rounded-md">
-                        {isLoadingManagers ? (
-                             <div className="p-4 text-center text-sm text-muted-foreground">Loading managers... <Loader2 className="inline h-4 w-4 animate-spin" /></div>
-                        ) : potentialManagersFiltered.length > 0 ? (
-                           <>
-                            <Button
-                                key={NO_MANAGER_VALUE}
-                                variant="ghost"
-                                className="w-full justify-start h-auto py-2 px-3 text-left hover:bg-accent"
-                                onClick={() => {
-                                    form.setValue('reportingManagerId', null, { shouldValidate: true, shouldDirty: true });
-                                    setSelectedManagerName("-- None --");
-                                    setIsManagerLookupOpen(false);
-                                }}
-                            >
-                                -- None --
-                            </Button>
-                            {potentialManagersFiltered.map((manager) => (
-                                <Button
-                                    key={manager.id}
-                                    variant="ghost"
-                                    className="w-full justify-start h-auto py-2 px-3 text-left hover:bg-accent"
-                                    onClick={() => {
-                                        form.setValue('reportingManagerId', manager.id, { shouldValidate: true, shouldDirty: true });
-                                        setSelectedManagerName(manager.name);
-                                        setIsManagerLookupOpen(false);
-                                    }}
-                                >
-                                    <div className="flex flex-col">
-                                      <span>{manager.name}</span>
-                                      <span className="text-xs text-muted-foreground">{manager.position} ({manager.employeeId || manager.email})</span>
-                                    </div>
-                                </Button>
-                            ))}
-                           </>
-                        ) : (
-                            <p className="p-4 text-center text-sm text-muted-foreground">
-                                {"No active managers found" + (managerSearchTerm ? " matching your search." : ".")}
-                            </p>
-                        )}
-                    </ScrollArea>
-                </div>
-                 <DialogClose asChild>
-                    <Button type="button" variant="outline" className="mt-2">Cancel</Button>
-                </DialogClose>
-            </DialogContent>
+            <DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Select Reporting Manager</DialogTitle></DialogHeader><div className="py-4 space-y-4">
+                <div className="relative"><Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /><Input type="text" placeholder="Search managers..." value={managerSearchTerm} onChange={(e) => setManagerSearchTerm(e.target.value)} className="pl-8" /></div>
+                <ScrollArea className="h-[300px] border rounded-md">{isLoadingManagers ? (<div className="p-4 text-center text-sm text-muted-foreground">Loading managers... <Loader2 className="inline h-4 w-4 animate-spin" /></div>) : potentialManagersFiltered.length > 0 ? (<>
+                    <Button key={NO_MANAGER_VALUE} variant="ghost" className="w-full justify-start h-auto py-2 px-3 text-left hover:bg-accent" onClick={() => { form.setValue('reportingManagerId', null, { shouldValidate: true, shouldDirty: true }); setSelectedManagerName("-- None --"); setIsManagerLookupOpen(false);}}>-- None --</Button>
+                    {potentialManagersFiltered.map((manager) => (<Button key={manager.id} variant="ghost" className="w-full justify-start h-auto py-2 px-3 text-left hover:bg-accent" onClick={() => { form.setValue('reportingManagerId', manager.id, { shouldValidate: true, shouldDirty: true }); setSelectedManagerName(manager.name); setIsManagerLookupOpen(false);}}><div className="flex flex-col"><span>{manager.name}</span><span className="text-xs text-muted-foreground">{manager.position} ({manager.employeeId || manager.email})</span></div></Button>))}
+                </>) : (<p className="p-4 text-center text-sm text-muted-foreground">{"No active managers found" + (managerSearchTerm ? " matching your search." : ".")}</p>)}</ScrollArea>
+            </div><DialogClose asChild><Button type="button" variant="outline" className="mt-2">Cancel</Button></DialogClose></DialogContent>
         </Dialog>
 
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField control={form.control} name="employmentType" render={({ field }) => (
+                <FormItem><FormLabel>Employment Type *</FormLabel><Select onValueChange={field.onChange} value={field.value ?? undefined} disabled={isEmployeeRoleActing && isEditMode}><FormControl><SelectTrigger><SelectValue placeholder="Select employment type" /></SelectTrigger></FormControl><SelectContent>
+                    {employmentTypeSchema.options.map(type => (<SelectItem key={type} value={type}>{type}</SelectItem>))}</SelectContent></Select><FormMessage /></FormItem>
+            )}/>
+            <FormField control={form.control} name="hireDate" render={({ field }) => (
+                <FormItem className="flex flex-col"><FormLabel>Hire Date *</FormLabel><Popover open={hireDatePickerOpen} onOpenChange={setHireDatePickerOpen}><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal",!field.value && "text-muted-foreground")} disabled={(isEmployeeRoleActing && isEditMode)} >
+                    {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined} onSelect={(date) => { field.onChange(date ? format(date, 'yyyy-MM-dd') : ""); setHireDatePickerOpen(false);}} disabled={(date) => (date > new Date() || date < new Date("1900-01-01")) || (isEmployeeRoleActing && isEditMode)} initialFocus /></PopoverContent></Popover><FormMessage /></FormItem>
+            )}/>
+        </div>
 
-           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField
-              control={form.control}
-              name="employmentType"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Employment Type *</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRoleActing}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select employment type" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {employmentTypeSchema.options.map(type => (
-                        <SelectItem key={type} value={type}>{type}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-             <FormField
-               control={form.control}
-               name="hireDate"
-               render={({ field }) => (
-                 <FormItem className="flex flex-col">
-                   <FormLabel>Hire Date *</FormLabel>
-                   <Popover open={hireDatePickerOpen} onOpenChange={setHireDatePickerOpen}>
-                     <PopoverTrigger asChild>
-                       <FormControl>
-                         <Button
-                           variant={"outline"}
-                           className={cn("w-full pl-3 text-left font-normal",!field.value && "text-muted-foreground")}
-                           disabled={isEmployeeRoleActing}
-                         >
-                           {field.value && isValid(parseISO(field.value)) ? format(parseISO(field.value), "PPP") : <span>Pick a date</span>}
-                           <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                         </Button>
-                       </FormControl>
-                     </PopoverTrigger>
-                     <PopoverContent className="w-auto p-0" align="start">
-                       <Calendar
-                         mode="single"
-                         selected={field.value && isValid(parseISO(field.value)) ? parseISO(field.value) : undefined}
-                         onSelect={(date) => {
-                            field.onChange(date ? format(date, 'yyyy-MM-dd') : "");
-                            setHireDatePickerOpen(false);
-                         }}
-                         disabled={(date) => (date > new Date() || date < new Date("1900-01-01")) || isEmployeeRoleActing}
-                         initialFocus
-                       />
-                     </PopoverContent>
-                   </Popover>
-                   <FormMessage />
-                 </FormItem>
-               )}
-             />
-           </div>
-
-           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-             <FormField
-              control={form.control}
-              name="workLocation"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Work Location</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Main Office, Remote" {...field} value={field.value ?? ""} disabled={isEmployeeRoleActing} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="status"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Status *</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRoleActing}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select status" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="Active">Active</SelectItem>
-                      <SelectItem value="Inactive">Inactive</SelectItem>
-                      <SelectItem value="On Leave">On Leave</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-           </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField control={form.control} name="workLocation" render={({ field }) => (
+                <FormItem><FormLabel>Work Location</FormLabel><FormControl><Input placeholder="e.g. Main Office, Remote" {...field} value={field.value ?? ""} disabled={isEmployeeRoleActing && isEditMode} /></FormControl><FormMessage /></FormItem>
+            )}/>
+            <FormField control={form.control} name="status" render={({ field }) => (
+                <FormItem><FormLabel>Status *</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEmployeeRoleActing && isEditMode}><FormControl><SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger></FormControl><SelectContent>
+                    <SelectItem value="Active">Active</SelectItem><SelectItem value="Inactive">Inactive</SelectItem><SelectItem value="On Leave">On Leave</SelectItem></SelectContent></Select><FormMessage /></FormItem>
+            )}/>
         </div>
 
         <div className="flex justify-end gap-2 pt-4 border-t mt-6">
-          <Button type="button" variant="outline" onClick={() => router.back()} disabled={isLoading}>
-            Cancel
-          </Button>
+          <Button type="button" variant="outline" onClick={() => router.back()} disabled={isLoading}>Cancel</Button>
           <Button type="submit" disabled={isLoading || (!form.formState.isDirty && isEditMode && !isEmployeeRoleActing) || (isEmployeeRoleActing && !form.formState.isDirty )}>
-            {isLoading ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />)
-            }
+            {isLoading ? (<Loader2 className="mr-2 h-4 w-4 animate-spin" />) : (isEditMode ? <Save className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />)}
             {isLoading ? 'Saving...' : actualSubmitButtonText}
           </Button>
         </div>

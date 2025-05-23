@@ -25,53 +25,58 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+} from "@/components/ui/alert-dialog"; // Removed AlertDialogTrigger from here
 import { useState } from "react";
+import { useParams } from "next/navigation"; // Import useParams
 
 // Helper function to determine badge variant based on status
-const getStatusVariant = (status: Employee['status']): "default" | "secondary" | "outline" | "destructive" => {
+const getStatusVariant = (status?: Employee['status']): "default" | "secondary" | "outline" | "destructive" => {
+  if (!status) return 'outline';
   switch (status) {
     case 'Active':
-      return 'default'; // Primary/Greenish in default themes
+      return 'default';
     case 'On Leave':
-      return 'secondary'; // Yellowish/Orange in default themes
+      return 'secondary';
     case 'Inactive':
-      return 'outline'; // Grayish
+      return 'destructive'; // Changed to destructive for Inactive
     default:
       return 'outline';
   }
 };
 
 // Action Cell Component for Delete Confirmation
-const ActionsCell = ({ employeeId, employeeName, onEmployeeDeleted }: { employeeId: string, employeeName: string, onEmployeeDeleted: () => void }) => {
+const ActionsCell = ({ employee, onEmployeeDeleted }: { employee: Employee, onEmployeeDeleted: () => void }) => {
   const { toast } = useToast();
+  const params = useParams();
+  const tenantDomain = params.domain as string;
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isAlertDialogOpen, setIsAlertDialogOpen] = useState(false);
+
 
   const handleDelete = async () => {
+    if (!employee.id) return;
     setIsDeleting(true);
     try {
-      // API call uses the base path, tenant context is handled by header
-      const response = await fetch(`/api/employees/${employeeId}`, {
+      const response = await fetch(`/api/employees/${employee.id}`, {
         method: 'DELETE',
-        // No need to explicitly pass tenantId here if API uses header from middleware
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: `Failed to delete ${employeeName}. Please try again.` }));
-        throw new Error(errorData.message || `Failed to delete ${employeeName}. Status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({ message: `Failed to delete ${employee.name}. Please try again.` }));
+        throw new Error(errorData.message || `Failed to delete ${employee.name}. Status: ${response.status}`);
       }
 
       toast({
         title: "Employee Deleted",
-        description: `${employeeName} has been successfully deleted.`,
+        description: `${employee.name} has been successfully deleted.`,
         className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
       });
-      onEmployeeDeleted(); // Trigger callback to refetch data in parent component
+      onEmployeeDeleted();
+      setIsAlertDialogOpen(false); // Close dialog on success
     } catch (error: any) {
       toast({
         title: "Error Deleting Employee",
-        description: error.message || `Failed to delete ${employeeName}. Please try again.`,
+        description: error.message || `Failed to delete ${employee.name}. Please try again.`,
         variant: "destructive",
       });
     } finally {
@@ -80,7 +85,7 @@ const ActionsCell = ({ employeeId, employeeName, onEmployeeDeleted }: { employee
   };
 
   return (
-     <AlertDialog>
+     <AlertDialog open={isAlertDialogOpen} onOpenChange={setIsAlertDialogOpen}>
        <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="h-8 w-8 p-0">
@@ -89,33 +94,32 @@ const ActionsCell = ({ employeeId, employeeName, onEmployeeDeleted }: { employee
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Actions</DropdownMenuLabel>
-          {/* Update links to be relative to the tenant root */}
+          <DropdownMenuLabel>Actions for {employee.name}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
-             <Link href={`/employees/${employeeId}/edit`} className="flex items-center">
-               <Pencil className="mr-2 h-4 w-4" /> Edit
-             </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-             <Link href={`/employees/${employeeId}`} className="flex items-center">
+             <Link href={`/${tenantDomain}/employees/${employee.id}`} className="flex items-center w-full">
                  <Eye className="mr-2 h-4 w-4" /> View Details
              </Link>
           </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+             <Link href={`/${tenantDomain}/employees/${employee.id}/edit`} className="flex items-center w-full">
+               <Pencil className="mr-2 h-4 w-4" /> Edit Profile
+             </Link>
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
-           <AlertDialogTrigger asChild>
-               <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10 flex items-center" disabled={isDeleting}>
+            <AlertDialogTrigger asChild>
+               <Button variant="ghost" className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10 px-2 py-1.5 text-sm" disabled={isDeleting}>
                   <Trash2 className="mr-2 h-4 w-4" /> Delete
-               </DropdownMenuItem>
+               </Button>
            </AlertDialogTrigger>
         </DropdownMenuContent>
       </DropdownMenu>
 
-       {/* Delete Confirmation Dialog */}
        <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
           <AlertDialogDescription>
-            This action cannot be undone. This will permanently delete the employee record for <strong>{employeeName}</strong>.
+            This action cannot be undone. This will permanently delete the employee record for <strong>{employee.name}</strong> and their associated user account (if any).
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -133,75 +137,60 @@ const ActionsCell = ({ employeeId, employeeName, onEmployeeDeleted }: { employee
 export const columns: ColumnDef<Employee>[] = [
    {
     accessorKey: "name",
-    header: ({ column }) => {
-      return (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Name
-          <ArrowUpDown className="ml-2 h-4 w-4" />
+    header: ({ column }) => (
+        <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
+          Name <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
-      )
-    },
+    ),
+    cell: ({ row }) => {
+        const employee = row.original;
+        // The 'id' here is the employee's primary key (employees.id)
+        return <Link href={`employees/${employee.id}`} className="hover:underline text-primary">{employee.name}</Link>;
+    }
   },
   {
-    accessorKey: "email",
-    header: "Email",
+    accessorKey: "employeeId", // Human-readable ID
+    header: "Employee ID",
   },
   {
-    accessorKey: "position",
-     header: ({ column }) => {
-      return (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Position
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      )
-    },
+    accessorKey: "email", // Official Email
+    header: "Official Email",
   },
   {
-    accessorKey: "department",
-     header: ({ column }) => {
-      return (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Department
-          <ArrowUpDown className="ml-2 h-4 w-4" />
+    accessorKey: "position", // Direct field from employees table
+     header: ({ column }) => (
+        <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
+          Position <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
-      )
-    },
+    ),
+  },
+  {
+    accessorKey: "department", // Direct field from employees table
+     header: ({ column }) => (
+        <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
+          Department <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+    ),
   },
    {
-    accessorKey: "hireDate",
-    header: ({ column }) => {
-      return (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Hire Date
-          <ArrowUpDown className="ml-2 h-4 w-4" />
+    accessorKey: "hireDate", // Direct field from employees table
+    header: ({ column }) => (
+        <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
+          Hire Date <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
-      )
-    },
+    ),
      cell: ({ row }) => {
-      const date = row.getValue("hireDate") as string;
-      // Format date for display (optional, depends on desired format)
+      const date = row.getValue("hireDate") as string | undefined;
+      if (!date) return "N/A";
        try {
-         return new Date(date).toLocaleDateString(); // Adjust format as needed
+         return format(parseISO(date), "MMM d, yyyy");
        } catch (e) {
-         return date; // Fallback to raw string if parsing fails
+         return date;
        }
     },
   },
   {
-    accessorKey: "status",
+    accessorKey: "status", // Direct field from employees table
     header: "Status",
     cell: ({ row }) => {
       const status = row.getValue("status") as Employee['status'];
@@ -213,13 +202,18 @@ export const columns: ColumnDef<Employee>[] = [
   },
    {
     id: "actions",
-    // Pass props down to the custom ActionsCell component
-    cell: ({ row, ...rest }) => {
+    cell: ({ row, table }) => {
       const employee = row.original;
-      // Extract the injected prop from the rest of the cell context
-      // @ts-ignore - `onEmployeeDeleted` is injected by EmployeeDataTable
-      const { onEmployeeDeleted } = rest;
-      return <ActionsCell employeeId={employee.id} employeeName={employee.name} onEmployeeDeleted={onEmployeeDeleted} />;
+      // @ts-ignore - onEmployeeDeleted is injected by DataTable
+      const onEmployeeDeleted = table.options.meta?.onEmployeeDeleted;
+      return <ActionsCell employee={employee} onEmployeeDeleted={onEmployeeDeleted} />;
     },
   },
 ];
+
+// Add meta type to table options for passing callbacks
+declare module '@tanstack/react-table' {
+  interface TableMeta<TData extends Employee> {
+    onEmployeeDeleted: () => void;
+  }
+}
