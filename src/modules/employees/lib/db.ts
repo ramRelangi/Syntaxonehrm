@@ -18,18 +18,18 @@ function mapRowToEmployee(row: any): Employee {
         first_name: row.first_name,
         middle_name: row.middle_name ?? undefined,
         last_name: row.last_name,
-        email: row.email, // Was official_email in new schema, now simplified to email
-        phone: row.phone_number ?? undefined,
+        email: row.email,
+        phone: row.phone ?? undefined, // Mapped from phone_number
         gender: row.gender as Gender ?? undefined,
-        position: row.position ?? undefined, // From old schema, not directly in new employees table, might be in employment_details
-        department: row.department ?? undefined, // From old schema
-        hireDate: row.hire_date ? new Date(row.hire_date).toISOString().split('T')[0] : undefined, // from old schema
-        status: row.status as Employee['status'], // from old schema, might map to is_active + employment_details
+        position: row.position ?? undefined,
+        department: row.department ?? undefined,
+        hireDate: row.hire_date ? new Date(row.hire_date).toISOString().split('T')[0] : undefined,
+        status: row.status as Employee['status'],
         dateOfBirth: row.date_of_birth ? new Date(row.date_of_birth).toISOString().split('T')[0] : undefined,
-        reportingManagerId: row.reporting_manager_id ?? null, // from old schema
-        workLocation: row.work_location ?? undefined, // from old schema
-        employmentType: row.employment_type as Employee['employmentType'] ?? 'Full-time', // from old schema
-        // Role comes from users table, not directly on employee
+        reportingManagerId: row.reporting_manager_id ?? null,
+        workLocation: row.work_location ?? undefined,
+        employmentType: row.employment_type as Employee['employmentType'] ?? 'Full-time',
+        role: row.role as UserRole ?? undefined, // Role comes from users table if joined, or set in action
     };
 }
 
@@ -40,21 +40,23 @@ export async function getAllEmployees(tenantId: string): Promise<Employee[]> {
     }
     const client = await pool.connect();
     try {
-        // Query needs to align with the new employees table structure
         const query = `
-            SELECT 
-                e.id, e.tenant_id, e.user_id, e.employee_id, 
+            SELECT
+                e.id, e.tenant_id, e.user_id, e.employee_id,
                 e.first_name, e.middle_name, e.last_name, e.name,
                 e.date_of_birth, e.gender, e.marital_status, e.nationality, e.blood_group,
-                e.personal_email, e.email, e.phone_number AS phone, e.emergency_contact_name, e.emergency_contact_number,
+                e.personal_email, e.email, e.phone,
+                e.emergency_contact_name, e.emergency_contact_number,
                 e.created_at, e.updated_at, e.is_active,
                 ed.position, d.department_name AS department, ed.joining_date AS hire_date,
-                CASE WHEN e.is_active THEN 'Active' ELSE 'Inactive' END AS status, -- Simplified status based on is_active
-                ed.reporting_manager_id, ed.work_location, ed.employment_type
+                e.status,
+                ed.reporting_manager_id, ed.work_location, ed.employment_type,
+                u.role -- Fetch role from users table
             FROM employees e
-            LEFT JOIN employment_details ed ON e.id = ed.employee_id AND e.tenant_id = ed.tenant_id AND ed.is_current = TRUE
+            LEFT JOIN users u ON e.user_id = u.user_id AND e.tenant_id = u.tenant_id
+            LEFT JOIN employment_details ed ON e.id = ed.employee_id AND e.tenant_id = ed.tenant_id AND ed.is_active = TRUE
             LEFT JOIN departments d ON ed.department_id = d.id AND ed.tenant_id = d.tenant_id
-            WHERE e.tenant_id = $1 
+            WHERE e.tenant_id = $1
             ORDER BY e.name ASC
         `;
         const res = await client.query(query, [tenantId.toLowerCase()]);
@@ -79,19 +81,21 @@ export async function getEmployeeById(id: string, tenantId: string, client?: any
     }
     const conn = client || await pool.connect();
     try {
-        // Query needs to align with new employees structure and potentially join employment_details
         const query = `
-            SELECT 
-                e.id, e.tenant_id, e.user_id, e.employee_id, 
+            SELECT
+                e.id, e.tenant_id, e.user_id, e.employee_id,
                 e.first_name, e.middle_name, e.last_name, e.name,
                 e.date_of_birth, e.gender, e.marital_status, e.nationality, e.blood_group,
-                e.personal_email, e.email, e.phone_number AS phone, e.emergency_contact_name, e.emergency_contact_number,
+                e.personal_email, e.email, e.phone,
+                e.emergency_contact_name, e.emergency_contact_number,
                 e.created_at, e.updated_at, e.is_active,
                 ed.position, d.department_name AS department, ed.joining_date AS hire_date,
-                CASE WHEN e.is_active THEN 'Active' ELSE 'Inactive' END AS status, 
-                ed.reporting_manager_id, ed.work_location, ed.employment_type
+                e.status,
+                ed.reporting_manager_id, ed.work_location, ed.employment_type,
+                u.role
             FROM employees e
-            LEFT JOIN employment_details ed ON e.id = ed.employee_id AND e.tenant_id = ed.tenant_id AND ed.is_current = TRUE
+            LEFT JOIN users u ON e.user_id = u.user_id AND e.tenant_id = u.tenant_id
+            LEFT JOIN employment_details ed ON e.id = ed.employee_id AND e.tenant_id = ed.tenant_id AND ed.is_active = TRUE
             LEFT JOIN departments d ON ed.department_id = d.id AND ed.tenant_id = d.tenant_id
             WHERE e.id = $1 AND e.tenant_id = $2
         `;
@@ -104,7 +108,7 @@ export async function getEmployeeById(id: string, tenantId: string, client?: any
         return undefined;
     } catch (err) {
         console.error(`Error fetching employee with id (PK) ${id} for tenant ${tenantId}:`, err);
-        if(!client) throw err;
+        if(!client) throw err; else return undefined;
     } finally {
         if (!client && conn) conn.release();
     }
@@ -130,10 +134,8 @@ async function generateNextEmployeeId(tenantId: string, client: any): Promise<st
     return `${prefix}${String(nextNumericPart).padStart(3, '0')}`;
 }
 
-// employeeData now matches new schema intent for employees table and joined data from employment_details
-// This function will primarily insert into 'employees' and then 'employment_details'
 export async function addEmployeeInternal(
-    employeeData: Omit<EmployeeFormData, 'employeeId' | 'name'> & { tenantId: string, userId: string } // `name` is generated
+    employeeData: Omit<EmployeeFormData, 'name' | 'status'> & { tenantId: string, userId: string, status?: Employee['status'] }
 ): Promise<Employee> {
     if (!uuidRegex.test(employeeData.tenantId)) throw new Error("Invalid tenant identifier format.");
     if (!uuidRegex.test(employeeData.userId)) throw new Error("Invalid user identifier format.");
@@ -141,21 +143,23 @@ export async function addEmployeeInternal(
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        const newEmployeeSystemId = await generateNextEmployeeId(employeeData.tenantId, client); // This is VARCHAR EMP-XXX
+        const newEmployeeSystemId = await generateNextEmployeeId(employeeData.tenantId, client);
 
-        // Separate data for `employees` table and `employment_details`
         const {
-            first_name, middle_name, last_name, dateOfBirth, gender, email, phone, // For employees table
-            position, department, hireDate, status, reportingManagerId, workLocation, employmentType // For employment_details
+            first_name, middle_name, last_name, dateOfBirth, gender, email, phone,
+            position, department: departmentName, hireDate, reportingManagerId, workLocation, employmentType
         } = employeeData;
+        
+        const currentStatus = employeeData.status || 'Active'; // Default to active if not provided
+        const isActive = currentStatus === 'Active';
 
         const employeeQuery = `
             INSERT INTO employees (
                 tenant_id, user_id, employee_id, first_name, middle_name, last_name, date_of_birth, gender,
-                email, phone_number, is_active
+                email, phone, is_active, status, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            RETURNING id, name; 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+            RETURNING id, name, status;
         `;
         const employeeValues = [
             employeeData.tenantId.toLowerCase(),
@@ -163,33 +167,31 @@ export async function addEmployeeInternal(
             newEmployeeSystemId,
             first_name, middle_name || null, last_name,
             dateOfBirth || null, gender || null, email, phone || null,
-            status === 'Active' // Map status to is_active for employees table
+            isActive, currentStatus
         ];
         const empRes = await client.query(employeeQuery, employeeValues);
-        const newEmployeePkId = empRes.rows[0].id; // This is the UUID PK for the new employee
+        const newEmployeePkId = empRes.rows[0].id;
         const generatedName = empRes.rows[0].name;
+        const savedStatus = empRes.rows[0].status;
 
-        // TODO: Resolve department name to department_id for employment_details FK
-        // For now, assuming department is passed as name and we need to look up its UUID ID.
-        // This is a simplification; robust solution needs department management.
         let department_uuid_id: string | null = null;
-        if (department) {
-            const deptRes = await client.query('SELECT id FROM departments WHERE tenant_id = $1 AND department_name = $2 LIMIT 1', [employeeData.tenantId, department]);
+        if (departmentName) {
+            const deptRes = await client.query('SELECT id FROM departments WHERE tenant_id = $1 AND department_name = $2 LIMIT 1', [employeeData.tenantId, departmentName]);
             if (deptRes.rows.length > 0) department_uuid_id = deptRes.rows[0].id;
-            else console.warn(`[DB addEmployeeInternal] Department "${department}" not found for tenant ${employeeData.tenantId}. employment_details.department_id will be null or insert might fail if NOT NULL.`);
+            else console.warn(`[DB addEmployeeInternal] Department "${departmentName}" not found for tenant ${employeeData.tenantId}. employment_details.department_id will be null.`);
         }
-        // TODO: Resolve designation name/level to designation_id
-        let designation_uuid_id: string | null = null; // Placeholder
+        
+        let designation_uuid_id: string | null = null; // Placeholder, assuming designation name/level is not passed or resolved here for now
 
         const employmentDetailsQuery = `
             INSERT INTO employment_details (
                 tenant_id, employee_id, department_id, designation_id, reporting_manager_id,
-                employment_type, joining_date, is_active, position, work_location
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+                employment_type, joining_date, is_active, position, work_location, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW());
         `;
         const employmentDetailsValues = [
             employeeData.tenantId.toLowerCase(), newEmployeePkId, department_uuid_id, designation_uuid_id,
-            reportingManagerId || null, employmentType || 'Full-time', hireDate, status === 'Active',
+            reportingManagerId || null, employmentType || 'Full-time', hireDate, isActive,
             position, workLocation || null
         ];
         await client.query(employmentDetailsQuery, employmentDetailsValues);
@@ -198,19 +200,20 @@ export async function addEmployeeInternal(
         console.log(`[DB addEmployeeInternal] Initialized leave balances for new employee ${newEmployeePkId}`);
 
         await client.query('COMMIT');
-        // Return a representation consistent with the Employee type
         return {
             ...employeeData,
             id: newEmployeePkId,
             tenantId: employeeData.tenantId,
             userId: employeeData.userId,
             employeeId: newEmployeeSystemId,
-            name: generatedName, // Use the generated name
-        } as Employee; // Cast, ensure all fields match
+            name: generatedName,
+            status: savedStatus as Employee['status'],
+            role: employeeData.role, // Role comes from form data / user creation
+        } as Employee;
     } catch (err: any) {
         await client.query('ROLLBACK');
         console.error('Error adding employee (internal):', err);
-        if (err.code === '23505') { // unique_violation
+        if (err.code === '23505') {
             if (err.constraint === 'unique_employees_tenant_id_email') {
                 throw new Error('Email address already exists for an employee in this tenant.');
             }
@@ -229,38 +232,44 @@ export async function addEmployeeInternal(
 
 export async function updateEmployee(id: string, tenantId: string, updates: Partial<EmployeeFormData>): Promise<Employee | undefined> {
     if (!uuidRegex.test(id)) throw new Error("Invalid employee identifier format.");
-    if (!uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier format.");
+    if (!uuidRegex.test(tenantId)) throw new Error("Invalid tenant identifier.");
 
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        // Separate updates for 'employees' table and 'employment_details' table
         const empTableUpdates: Partial<any> = {};
         const empDetailsUpdates: Partial<any> = {};
+        const userTableUpdates: Partial<any> = {};
 
         if (updates.first_name !== undefined) empTableUpdates.first_name = updates.first_name;
         if (updates.middle_name !== undefined) empTableUpdates.middle_name = updates.middle_name || null;
         if (updates.last_name !== undefined) empTableUpdates.last_name = updates.last_name;
         if (updates.dateOfBirth !== undefined) empTableUpdates.date_of_birth = updates.dateOfBirth || null;
         if (updates.gender !== undefined) empTableUpdates.gender = updates.gender || null;
-        if (updates.email !== undefined) empTableUpdates.email = updates.email;
-        if (updates.phone !== undefined) empTableUpdates.phone_number = updates.phone || null;
-        if (updates.status !== undefined) empTableUpdates.is_active = updates.status === 'Active';
+        if (updates.email !== undefined) {
+             empTableUpdates.email = updates.email;
+             // If user_id is present on employee, update users table email too
+             const emp = await getEmployeeById(id, tenantId, client);
+             if (emp?.userId) userTableUpdates.email = updates.email;
+        }
+        if (updates.phone !== undefined) empTableUpdates.phone = updates.phone || null;
+        if (updates.status !== undefined) {
+            empTableUpdates.status = updates.status;
+            empTableUpdates.is_active = updates.status === 'Active';
+            empDetailsUpdates.is_active = updates.status === 'Active'; // Sync employment_details too
+        }
 
         if (updates.position !== undefined) empDetailsUpdates.position = updates.position;
-        if (updates.department !== undefined) {
-            // Need to lookup department_id from department name
+        if (updates.department !== undefined && updates.department !== null) {
             const deptRes = await client.query('SELECT id FROM departments WHERE tenant_id = $1 AND department_name = $2 LIMIT 1', [tenantId, updates.department]);
             if (deptRes.rows.length > 0) empDetailsUpdates.department_id = deptRes.rows[0].id;
-            else console.warn(`Department ${updates.department} not found for update.`);
+            else console.warn(`Department ${updates.department} not found for update. Skipping department update.`);
         }
         if (updates.hireDate !== undefined) empDetailsUpdates.joining_date = updates.hireDate;
         if (updates.reportingManagerId !== undefined) empDetailsUpdates.reporting_manager_id = updates.reportingManagerId || null;
         if (updates.workLocation !== undefined) empDetailsUpdates.work_location = updates.workLocation || null;
         if (updates.employmentType !== undefined) empDetailsUpdates.employment_type = updates.employmentType;
-        if (updates.status !== undefined) empDetailsUpdates.is_active = updates.status === 'Active';
-
 
         if (Object.keys(empTableUpdates).length > 0) {
             const setClausesEmp: string[] = [];
@@ -286,15 +295,43 @@ export async function updateEmployee(id: string, tenantId: string, updates: Part
                 valuesDetails.push(empDetailsUpdates[key]);
             }
             setClausesDetails.push(`updated_at = NOW()`);
-            valuesDetails.push(id.toLowerCase()); // employee_id in employment_details is FK to employees.id
+            valuesDetails.push(id.toLowerCase());
             valuesDetails.push(tenantId.toLowerCase());
-            const empDetailsUpdateQuery = `UPDATE employment_details SET ${setClausesDetails.join(', ')} WHERE employee_id = $${valueIndexDetails} AND tenant_id = $${valueIndexDetails + 1} AND is_current = TRUE`;
-            // This assumes one current employment_detail record per employee. If multiple, logic needs to be more complex.
+            const empDetailsUpdateQuery = `UPDATE employment_details SET ${setClausesDetails.join(', ')} WHERE employee_id = $${valueIndexDetails} AND tenant_id = $${valueIndexDetails + 1} AND is_active = TRUE`;
             await client.query(empDetailsUpdateQuery, valuesDetails);
         }
+        
+        // Update role in users table if provided and user_id exists
+        if (updates.role !== undefined) {
+            const empForUserUpdate = await getEmployeeById(id, tenantId, client); // Re-fetch to ensure we have user_id
+            if (empForUserUpdate?.userId) {
+                userTableUpdates.role = updates.role;
+            }
+        }
+        if (Object.keys(userTableUpdates).length > 0) {
+             const empForUserUpdate = await getEmployeeById(id, tenantId, client);
+             if (empForUserUpdate?.userId) {
+                const setClausesUser: string[] = [];
+                const valuesUser: any[] = [];
+                let valueIndexUser = 1;
+                for (const key in userTableUpdates) {
+                    setClausesUser.push(`${key} = $${valueIndexUser++}`);
+                    valuesUser.push(userTableUpdates[key]);
+                }
+                setClausesUser.push(`updated_at = NOW()`);
+                valuesUser.push(empForUserUpdate.userId.toLowerCase());
+                valuesUser.push(tenantId.toLowerCase());
+                const userUpdateQuery = `UPDATE users SET ${setClausesUser.join(', ')} WHERE user_id = $${valueIndexUser} AND tenant_id = $${valueIndexUser + 1}`;
+                await client.query(userUpdateQuery, valuesUser);
+                console.log(`[DB updateEmployee] Updated users table for user_id ${empForUserUpdate.userId}`);
+             } else {
+                 console.warn(`[DB updateEmployee] Cannot update users table as user_id is missing for employee ${id}`);
+             }
+        }
+
 
         await client.query('COMMIT');
-        return getEmployeeById(id, tenantId); // Fetch the updated record with joins
+        return getEmployeeById(id, tenantId);
 
     } catch (err: any) {
         await client.query('ROLLBACK');
@@ -323,9 +360,10 @@ export async function deleteEmployee(id: string, tenantId: string): Promise<bool
         const userIdToDelete = employeeRes.rows.length > 0 ? employeeRes.rows[0].user_id : null;
         console.log(`[DB deleteEmployee] Found user_id to delete: ${userIdToDelete} (null if no user linked or employee not found).`);
 
-        // Order of deletion matters due to FK constraints.
-        // Typically, related records in child tables should be deleted first, or FKs set to ON DELETE CASCADE/SET NULL.
-        // Assuming cascading deletes or appropriate handling for employment_details, employee_address, etc.
+        // First, delete from employment_details (or set FK to ON DELETE CASCADE in schema)
+        await client.query('DELETE FROM employment_details WHERE employee_id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
+        console.log(`[DB deleteEmployee] Deleted employment_details for employee PK ${id}.`);
+
 
         console.log(`[DB deleteEmployee] Attempting to delete employee record PK ${id}.`);
         const deleteEmployeeRes = await client.query('DELETE FROM employees WHERE id = $1 AND tenant_id = $2', [id.toLowerCase(), tenantId.toLowerCase()]);
@@ -362,7 +400,6 @@ export async function deleteEmployee(id: string, tenantId: string): Promise<bool
     }
 }
 
-// Get employee by user_id (UUID FK from employees table to users.user_id) and tenant_id
 export async function getEmployeeByUserId(userId: string, tenantId: string, client?: any): Promise<Employee | undefined> {
     console.log(`[DB getEmployeeByUserId] Validating IDs. User ID: ${userId}, Tenant ID: ${tenantId}`);
     if (!uuidRegex.test(userId)) {
@@ -375,19 +412,21 @@ export async function getEmployeeByUserId(userId: string, tenantId: string, clie
     }
     const conn = client || await pool.connect();
     try {
-        // Query needs to align with new employees structure and potentially join employment_details
         const query = `
-            SELECT 
-                e.id, e.tenant_id, e.user_id, e.employee_id, 
+            SELECT
+                e.id, e.tenant_id, e.user_id, e.employee_id,
                 e.first_name, e.middle_name, e.last_name, e.name,
                 e.date_of_birth, e.gender, e.marital_status, e.nationality, e.blood_group,
-                e.personal_email, e.email, e.phone_number AS phone, e.emergency_contact_name, e.emergency_contact_number,
+                e.personal_email, e.email, e.phone,
+                e.emergency_contact_name, e.emergency_contact_number,
                 e.created_at, e.updated_at, e.is_active,
                 ed.position, d.department_name AS department, ed.joining_date AS hire_date,
-                CASE WHEN e.is_active THEN 'Active' ELSE 'Inactive' END AS status, 
-                ed.reporting_manager_id, ed.work_location, ed.employment_type
+                e.status,
+                ed.reporting_manager_id, ed.work_location, ed.employment_type,
+                u.role
             FROM employees e
-            LEFT JOIN employment_details ed ON e.id = ed.employee_id AND e.tenant_id = ed.tenant_id AND ed.is_current = TRUE
+            LEFT JOIN users u ON e.user_id = u.user_id AND e.tenant_id = u.tenant_id
+            LEFT JOIN employment_details ed ON e.id = ed.employee_id AND e.tenant_id = ed.tenant_id AND ed.is_active = TRUE
             LEFT JOIN departments d ON ed.department_id = d.id AND ed.tenant_id = d.tenant_id
             WHERE e.user_id = $1 AND e.tenant_id = $2
         `;
@@ -400,7 +439,7 @@ export async function getEmployeeByUserId(userId: string, tenantId: string, clie
         return undefined;
     } catch (err) {
         console.error(`Error fetching employee by user_id ${userId} for tenant ${tenantId}:`, err);
-        if(!client) throw err;
+        if(!client) throw err; else return undefined;
     } finally {
         if (!client && conn) conn.release();
     }
